@@ -34,7 +34,7 @@ AZDO_PROJECT = os.getenv("AZURE_DEVOPS_PROJECT", "").strip()
 AZDO_PAT = os.getenv("AZURE_DEVOPS_PAT", "").strip()
 BOOTSTRAP_BRANCH = os.getenv("BOOTSTRAP_BRANCH", "feature/devops").strip() or "feature/devops"
 
-app = FastAPI(title="DevOps Portal API", version="2.2.0")
+app = FastAPI(title="DevOps Portal API", version="2.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -55,6 +55,7 @@ class PipelineRequestCreate(BaseModel):
     application_type: ApplicationType = "H2H"
     repository_name: str = Field(min_length=2, max_length=100, pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
     reference_repository_name: str = ""
+    reference_branch: str = ""
     pipeline_type: str | None = None
     ingress_path: str
     ingress_name: str | None = None
@@ -124,9 +125,8 @@ def require_devops(user: UserContext = Depends(current_user)) -> UserContext:
 def normalize_stored_request(item: dict[str, Any]) -> dict[str, Any]:
     item.setdefault("application_type", "H2H")
     item.setdefault("reference_repository_name", "")
+    item.setdefault("reference_branch", "")
     item.setdefault("ingress_name", None)
-    # Older records used application_name. Repository name is now the source of
-    # truth for service selectors, ingress defaults and repository provisioning.
     item.pop("application_name", None)
     return item
 
@@ -189,7 +189,8 @@ def azdo_request(method: str, path: str, payload: dict | None = None) -> tuple[i
     request = urllib.request.Request(url, data=data, method=method, headers={"Authorization": f"Basic {token}", "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=45) as response:
-            return response.status, json.loads(response.read().decode() or "{}")
+            raw = response.read().decode()
+            return response.status, json.loads(raw or "{}")
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode()
         try:
@@ -215,43 +216,61 @@ def create_repository(name: str) -> dict:
     return body
 
 
-def reference_files(reference_repository_name: str) -> list[dict[str, str]]:
-    repository = get_repository(reference_repository_name)
-    if not repository:
-        raise RuntimeError(f"Reference repository {reference_repository_name} was not found")
-
-    default_branch = (repository.get("defaultBranch") or "refs/heads/main").removeprefix("refs/heads/")
-    repository_id = repository["id"]
+def get_reference_file_content(repository_id: str, path: str, reference_branch: str) -> str:
     query = urllib.parse.urlencode({
-        "scopePath": "/",
-        "recursionLevel": "Full",
+        "path": path,
         "includeContent": "true",
-        "versionDescriptor.version": default_branch,
+        "versionDescriptor.version": reference_branch,
         "versionDescriptor.versionType": "branch",
         "api-version": "7.1",
     })
     code, body = azdo_request("GET", f"_apis/git/repositories/{repository_id}/items?{query}")
     if code != 200:
-        raise RuntimeError(body.get("message", f"Unable to read reference repository with HTTP {code}"))
+        raise RuntimeError(body.get("message", f"Unable to read {path} from branch {reference_branch} with HTTP {code}"))
+    content = body.get("content")
+    if content is None:
+        raise RuntimeError(f"Content was not returned for reference file {path} on branch {reference_branch}")
+    return content
 
-    selected: list[dict[str, str]] = []
+
+def reference_files(reference_repository_name: str, reference_branch: str) -> list[dict[str, str]]:
+    repository = get_repository(reference_repository_name)
+    if not repository:
+        raise RuntimeError(f"Reference repository {reference_repository_name} was not found")
+    if not reference_branch.strip():
+        raise RuntimeError("Reference repository branch must be provided by DevOps")
+
+    repository_id = repository["id"]
+    branch = reference_branch.strip().removeprefix("refs/heads/")
+    query = urllib.parse.urlencode({
+        "scopePath": "/",
+        "recursionLevel": "Full",
+        "versionDescriptor.version": branch,
+        "versionDescriptor.versionType": "branch",
+        "api-version": "7.1",
+    })
+    code, body = azdo_request("GET", f"_apis/git/repositories/{repository_id}/items?{query}")
+    if code != 200:
+        raise RuntimeError(body.get("message", f"Unable to read reference repository branch {branch} with HTTP {code}"))
+
     exact_files = {"/Dockerfile", "/azure-pipelines.yaml"}
     folder_prefixes = ("/manifests/", "/shared-config/")
+    selected_paths: list[str] = []
     for item in body.get("value", []):
         path = item.get("path", "")
         if item.get("isFolder"):
             continue
-        if path not in exact_files and not path.startswith(folder_prefixes):
-            continue
-        content = item.get("content")
-        if content is None:
-            raise RuntimeError(f"Content was not returned for reference file {path}")
-        selected.append({"path": path, "content": content})
+        if path in exact_files or path.startswith(folder_prefixes):
+            selected_paths.append(path)
 
-    selected_paths = {item["path"] for item in selected}
-    missing_files = sorted(exact_files - selected_paths)
+    missing_files = sorted(exact_files - set(selected_paths))
     if missing_files:
-        raise RuntimeError(f"Reference repository is missing required files: {', '.join(missing_files)}")
+        raise RuntimeError(f"Reference repository branch {branch} is missing required files: {', '.join(missing_files)}")
+
+    selected = [
+        {"path": path, "content": get_reference_file_content(repository_id, path, branch)}
+        for path in selected_paths
+    ]
     if not any(path.startswith("/manifests/") for path in selected_paths):
         selected.append({"path": "/manifests/.gitkeep", "content": ""})
     if not any(path.startswith("/shared-config/") for path in selected_paths):
@@ -259,35 +278,33 @@ def reference_files(reference_repository_name: str) -> list[dict[str, str]]:
     return selected
 
 
-def bootstrap_repository(target_repository: dict, reference_repository_name: str, application_type: str) -> dict[str, Any]:
+def bootstrap_repository(target_repository: dict, reference_repository_name: str, reference_branch: str, application_type: str) -> dict[str, Any]:
     if application_type != "H2H":
         raise RuntimeError(f"Template bootstrap is currently configured only for H2H, not {application_type}")
     if not reference_repository_name.strip():
         raise RuntimeError("Reference repository name is required for H2H")
+    if not reference_branch.strip():
+        raise RuntimeError("Reference repository branch must be provided by DevOps")
 
-    files = reference_files(reference_repository_name.strip())
-    changes = [
-        {
-            "changeType": "add",
-            "item": {"path": item["path"]},
-            "newContent": {"content": item["content"], "contentType": "rawtext"},
-        }
-        for item in files
-    ]
+    branch = reference_branch.strip().removeprefix("refs/heads/")
+    files = reference_files(reference_repository_name.strip(), branch)
+    changes = [{
+        "changeType": "add",
+        "item": {"path": item["path"]},
+        "newContent": {"content": item["content"], "contentType": "rawtext"},
+    } for item in files]
     payload = {
         "refUpdates": [{"name": f"refs/heads/{BOOTSTRAP_BRANCH}", "oldObjectId": "0" * 40}],
-        "commits": [{
-            "comment": f"Bootstrap {application_type} DevOps repository structure",
-            "changes": changes,
-        }],
+        "commits": [{"comment": f"Bootstrap {application_type} DevOps repository structure from {branch}", "changes": changes}],
     }
     code, body = azdo_request("POST", f"_apis/git/repositories/{target_repository['id']}/pushes?api-version=7.1", payload)
     if code not in (200, 201):
         raise RuntimeError(body.get("message", f"Repository bootstrap failed with HTTP {code}"))
     return {
         "status": "Completed",
-        "message": f"Created {BOOTSTRAP_BRANCH} from reference repository {reference_repository_name}",
+        "message": f"Created {BOOTSTRAP_BRANCH} using {reference_repository_name}:{branch}",
         "branch": BOOTSTRAP_BRANCH,
+        "source_branch": branch,
         "files": [item["path"] for item in files],
         "url": target_repository.get("webUrl") or target_repository.get("remoteUrl"),
     }
@@ -324,7 +341,6 @@ def ensure_ingress_path(item: dict) -> dict[str, str]:
         raise RuntimeError("No ingress resource was selected by DevOps")
     if not item.get("create_service"):
         raise RuntimeError("Ingress provisioning requires Kubernetes service creation")
-
     load_k8s()
     api = client.NetworkingV1Api()
     namespace = item["namespace"]
@@ -332,17 +348,14 @@ def ensure_ingress_path(item: dict) -> dict[str, str]:
     rules = ingress.spec.rules or []
     if not rules:
         raise RuntimeError(f"Ingress {ingress_name} does not contain any rules")
-
     path_value = item["ingress_path"]
     if not path_value.startswith("/"):
         path_value = f"/{path_value}"
     if not path_value.endswith("(/|$)(.*)"):
         path_value = f"{path_value}(/|$)(.*)"
-
     target_rule = next((rule for rule in rules if rule.http is not None), None)
     if target_rule is None:
         raise RuntimeError(f"Ingress {ingress_name} does not contain an HTTP rule")
-
     paths = target_rule.http.paths or []
     existing = next((path for path in paths if path.path == path_value), None)
     backend = client.V1IngressBackend(service=client.V1IngressServiceBackend(name=item["service_name"], port=client.V1ServiceBackendPort(number=item["service_port"])))
@@ -352,7 +365,6 @@ def ensure_ingress_path(item: dict) -> dict[str, str]:
     else:
         paths.append(client.V1HTTPIngressPath(path=path_value, path_type="ImplementationSpecific", backend=backend))
         action = "Added path"
-
     target_rule.http.paths = paths
     ingress.spec.rules = rules
     api.replace_namespaced_ingress(ingress_name, namespace, ingress)
@@ -364,17 +376,27 @@ def provision(item: dict) -> tuple[str, dict]:
     target_repo: dict | None = None
     try:
         existing_repo = get_repository(item["repository_name"])
-        if existing_repo:
+        previous_repo_id = item.get("provisioning", {}).get("repository", {}).get("id")
+        if existing_repo and previous_repo_id != existing_repo.get("id"):
             steps["repository"] = {"status": "Warning", "message": "Repository already exists", "id": existing_repo.get("id"), "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl")}
             return "Pending Action", steps
-        target_repo = create_repository(item["repository_name"])
-        steps["repository"] = {"status": "Completed", "id": target_repo.get("id"), "url": target_repo.get("webUrl") or target_repo.get("remoteUrl")}
+        if existing_repo:
+            target_repo = existing_repo
+            steps["repository"] = {"status": "Already Exists", "message": "Reusing repository created during the earlier provisioning attempt", "id": existing_repo.get("id"), "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl")}
+        else:
+            target_repo = create_repository(item["repository_name"])
+            steps["repository"] = {"status": "Completed", "id": target_repo.get("id"), "url": target_repo.get("webUrl") or target_repo.get("remoteUrl")}
     except Exception as exc:
         steps["repository"] = {"status": "Failed", "message": str(exc)}
 
     if target_repo:
         try:
-            steps["repository_bootstrap"] = bootstrap_repository(target_repo, item.get("reference_repository_name", ""), item.get("application_type", "H2H"))
+            steps["repository_bootstrap"] = bootstrap_repository(
+                target_repo,
+                item.get("reference_repository_name", ""),
+                item.get("reference_branch", ""),
+                item.get("application_type", "H2H"),
+            )
             steps["pipeline"] = {"status": "Completed", "message": f"azure-pipelines.yaml committed to {BOOTSTRAP_BRANCH}"}
         except Exception as exc:
             steps["repository_bootstrap"] = {"status": "Failed", "message": str(exc)}
@@ -387,7 +409,6 @@ def provision(item: dict) -> tuple[str, dict]:
         steps["service"] = {"status": ensure_service(item)}
     except Exception as exc:
         steps["service"] = {"status": "Failed", "message": str(exc)}
-
     try:
         steps["ingress"] = ensure_ingress_path(item)
     except Exception as exc:
@@ -467,6 +488,8 @@ def update_request(request_id: str, payload: ReviewUpdate, user: UserContext = D
         raise HTTPException(status_code=400, detail=f"Ingress {payload.ingress_name} does not exist in namespace {payload.namespace}")
     if payload.application_type == "H2H" and not payload.reference_repository_name.strip():
         raise HTTPException(status_code=400, detail="Reference repository name is required for H2H")
+    if payload.application_type == "H2H" and not payload.reference_branch.strip():
+        raise HTTPException(status_code=400, detail="Reference repository branch must be provided by DevOps")
     original = current.get("original_request") or {key: current.get(key) for key in PipelineRequestCreate.model_fields}
     updated = {**current, **payload.model_dump(exclude={"review_comments"}), "review_comments": payload.review_comments, "reviewed_by": user.username, "updated_at": now_iso(), "original_request": original}
     updated.setdefault("timeline", []).append(timeline_event("Modified by DevOps", user.username, payload.review_comments or "Request values updated"))
@@ -492,12 +515,14 @@ def approve_request(request_id: str, user: UserContext = Depends(require_devops)
     index, current = find_request(items, request_id)
     if current.get("status") not in ("Pending Approval", "Pending Action", "Partially Completed"):
         raise HTTPException(status_code=409, detail=f"Request cannot be approved from status {current.get('status')}")
+    if not current.get("reference_branch", "").strip():
+        raise HTTPException(status_code=400, detail="Provide the reference repository branch before approval")
     if not current.get("ingress_name"):
         raise HTTPException(status_code=400, detail="Select an ingress resource before approval")
     current["status"] = "Provisioning"
     current["reviewed_by"] = user.username
     current["updated_at"] = now_iso()
-    current.setdefault("timeline", []).append(timeline_event("Approved", user.username))
+    current.setdefault("timeline", []).append(timeline_event("Approved", user.username, f"Reference branch: {current['reference_branch']}"))
     final_status, steps = provision(current)
     current["provisioning"] = steps
     current["status"] = final_status
