@@ -30,7 +30,8 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
   const [notice, setNotice] = useState("");
 
   const load = async () => {
-    setLoading(true); setError("");
+    setLoading(true);
+    setError("");
     try {
       const items = await getPipelineRequests(token);
       setRequests(items);
@@ -67,6 +68,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
       application_type: request.application_type,
       repository_name: request.repository_name,
       reference_repository_name: request.reference_repository_name,
+      reference_branch: request.reference_branch ?? "release/uat",
       pipeline_type: request.pipeline_type,
       ingress_path: request.ingress_path,
       ingress_name: request.ingress_name ?? "",
@@ -91,6 +93,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
 
   const approve = async () => {
     if (!selected || !draft) return;
+    if (!draft.reference_branch?.trim()) { setError("Provide the reference repository branch before approval."); return; }
     if (!draft.ingress_name) { setError("Select an ingress from the requested namespace before approval."); return; }
     setBusy(true); setError(""); setNotice("");
     try {
@@ -115,7 +118,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
   };
 
   return <section>
-    <div className="section-heading"><div><span className="eyebrow">PIPELINE ONBOARDING</span><h2>{role === "devops" ? "All Pipeline Requests" : "My Pipeline Requests"}</h2><p>Preview approved values, template bootstrap progress and pending actions.</p></div></div>
+    <div className="section-heading"><div><span className="eyebrow">PIPELINE ONBOARDING</span><h2>{role === "devops" ? "All Pipeline Requests" : "My Pipeline Requests"}</h2><p>Preview approved values, provisioning progress and pending actions.</p></div></div>
     <div className="table-card">{loading ? <p>Loading requests...</p> : error && !selected ? <div className="form-error">{error}</div> : requests.length === 0 ? <p>No requests have been submitted yet.</p> : <table><thead><tr><th>Request ID</th><th>Application</th><th>Repository</th><th>Namespace</th><th>Service</th><th>Status</th><th>Requested By</th><th>Action</th></tr></thead><tbody>{requests.map((request) => <tr key={request.id}><td><strong>{request.id}</strong></td><td>{request.application_type}</td><td>{request.repository_name}</td><td>{request.namespace}</td><td>{request.create_service ? `${request.service_name}:${request.service_port}` : "Not requested"}</td><td><span className={`status ${statusClass(request.status)}`}>{request.status}</span></td><td>{request.requested_by}</td><td><button className="secondary-button compact-button" onClick={() => openPreview(request)}>Preview</button></td></tr>)}</tbody></table>}</div>
 
     {selected && draft && <div className="request-modal-backdrop" onClick={() => setSelected(null)}><article className="request-modal" onClick={(event) => event.stopPropagation()}>
@@ -123,9 +126,10 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
       {error && <div className="form-error">{error}</div>}{notice && <div className="form-success">{notice}</div>}
       <div className="request-status-row"><span className={`status ${statusClass(selected.status)}`}>{selected.status}</span>{selected.reviewed_by && <span>Reviewed by {selected.reviewed_by}</span>}</div>
       <div className="form-card two-column review-form">
-        <label>Application<select disabled={role !== "devops"} value={draft.application_type} onChange={(e) => setDraft({ ...draft, application_type: e.target.value as ReviewUpdate["application_type"] })}><option value="H2H">H2H</option><option value="Collections">Collections</option><option value="Native-Mobile">Native-Mobile</option><option value="Safenet">Safenet</option></select></label>
+        <label>Application<input disabled value={draft.application_type} /></label>
         <label>Repository Name<input disabled={role !== "devops"} value={draft.repository_name} onChange={(e) => setDraft({ ...draft, repository_name: e.target.value })} /></label>
         <label>Reference Repository<input disabled={role !== "devops"} value={draft.reference_repository_name} onChange={(e) => setDraft({ ...draft, reference_repository_name: e.target.value })} /></label>
+        <label>Reference Branch<input disabled={role !== "devops"} required value={draft.reference_branch ?? ""} placeholder="release/uat" onChange={(e) => setDraft({ ...draft, reference_branch: e.target.value.trim() })} /></label>
         <label>Pipeline Type<input disabled={role !== "devops"} value={draft.pipeline_type ?? ""} onChange={(e) => setDraft({ ...draft, pipeline_type: e.target.value })} /></label>
         <label>Namespace<input disabled value={draft.namespace} /></label>
         <label>Ingress Path<input disabled={role !== "devops"} value={draft.ingress_path} onChange={(e) => setDraft({ ...draft, ingress_path: e.target.value })} /></label>
@@ -137,7 +141,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
         <label className="full-width">DevOps Review Comments<textarea disabled={role !== "devops"} rows={3} value={draft.review_comments ?? ""} onChange={(e) => setDraft({ ...draft, review_comments: e.target.value })} /></label>
       </div>
       {originalChanges.length > 0 && <div className="change-summary"><h3>Changes made by DevOps</h3>{originalChanges.map((change) => <div key={change.key}><strong>{change.key.replace(/_/g, " ")}</strong><span>{change.requested}</span><span>→</span><span>{change.approved}</span></div>)}</div>}
-      {selected.provisioning && Object.keys(selected.provisioning).length > 0 && <div className="provision-grid"><h3>Provisioning Status</h3>{Object.entries(selected.provisioning).map(([name, step]) => <div className="provision-step" key={name}><strong>{name}</strong><span className={`status ${statusClass(step.status)}`}>{step.status}</span><small>{step.message}</small>{step.branch && <small>Branch: {step.branch}</small>}{step.files && <small>{step.files.join(", ")}</small>}{step.url && <a href={step.url} target="_blank" rel="noreferrer">Open resource</a>}</div>)}</div>}
+      {selected.provisioning && Object.keys(selected.provisioning).length > 0 && <div className="provision-grid"><h3>Provisioning Status</h3>{Object.entries(selected.provisioning).map(([name, step]) => <div className="provision-step" key={name}><strong>{name}</strong><span className={`status ${statusClass(step.status)}`}>{step.status}</span><small>{step.message}</small>{step.url && <a href={step.url} target="_blank" rel="noreferrer">Open resource</a>}</div>)}</div>}
       {selected.timeline && selected.timeline.length > 0 && <div className="timeline"><h3>Timeline</h3>{selected.timeline.map((event, index) => <div key={`${event.at}-${index}`}><strong>{event.action}</strong><span>{event.actor} · {new Date(event.at).toLocaleString()}</span><small>{event.detail}</small></div>)}</div>}
       {role === "devops" && ["Pending Approval", "Pending Action", "Partially Completed"].includes(selected.status) && <div className="modal-actions"><button disabled={busy} className="secondary-button" onClick={saveChanges}>Save Changes</button><button disabled={busy} className="danger-button" onClick={reject}>Reject</button><button disabled={busy} className="primary-button" onClick={approve}>{busy ? "Processing..." : "Approve & Provision"}</button></div>}
     </article></div>}
