@@ -11,6 +11,7 @@ const initial: PipelineRequestInput = {
   application_type: "H2H",
   repository_name: "",
   reference_repository_name: "",
+  reference_branch: "",
   pipeline_type: "",
   ingress_path: "/api/",
   create_service: true,
