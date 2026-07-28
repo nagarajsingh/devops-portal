@@ -23,9 +23,12 @@ export interface AuthSession {
   role: Role;
 }
 
+export type ApplicationType = "H2H" | "Collections" | "Native-Mobile" | "Safenet";
+
 export interface PipelineRequestInput {
-  application_name: string;
+  application_type: ApplicationType;
   repository_name: string;
+  reference_repository_name: string;
   pipeline_type?: string;
   ingress_path: string;
   ingress_name?: string;
@@ -41,6 +44,8 @@ export interface ProvisionStep {
   message?: string;
   id?: string;
   url?: string;
+  branch?: string;
+  files?: string[];
 }
 
 export interface TimelineEvent {
