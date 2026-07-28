@@ -12,6 +12,10 @@ from .logging_config import get_logger
 
 logger = get_logger("azure-devops")
 
+PIPELINE_FILE_CANDIDATES = ("/azure-pipelines.yml", "/azure-pipelines.yaml")
+DOCKERFILE_PATH = "/Dockerfile"
+FOLDER_PREFIXES = ("/manifests/", "/shared-config/")
+
 
 def azdo_request(method: str, path: str, payload: dict | None = None) -> tuple[int, dict]:
     if not AZDO_ORG or not AZDO_PROJECT or not AZDO_PAT:
@@ -80,18 +84,44 @@ def reference_files(reference_repository_name: str, reference_branch: str) -> li
     branch = reference_branch.strip().removeprefix("refs/heads/")
     if not branch:
         raise RuntimeError("Reference repository branch must be provided by DevOps")
+
     repository_id = repository["id"]
     logger.info("Reading reference repository repository=%s branch=%s", reference_repository_name, branch)
     query = urllib.parse.urlencode({"scopePath": "/", "recursionLevel": "Full", "versionDescriptor.version": branch, "versionDescriptor.versionType": "branch", "api-version": "7.1"})
     code, body = azdo_request("GET", f"_apis/git/repositories/{repository_id}/items?{query}")
     if code != 200:
         raise RuntimeError(body.get("message", f"Unable to read reference repository branch {branch} with HTTP {code}"))
-    exact_files = {"/Dockerfile", "/azure-pipelines.yaml"}
-    folder_prefixes = ("/manifests/", "/shared-config/")
-    selected_paths = [item.get("path", "") for item in body.get("value", []) if not item.get("isFolder") and (item.get("path", "") in exact_files or item.get("path", "").startswith(folder_prefixes))]
-    missing = sorted(exact_files - set(selected_paths))
+
+    available_paths = {
+        item.get("path", "")
+        for item in body.get("value", [])
+        if not item.get("isFolder")
+    }
+    pipeline_path = next((path for path in PIPELINE_FILE_CANDIDATES if path in available_paths), None)
+
+    missing: list[str] = []
+    if DOCKERFILE_PATH not in available_paths:
+        missing.append(DOCKERFILE_PATH)
+    if pipeline_path is None:
+        missing.append("/azure-pipelines.yml or /azure-pipelines.yaml")
     if missing:
         raise RuntimeError(f"Reference repository branch {branch} is missing required files: {', '.join(missing)}")
+
+    selected_paths = sorted(
+        path
+        for path in available_paths
+        if path == DOCKERFILE_PATH
+        or path == pipeline_path
+        or path.startswith(FOLDER_PREFIXES)
+    )
+    logger.info(
+        "Reference template matched repository=%s branch=%s pipeline_file=%s selected_files=%s",
+        reference_repository_name,
+        branch,
+        pipeline_path,
+        len(selected_paths),
+    )
+
     files = [{"path": path, "content": get_reference_file_content(repository_id, path, branch)} for path in selected_paths]
     if not any(path.startswith("/manifests/") for path in selected_paths):
         files.append({"path": "/manifests/.gitkeep", "content": ""})
