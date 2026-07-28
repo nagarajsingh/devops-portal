@@ -1,0 +1,114 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: devops-portal-backend
+  namespace: automation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: devops-portal-namespace-reader
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: devops-portal-namespace-reader
+subjects:
+  - kind: ServiceAccount
+    name: devops-portal-backend
+    namespace: automation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: devops-portal-namespace-reader
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: devops-portal-config
+  namespace: automation
+data:
+  ALLOWED_NAMESPACES: "automation,h2h-dev,h2h-sit,mobile-orchestration-dev,mobile-orchestration-sit"
+  AZURE_DEVOPS_ORGANIZATION: "update-me"
+  AZURE_DEVOPS_PROJECT: "update-me"
+  DEFAULT_IMAGE_PULL_SECRET: "docker-secret"
+  REQUEST_DATA_FILE: "/data/requests.json"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: devops-portal-secrets
+  namespace: automation
+type: Opaque
+stringData:
+  JWT_SECRET: "replace-with-a-long-random-value"
+  DEVOPS_USERNAME: "devops"
+  DEVOPS_PASSWORD: "change-me"
+  DEVELOPER_USERNAME: "developer"
+  DEVELOPER_PASSWORD: "change-me"
+  AZURE_DEVOPS_PAT: "replace-me"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devops-portal-backend
+  namespace: automation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: devops-portal-backend
+  template:
+    metadata:
+      labels:
+        app: devops-portal-backend
+    spec:
+      serviceAccountName: devops-portal-backend
+      imagePullSecrets:
+        - name: docker-secret
+      containers:
+        - name: backend
+          image: mashrequae.azurecr.io/devops-portal-backend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: devops-portal-config
+            - secretRef:
+                name: devops-portal-secrets
+          volumeMounts:
+            - name: request-data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+      volumes:
+        - name: request-data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: devops-portal-backend
+  namespace: automation
+spec:
+  selector:
+    app: devops-portal-backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
