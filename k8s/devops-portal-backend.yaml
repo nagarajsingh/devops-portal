@@ -7,16 +7,19 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: devops-portal-namespace-reader
+  name: devops-portal-provisioner
 rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "create", "update", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: devops-portal-namespace-reader
+  name: devops-portal-provisioner
 subjects:
   - kind: ServiceAccount
     name: devops-portal-backend
@@ -24,7 +27,7 @@ subjects:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: devops-portal-namespace-reader
+  name: devops-portal-provisioner
 ---
 apiVersion: v1
 kind: ConfigMap
