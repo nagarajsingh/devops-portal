@@ -40,6 +40,11 @@ export interface PipelineRequestInput {
   comments?: string;
 }
 
+export interface KubernetesService {
+  name: string;
+  ports: number[];
+}
+
 export interface ProvisionStep {
   status: string;
   message?: string;
