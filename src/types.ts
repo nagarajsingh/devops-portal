@@ -35,9 +35,33 @@ export interface PipelineRequestInput {
   comments?: string;
 }
 
+export interface ProvisionStep {
+  status: string;
+  message?: string;
+  id?: string;
+  url?: string;
+}
+
+export interface TimelineEvent {
+  at: string;
+  action: string;
+  actor: string;
+  detail?: string;
+}
+
 export interface PipelineRequest extends PipelineRequestInput {
   id: string;
   requested_by: string;
   status: string;
   created_at: string;
+  updated_at?: string;
+  reviewed_by?: string;
+  review_comments?: string;
+  original_request?: PipelineRequestInput;
+  provisioning?: Record<string, ProvisionStep>;
+  timeline?: TimelineEvent[];
+}
+
+export interface ReviewUpdate extends PipelineRequestInput {
+  review_comments?: string;
 }
