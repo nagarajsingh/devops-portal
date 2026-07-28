@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import jwt
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
@@ -32,7 +32,7 @@ AZDO_ORG = os.getenv("AZURE_DEVOPS_ORGANIZATION", "").strip()
 AZDO_PROJECT = os.getenv("AZURE_DEVOPS_PROJECT", "").strip()
 AZDO_PAT = os.getenv("AZURE_DEVOPS_PAT", "").strip()
 
-app = FastAPI(title="DevOps Portal API", version="2.0.1")
+app = FastAPI(title="DevOps Portal API", version="2.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -54,6 +54,7 @@ class PipelineRequestCreate(BaseModel):
     repository_name: str = Field(min_length=2, max_length=100)
     pipeline_type: str | None = None
     ingress_path: str
+    ingress_name: str | None = None
     create_service: bool = True
     service_name: str
     service_port: int = Field(default=8080, ge=1, le=65535)
@@ -138,13 +139,31 @@ def find_request(items: list[dict], request_id: str) -> tuple[int, dict]:
     raise HTTPException(status_code=404, detail="Pipeline request not found")
 
 
-def cluster_namespaces() -> list[str]:
+def load_k8s() -> None:
     try:
         config.load_incluster_config()
+    except config.ConfigException:
+        config.load_kube_config()
+
+
+def cluster_namespaces() -> list[str]:
+    try:
+        load_k8s()
         names = [item.metadata.name for item in client.CoreV1Api().list_namespace().items]
         return sorted(name for name in names if not NAMESPACE_ALLOWLIST or name in NAMESPACE_ALLOWLIST)
     except Exception:
         return sorted(NAMESPACE_ALLOWLIST)
+
+
+def namespace_ingresses(namespace: str) -> list[str]:
+    if namespace not in cluster_namespaces():
+        raise HTTPException(status_code=400, detail="Namespace is not allowed")
+    try:
+        load_k8s()
+        items = client.NetworkingV1Api().list_namespaced_ingress(namespace).items
+        return sorted(item.metadata.name for item in items if item.metadata and item.metadata.name)
+    except ApiException as exc:
+        raise HTTPException(status_code=exc.status or 500, detail=f"Unable to list ingresses in namespace {namespace}: {exc.reason}") from exc
 
 
 def azdo_request(method: str, path: str, payload: dict | None = None) -> tuple[int, dict]:
@@ -156,8 +175,7 @@ def azdo_request(method: str, path: str, payload: dict | None = None) -> tuple[i
     request = urllib.request.Request(url, data=data, method=method, headers={"Authorization": f"Basic {token}", "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            body = json.loads(response.read().decode() or "{}")
-            return response.status, body
+            return response.status, json.loads(response.read().decode() or "{}")
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode()
         try:
@@ -176,18 +194,8 @@ def get_repository(name: str) -> dict | None:
     raise RuntimeError(body.get("message", f"Repository lookup failed with HTTP {code}"))
 
 
-def repository_exists(name: str) -> bool:
-    return get_repository(name) is not None
-
-
 def create_repository(name: str) -> dict:
-    # The project is already supplied in the Azure DevOps URI. Sending a
-    # project object in the request body can trigger a project-ID mismatch.
-    code, body = azdo_request(
-        "POST",
-        "_apis/git/repositories?api-version=7.1",
-        {"name": name},
-    )
+    code, body = azdo_request("POST", "_apis/git/repositories?api-version=7.1", {"name": name})
     if code not in (200, 201):
         raise RuntimeError(body.get("message", f"Repository creation failed with HTTP {code}"))
     return body
@@ -196,7 +204,7 @@ def create_repository(name: str) -> dict:
 def ensure_service(item: dict) -> str:
     if not item.get("create_service"):
         return "Skipped"
-    config.load_incluster_config()
+    load_k8s()
     api = client.CoreV1Api()
     name = item["service_name"]
     namespace = item["namespace"]
@@ -218,17 +226,66 @@ def ensure_service(item: dict) -> str:
     return "Completed"
 
 
+def ensure_ingress_path(item: dict) -> dict[str, str]:
+    ingress_name = (item.get("ingress_name") or "").strip()
+    if not ingress_name:
+        raise RuntimeError("No ingress resource was selected by DevOps")
+    if not item.get("create_service"):
+        raise RuntimeError("Ingress provisioning requires Kubernetes service creation")
+
+    load_k8s()
+    api = client.NetworkingV1Api()
+    namespace = item["namespace"]
+    ingress = api.read_namespaced_ingress(ingress_name, namespace)
+    rules = ingress.spec.rules or []
+    if not rules:
+        raise RuntimeError(f"Ingress {ingress_name} does not contain any rules")
+
+    path_value = item["ingress_path"]
+    if not path_value.startswith("/"):
+        path_value = f"/{path_value}"
+    if not path_value.endswith("(/|$)(.*)"):
+        path_value = f"{path_value}(/|$)(.*)"
+
+    target_rule = next((rule for rule in rules if rule.http is not None), None)
+    if target_rule is None:
+        raise RuntimeError(f"Ingress {ingress_name} does not contain an HTTP rule")
+
+    paths = target_rule.http.paths or []
+    existing = next((path for path in paths if path.path == path_value), None)
+    if existing:
+        existing.backend = client.V1IngressBackend(
+            service=client.V1IngressServiceBackend(
+                name=item["service_name"],
+                port=client.V1ServiceBackendPort(number=item["service_port"]),
+            )
+        )
+        action = "Updated existing path"
+    else:
+        paths.append(client.V1HTTPIngressPath(
+            path=path_value,
+            path_type="ImplementationSpecific",
+            backend=client.V1IngressBackend(
+                service=client.V1IngressServiceBackend(
+                    name=item["service_name"],
+                    port=client.V1ServiceBackendPort(number=item["service_port"]),
+                )
+            ),
+        ))
+        action = "Added path"
+
+    target_rule.http.paths = paths
+    ingress.spec.rules = rules
+    api.replace_namespaced_ingress(ingress_name, namespace, ingress)
+    return {"status": "Completed", "message": f"{action} {path_value} in ingress {ingress_name}"}
+
+
 def provision(item: dict) -> tuple[str, dict]:
     steps: dict[str, Any] = {}
     try:
         existing_repo = get_repository(item["repository_name"])
         if existing_repo:
-            steps["repository"] = {
-                "status": "Warning",
-                "message": "Repository already exists",
-                "id": existing_repo.get("id"),
-                "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl"),
-            }
+            steps["repository"] = {"status": "Warning", "message": "Repository already exists", "id": existing_repo.get("id"), "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl")}
             return "Pending Action", steps
         repo = create_repository(item["repository_name"])
         steps["repository"] = {"status": "Completed", "id": repo.get("id"), "url": repo.get("webUrl") or repo.get("remoteUrl")}
@@ -236,14 +293,16 @@ def provision(item: dict) -> tuple[str, dict]:
         steps["repository"] = {"status": "Failed", "message": str(exc)}
 
     try:
-        service_status = ensure_service(item)
-        steps["service"] = {"status": service_status}
+        steps["service"] = {"status": ensure_service(item)}
     except Exception as exc:
         steps["service"] = {"status": "Failed", "message": str(exc)}
 
-    steps["pipeline"] = {"status": "Pending", "message": "Pipeline template/configuration is not configured"}
-    steps["ingress"] = {"status": "Pending", "message": f"Ingress path {item['ingress_path']} requires ingress resource configuration"}
+    try:
+        steps["ingress"] = ensure_ingress_path(item)
+    except Exception as exc:
+        steps["ingress"] = {"status": "Failed", "message": str(exc)}
 
+    steps["pipeline"] = {"status": "Pending", "message": "Pipeline template/configuration is not configured"}
     statuses = [step["status"] for step in steps.values()]
     if statuses and all(value in ("Completed", "Skipped", "Already Exists") for value in statuses):
         return "Completed", steps
@@ -269,6 +328,11 @@ def login(payload: LoginRequest) -> LoginResponse:
 @app.get("/namespaces", response_model=list[str])
 def list_namespaces(_: UserContext = Depends(current_user)) -> list[str]:
     return cluster_namespaces()
+
+
+@app.get("/ingresses/{namespace}", response_model=list[str])
+def list_ingresses(namespace: str, _: UserContext = Depends(require_devops)) -> list[str]:
+    return namespace_ingresses(namespace)
 
 
 @app.post("/requests", response_model=PipelineRequest, status_code=201)
@@ -303,8 +367,12 @@ def get_request(request_id: str, user: UserContext = Depends(current_user)) -> P
 def update_request(request_id: str, payload: ReviewUpdate, user: UserContext = Depends(require_devops)) -> PipelineRequest:
     items = read_requests()
     index, current = find_request(items, request_id)
-    if current.get("status") not in ("Pending Approval", "Pending Action"):
+    if current.get("status") not in ("Pending Approval", "Pending Action", "Partially Completed"):
         raise HTTPException(status_code=409, detail="Only pending requests can be modified")
+    if payload.namespace not in cluster_namespaces():
+        raise HTTPException(status_code=400, detail="Namespace is not allowed")
+    if payload.ingress_name and payload.ingress_name not in namespace_ingresses(payload.namespace):
+        raise HTTPException(status_code=400, detail=f"Ingress {payload.ingress_name} does not exist in namespace {payload.namespace}")
     original = current.get("original_request") or {key: current.get(key) for key in PipelineRequestCreate.model_fields}
     updated = {**current, **payload.model_dump(exclude={"review_comments"}), "review_comments": payload.review_comments, "reviewed_by": user.username, "updated_at": now_iso(), "original_request": original}
     updated.setdefault("timeline", []).append(timeline_event("Modified by DevOps", user.username, payload.review_comments or "Request values updated"))
@@ -330,6 +398,8 @@ def approve_request(request_id: str, user: UserContext = Depends(require_devops)
     index, current = find_request(items, request_id)
     if current.get("status") not in ("Pending Approval", "Pending Action", "Partially Completed"):
         raise HTTPException(status_code=409, detail=f"Request cannot be approved from status {current.get('status')}")
+    if not current.get("ingress_name"):
+        raise HTTPException(status_code=400, detail="Select an ingress resource before approval")
     current["status"] = "Provisioning"
     current["reviewed_by"] = user.username
     current["updated_at"] = now_iso()
