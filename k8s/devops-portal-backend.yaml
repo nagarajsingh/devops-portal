@@ -41,6 +41,7 @@ data:
   ALLOWED_NAMESPACES: "automation,h2h-dev,h2h-sit,mobile-orchestration-dev,mobile-orchestration-sit"
   AZURE_DEVOPS_ORGANIZATION: "update-me"
   AZURE_DEVOPS_PROJECT: "update-me"
+  BOOTSTRAP_BRANCH: "feature/devops"
   DEFAULT_IMAGE_PULL_SECRET: "docker-secret"
   REQUEST_DATA_FILE: "/data/requests.json"
 ---
