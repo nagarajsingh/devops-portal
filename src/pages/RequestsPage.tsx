@@ -1,66 +1,20 @@
-const requests = [
-  {
-    id: "MS-1023",
-    service: "payment-api",
-    namespace: "mobile-domain-dev",
-    status: "Pending Approval",
-    requestedOn: "Today",
-  },
-  {
-    id: "MS-1022",
-    service: "auth-service",
-    namespace: "mobile-orchestration-dev",
-    status: "Approved",
-    requestedOn: "Yesterday",
-  },
-  {
-    id: "MS-1019",
-    service: "customer-profile",
-    namespace: "h2h-dev",
-    status: "Completed",
-    requestedOn: "25 Jul 2026",
-  },
-];
+import { useEffect, useState } from "react";
+import { getPipelineRequests } from "../services/api";
+import type { PipelineRequest, Role } from "../types";
 
-export default function RequestsPage() {
-  return (
-    <section>
-      <div className="section-heading">
-        <div>
-          <span className="eyebrow">SELF-SERVICE</span>
-          <h2>My Requests</h2>
-          <p>Track the status of your submitted microservice requests.</p>
-        </div>
-      </div>
+interface Props { token: string; role: Role; refreshKey: number; }
 
-      <div className="table-card">
-        <table>
-          <thead>
-            <tr>
-              <th>Request ID</th>
-              <th>Service</th>
-              <th>Namespace</th>
-              <th>Status</th>
-              <th>Requested On</th>
-            </tr>
-          </thead>
-          <tbody>
-            {requests.map((request) => (
-              <tr key={request.id}>
-                <td><strong>{request.id}</strong></td>
-                <td>{request.service}</td>
-                <td>{request.namespace}</td>
-                <td>
-                  <span className={`status ${request.status === "Pending Approval" ? "pending" : request.status === "Approved" ? "progress" : "healthy"}`}>
-                    {request.status}
-                  </span>
-                </td>
-                <td>{request.requestedOn}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
+export default function RequestsPage({ token, role, refreshKey }: Props) {
+  const [requests, setRequests] = useState<PipelineRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setLoading(true);
+    getPipelineRequests(token).then(setRequests).catch(reason => setError(reason.message)).finally(() => setLoading(false));
+  }, [token, refreshKey]);
+
+  return <section><div className="section-heading"><div><span className="eyebrow">PIPELINE ONBOARDING</span><h2>{role === "devops" ? "All Pipeline Requests" : "My Pipeline Requests"}</h2><p>Track submitted repository, pipeline, ingress and service creation requests.</p></div></div>
+    <div className="table-card">{loading ? <p>Loading requests...</p> : error ? <div className="form-error">{error}</div> : requests.length === 0 ? <p>No requests have been submitted yet.</p> : <table><thead><tr><th>Request ID</th><th>Application</th><th>Repository</th><th>Namespace</th><th>Service</th><th>Status</th><th>Requested By</th><th>Created</th></tr></thead><tbody>{requests.map(request => <tr key={request.id}><td><strong>{request.id}</strong></td><td>{request.application_name}</td><td>{request.repository_name}</td><td>{request.namespace}</td><td>{request.create_service ? `${request.service_name}:${request.service_port}` : "Not requested"}</td><td><span className="status pending">{request.status}</span></td><td>{request.requested_by}</td><td>{new Date(request.created_at).toLocaleString()}</td></tr>)}</tbody></table>}</div>
+  </section>;
 }
