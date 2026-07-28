@@ -28,6 +28,7 @@ export interface PipelineRequestInput {
   repository_name: string;
   pipeline_type?: string;
   ingress_path: string;
+  ingress_name?: string;
   create_service: boolean;
   service_name: string;
   service_port: number;
