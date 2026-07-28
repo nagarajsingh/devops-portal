@@ -32,6 +32,10 @@ export function getNamespaces(token: string): Promise<string[]> {
   return request<string[]>("/namespaces", {}, token);
 }
 
+export function getIngresses(namespace: string, token: string): Promise<string[]> {
+  return request<string[]>(`/ingresses/${encodeURIComponent(namespace)}`, {}, token);
+}
+
 export function createPipelineRequest(payload: PipelineRequestInput, token: string): Promise<PipelineRequest> {
   return request<PipelineRequest>("/requests", {
     method: "POST",
