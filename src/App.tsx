@@ -25,13 +25,13 @@ const navItems: NavItem[] = [
   {
     key: "file-placement",
     label: "File Placement",
-    href: "/file-placement/",
+    href: "/devops-portal/file-placement/",
   },
   { key: "monitoring", label: "Monitoring", adminOnly: true },
   {
     key: "ms-portal",
     label: "MS Portal",
-    href: "/ms-setup-frontend/",
+    href: "/devops-portal/ms-setup/",
   },
   { key: "admin", label: "Admin", adminOnly: true },
 ];
