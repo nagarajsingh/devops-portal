@@ -3,10 +3,11 @@ import {
   approvePipelineRequest,
   getIngresses,
   getPipelineRequests,
+  getServices,
   rejectPipelineRequest,
   updatePipelineRequest,
 } from "../services/api";
-import type { PipelineRequest, ReviewUpdate, Role } from "../types";
+import type { KubernetesService, PipelineRequest, ReviewUpdate, Role } from "../types";
 
 interface Props { token: string; role: Role; refreshKey: number; }
 
@@ -23,7 +24,9 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
   const [selected, setSelected] = useState<PipelineRequest | null>(null);
   const [draft, setDraft] = useState<ReviewUpdate | null>(null);
   const [ingresses, setIngresses] = useState<string[]>([]);
+  const [services, setServices] = useState<KubernetesService[]>([]);
   const [loadingIngresses, setLoadingIngresses] = useState(false);
+  const [loadingServices, setLoadingServices] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -54,6 +57,30 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
       .catch((reason) => { setIngresses([]); setError(reason instanceof Error ? reason.message : "Unable to load ingresses"); })
       .finally(() => setLoadingIngresses(false));
   }, [draft?.namespace, role, token]);
+
+  useEffect(() => {
+    if (role !== "devops" || !draft?.namespace || draft.create_service) return;
+    setLoadingServices(true);
+    getServices(draft.namespace, token)
+      .then((items) => {
+        setServices(items);
+        setDraft((current) => {
+          if (!current) return current;
+          const selectedService = items.find((item) => item.name === current.service_name);
+          if (selectedService) {
+            return {
+              ...current,
+              service_port: selectedService.ports.includes(current.service_port)
+                ? current.service_port
+                : selectedService.ports[0] ?? current.service_port,
+            };
+          }
+          return { ...current, service_name: "" };
+        });
+      })
+      .catch((reason) => { setServices([]); setError(reason instanceof Error ? reason.message : "Unable to load services"); })
+      .finally(() => setLoadingServices(false));
+  }, [draft?.namespace, draft?.create_service, role, token]);
 
   const originalChanges = useMemo(() => {
     if (!selected?.original_request) return [];
@@ -95,6 +122,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
     if (!selected || !draft) return;
     if (!draft.reference_branch?.trim()) { setError("Provide the reference repository branch before approval."); return; }
     if (!draft.ingress_name) { setError("Select an ingress from the requested namespace before approval."); return; }
+    if (!draft.service_name.trim()) { setError(draft.create_service ? "Provide the Kubernetes service name." : "Select an existing Kubernetes service for ingress provisioning."); return; }
     setBusy(true); setError(""); setNotice("");
     try {
       await updatePipelineRequest(selected.id, draft, token);
@@ -117,9 +145,11 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
     finally { setBusy(false); }
   };
 
+  const selectedService = services.find((item) => item.name === draft?.service_name);
+
   return <section>
     <div className="section-heading"><div><span className="eyebrow">PIPELINE ONBOARDING</span><h2>{role === "devops" ? "All Pipeline Requests" : "My Pipeline Requests"}</h2><p>Preview approved values, provisioning progress and pending actions.</p></div></div>
-    <div className="table-card">{loading ? <p>Loading requests...</p> : error && !selected ? <div className="form-error">{error}</div> : requests.length === 0 ? <p>No requests have been submitted yet.</p> : <table><thead><tr><th>Request ID</th><th>Application</th><th>Repository</th><th>Namespace</th><th>Service</th><th>Status</th><th>Requested By</th><th>Action</th></tr></thead><tbody>{requests.map((request) => <tr key={request.id}><td><strong>{request.id}</strong></td><td>{request.application_type}</td><td>{request.repository_name}</td><td>{request.namespace}</td><td>{request.create_service ? `${request.service_name}:${request.service_port}` : "Not requested"}</td><td><span className={`status ${statusClass(request.status)}`}>{request.status}</span></td><td>{request.requested_by}</td><td><button className="secondary-button compact-button" onClick={() => openPreview(request)}>Preview</button></td></tr>)}</tbody></table>}</div>
+    <div className="table-card">{loading ? <p>Loading requests...</p> : error && !selected ? <div className="form-error">{error}</div> : requests.length === 0 ? <p>No requests have been submitted yet.</p> : <table><thead><tr><th>Request ID</th><th>Application</th><th>Repository</th><th>Namespace</th><th>Service</th><th>Status</th><th>Requested By</th><th>Action</th></tr></thead><tbody>{requests.map((request) => <tr key={request.id}><td><strong>{request.id}</strong></td><td>{request.application_type}</td><td>{request.repository_name}</td><td>{request.namespace}</td><td>{request.create_service ? `${request.service_name}:${request.service_port}` : request.service_name ? `Existing: ${request.service_name}:${request.service_port}` : "Not selected"}</td><td><span className={`status ${statusClass(request.status)}`}>{request.status}</span></td><td>{request.requested_by}</td><td><button className="secondary-button compact-button" onClick={() => openPreview(request)}>Preview</button></td></tr>)}</tbody></table>}</div>
 
     {selected && draft && <div className="request-modal-backdrop" onClick={() => setSelected(null)}><article className="request-modal" onClick={(event) => event.stopPropagation()}>
       <div className="modal-header"><div><span className="request-id">{selected.id}</span><h2>{selected.repository_name}</h2><p>Submitted by {selected.requested_by} on {new Date(selected.created_at).toLocaleString()}</p></div><button className="secondary-button" onClick={() => setSelected(null)}>Close</button></div>
@@ -134,9 +164,9 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
         <label>Namespace<input disabled value={draft.namespace} /></label>
         <label>Ingress Path<input disabled={role !== "devops"} value={draft.ingress_path} onChange={(e) => setDraft({ ...draft, ingress_path: e.target.value })} /></label>
         <label>Ingress Resource{role === "devops" ? <select required value={draft.ingress_name ?? ""} disabled={loadingIngresses} onChange={(e) => setDraft({ ...draft, ingress_name: e.target.value })}><option value="">{loadingIngresses ? "Loading ingresses..." : "Select ingress"}</option>{ingresses.map((name) => <option key={name} value={name}>{name}</option>)}</select> : <input disabled value={draft.ingress_name || "Not selected"} />}</label>
-        <label>Service Name<input disabled={role !== "devops" || !draft.create_service} value={draft.service_name} onChange={(e) => setDraft({ ...draft, service_name: e.target.value })} /></label>
-        <label>Service Port<input disabled={role !== "devops" || !draft.create_service} type="number" value={draft.service_port} onChange={(e) => setDraft({ ...draft, service_port: Number(e.target.value) })} /></label>
-        <label className="checkbox-line"><input disabled={role !== "devops"} type="checkbox" checked={draft.create_service} onChange={(e) => setDraft({ ...draft, create_service: e.target.checked })} />Create Kubernetes Service</label>
+        {draft.create_service ? <label>Service Name<input disabled={role !== "devops"} value={draft.service_name} onChange={(e) => setDraft({ ...draft, service_name: e.target.value })} /></label> : <label>Existing Service{role === "devops" ? <select required value={draft.service_name} disabled={loadingServices} onChange={(e) => { const service = services.find((item) => item.name === e.target.value); setDraft({ ...draft, service_name: e.target.value, service_port: service?.ports[0] ?? draft.service_port }); }}><option value="">{loadingServices ? "Loading services..." : "Select existing service"}</option>{services.map((service) => <option key={service.name} value={service.name}>{service.name}</option>)}</select> : <input disabled value={draft.service_name || "Not selected"} />}</label>}
+        <label>Service Port{!draft.create_service && role === "devops" && selectedService?.ports.length ? <select value={draft.service_port} onChange={(e) => setDraft({ ...draft, service_port: Number(e.target.value) })}>{selectedService.ports.map((port) => <option key={port} value={port}>{port}</option>)}</select> : <input disabled={role !== "devops"} type="number" value={draft.service_port} onChange={(e) => setDraft({ ...draft, service_port: Number(e.target.value) })} />}</label>
+        <label className="checkbox-line"><input disabled={role !== "devops"} type="checkbox" checked={draft.create_service} onChange={(e) => setDraft({ ...draft, create_service: e.target.checked, service_name: e.target.checked ? draft.repository_name : "" })} />Create Kubernetes Service</label>
         <label className="full-width">Developer Comments<textarea disabled rows={3} value={draft.comments ?? ""} /></label>
         <label className="full-width">DevOps Review Comments<textarea disabled={role !== "devops"} rows={3} value={draft.review_comments ?? ""} onChange={(e) => setDraft({ ...draft, review_comments: e.target.value })} /></label>
       </div>
