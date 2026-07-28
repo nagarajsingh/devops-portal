@@ -1,0 +1,3 @@
+export default function FilePlacementPage() {
+  return <section><div className="section-heading"><div><span className="eyebrow">DELIVERY</span><h2>File Placement</h2></div><button className="primary-button">New placement</button></div><div className="form-card"><label>Application name<input placeholder="Enter application name" /></label><label>Environment<select><option>Development</option><option>SIT</option><option>UAT</option><option>Production</option></select></label><label>Target path<input placeholder="/opt/application/config" /></label><label>Change details<textarea rows={4} placeholder="Describe the file placement request" /></label><button className="primary-button">Submit request</button></div></section>;
+}
