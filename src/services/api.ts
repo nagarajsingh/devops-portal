@@ -1,4 +1,4 @@
-import type { AuthSession, PipelineRequest, PipelineRequestInput, Role } from "../types";
+import type { AuthSession, PipelineRequest, PipelineRequestInput, ReviewUpdate, Role } from "../types";
 
 const API_BASE = "/devops-portal/api";
 
@@ -14,7 +14,8 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: "Request failed" }));
-    throw new Error(body.detail ?? `Request failed with status ${response.status}`);
+    const detail = typeof body.detail === "string" ? body.detail : body.detail?.message ?? "Request failed";
+    throw new Error(detail);
   }
 
   return response.json() as Promise<T>;
@@ -40,4 +41,22 @@ export function createPipelineRequest(payload: PipelineRequestInput, token: stri
 
 export function getPipelineRequests(token: string): Promise<PipelineRequest[]> {
   return request<PipelineRequest[]>("/requests", {}, token);
+}
+
+export function updatePipelineRequest(id: string, payload: ReviewUpdate, token: string): Promise<PipelineRequest> {
+  return request<PipelineRequest>(`/requests/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  }, token);
+}
+
+export function approvePipelineRequest(id: string, token: string): Promise<PipelineRequest> {
+  return request<PipelineRequest>(`/requests/${id}/approve`, { method: "POST" }, token);
+}
+
+export function rejectPipelineRequest(id: string, reason: string, token: string): Promise<PipelineRequest> {
+  return request<PipelineRequest>(`/requests/${id}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  }, token);
 }
