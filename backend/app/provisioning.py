@@ -61,15 +61,24 @@ def provision(item: dict) -> tuple[str, dict[str, Any]]:
 
     if target_repo:
         try:
-            steps["repository_bootstrap"] = bootstrap_repository(
+            bootstrap_result = bootstrap_repository(
                 target_repo,
                 item.get("reference_repository_name", ""),
                 item.get("reference_branch", ""),
                 item.get("application_type", "H2H"),
             )
+            steps["repository_bootstrap"] = bootstrap_result
+            pipeline_file = next(
+                (
+                    path.lstrip("/")
+                    for path in bootstrap_result.get("files", [])
+                    if path in ("/azure-pipelines.yml", "/azure-pipelines.yaml")
+                ),
+                "azure-pipelines.yml or azure-pipelines.yaml",
+            )
             steps["pipeline"] = {
                 "status": "Completed",
-                "message": f"azure-pipelines.yaml committed to {BOOTSTRAP_BRANCH}",
+                "message": f"{pipeline_file} committed to {BOOTSTRAP_BRANCH}",
             }
         except Exception as exc:
             logger.exception(
