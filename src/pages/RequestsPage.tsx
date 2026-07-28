@@ -184,7 +184,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
               <label className="full-width">DevOps Review Comments<textarea disabled={role !== "devops"} rows={3} value={draft.review_comments ?? ""} onChange={(e) => setDraft({ ...draft, review_comments: e.target.value })} /></label>
             </div>
 
-            {originalChanges.length > 0 && <div className="change-summary"><h3>Changes made by DevOps</h3>{originalChanges.map((change) => <div key={change.key}><strong>{change.key.replaceAll("_", " ")}</strong><span>{change.requested}</span><span>→</span><span>{change.approved}</span></div>)}</div>}
+            {originalChanges.length > 0 && <div className="change-summary"><h3>Changes made by DevOps</h3>{originalChanges.map((change) => <div key={change.key}><strong>{change.key.replace(/_/g, " ")}</strong><span>{change.requested}</span><span>→</span><span>{change.approved}</span></div>)}</div>}
 
             {selected.provisioning && Object.keys(selected.provisioning).length > 0 && <div className="provision-grid"><h3>Provisioning Status</h3>{Object.entries(selected.provisioning).map(([name, step]) => <div className="provision-step" key={name}><strong>{name}</strong><span className={`status ${statusClass(step.status)}`}>{step.status}</span><small>{step.message}</small>{step.url && <a href={step.url} target="_blank" rel="noreferrer">Open resource</a>}</div>)}</div>}
 
