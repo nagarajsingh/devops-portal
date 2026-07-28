@@ -1,0 +1,178 @@
+trigger:
+  branches:
+    include:
+      - develop
+      - releases/uat
+      - feature/*
+  paths:
+    include:
+      - Dockerfile
+      - nginx.conf
+      - package.json
+      - package-lock.json
+      - index.html
+      - tsconfig.json
+      - src/**
+      - manifests/**
+      - shared-config/**
+      - azure-pipelines.yaml
+
+pr:
+  branches:
+    include:
+      - develop
+      - releases/uat
+      - feature/*
+  paths:
+    include:
+      - Dockerfile
+      - nginx.conf
+      - package.json
+      - package-lock.json
+      - index.html
+      - tsconfig.json
+      - src/**
+      - manifests/**
+      - shared-config/**
+      - azure-pipelines.yaml
+
+parameters:
+  - name: vmImage
+    displayName: Agent VM image
+    type: string
+    default: ubuntu-latest
+
+variables:
+  ACR_SERVICE_CONNECTION: 'azure-devops-acr-rbg-prod-CorpCore-Titan-DevOps'
+  ACR_LOGIN_SERVER: 'mashrequae.azurecr.io'
+  IMAGE_REPOSITORY: 'devops-portal'
+  IMAGE_TAG: '$(Build.BuildId)'
+  BUILD_CONTEXT: '$(Build.SourcesDirectory)'
+  MANIFEST_DIRECTORY: '$(Build.SourcesDirectory)/manifests'
+  SHARED_CONFIG_DIRECTORY: '$(Build.SourcesDirectory)/shared-config'
+
+jobs:
+  - job: Build
+    displayName: Build Frontend and Publish Deployment Artifacts
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+
+    steps:
+      - checkout: self
+        clean: true
+        fetchDepth: 1
+
+      - bash: |
+          set -euo pipefail
+
+          echo "Repository root: $(Build.SourcesDirectory)"
+          find "$(Build.SourcesDirectory)" -maxdepth 3 -type f | sort
+
+          required_files=(
+            "Dockerfile"
+            "nginx.conf"
+            "package.json"
+            "index.html"
+            "tsconfig.json"
+            "src/main.tsx"
+            "src/App.tsx"
+            "manifests/k8s-dev.yaml"
+            "shared-config/dev/configmap-frontend-dev.yaml"
+          )
+
+          for file in "${required_files[@]}"; do
+            if [ ! -f "$(Build.SourcesDirectory)/${file}" ]; then
+              echo "ERROR: Required file not found: ${file}"
+              exit 1
+            fi
+          done
+
+          echo "Repository validation completed successfully."
+        displayName: Validate repository structure
+
+      - task: Docker@2
+        displayName: Login to Azure Container Registry
+        inputs:
+          command: login
+          containerRegistry: '$(ACR_SERVICE_CONNECTION)'
+
+      - bash: |
+          set -euo pipefail
+
+          IMAGE="$(ACR_LOGIN_SERVER)/$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
+
+          echo "Building ${IMAGE}"
+          docker build \
+            --pull \
+            --tag "${IMAGE}" \
+            --tag "$(ACR_LOGIN_SERVER)/$(IMAGE_REPOSITORY):latest" \
+            "$(BUILD_CONTEXT)"
+        displayName: Build frontend Docker image
+
+      - bash: |
+          set -euo pipefail
+
+          docker push "$(ACR_LOGIN_SERVER)/$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
+          docker push "$(ACR_LOGIN_SERVER)/$(IMAGE_REPOSITORY):latest"
+        displayName: Push frontend Docker image
+        condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+
+      - task: replacetokens@3
+        displayName: Configure Kubernetes manifests
+        condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+        inputs:
+          targetFiles: |
+            $(MANIFEST_DIRECTORY)/**/*.yaml
+            $(SHARED_CONFIG_DIRECTORY)/**/*.yaml
+          encoding: auto
+          writeBOM: false
+          actionOnMissing: fail
+          keepToken: false
+          tokenPrefix: '#{'
+          tokenSuffix: '}#'
+
+      - bash: |
+          set -euo pipefail
+
+          echo "Checking for unresolved replacement tokens..."
+          if grep -RIn --include='*.yaml' '#{[^}]*}#' \
+            "$(MANIFEST_DIRECTORY)" \
+            "$(SHARED_CONFIG_DIRECTORY)"; then
+            echo "ERROR: Unresolved replacement tokens were found."
+            exit 1
+          fi
+
+          echo "Rendered manifest files:"
+          find "$(MANIFEST_DIRECTORY)" "$(SHARED_CONFIG_DIRECTORY)" \
+            -type f -name '*.yaml' -print
+        displayName: Validate rendered manifests
+        condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+
+      - task: PublishPipelineArtifact@1
+        displayName: Publish Kubernetes manifests
+        condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+        inputs:
+          artifactName: manifests
+          targetPath: '$(MANIFEST_DIRECTORY)'
+
+      - task: PublishPipelineArtifact@1
+        displayName: Publish shared configuration
+        condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+        inputs:
+          artifactName: shared-config
+          targetPath: '$(SHARED_CONFIG_DIRECTORY)'
+
+      - bash: |
+          docker image rm \
+            "$(ACR_LOGIN_SERVER)/$(IMAGE_REPOSITORY):$(IMAGE_TAG)" \
+            "$(ACR_LOGIN_SERVER)/$(IMAGE_REPOSITORY):latest" \
+            --force || true
+        displayName: Remove local Docker images
+        condition: always()
+
+      - task: Docker@2
+        displayName: Logout from Azure Container Registry
+        inputs:
+          command: logout
+          containerRegistry: '$(ACR_SERVICE_CONNECTION)'
+        condition: always()
