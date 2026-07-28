@@ -32,7 +32,7 @@ AZDO_ORG = os.getenv("AZURE_DEVOPS_ORGANIZATION", "").strip()
 AZDO_PROJECT = os.getenv("AZURE_DEVOPS_PROJECT", "").strip()
 AZDO_PAT = os.getenv("AZURE_DEVOPS_PAT", "").strip()
 
-app = FastAPI(title="DevOps Portal API", version="2.0.0")
+app = FastAPI(title="DevOps Portal API", version="2.0.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -159,17 +159,35 @@ def azdo_request(method: str, path: str, payload: dict | None = None) -> tuple[i
             body = json.loads(response.read().decode() or "{}")
             return response.status, body
     except urllib.error.HTTPError as exc:
-        body = json.loads(exc.read().decode() or "{}")
+        raw = exc.read().decode()
+        try:
+            body = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            body = {"message": raw or f"Azure DevOps request failed with HTTP {exc.code}"}
         return exc.code, body
 
 
+def get_repository(name: str) -> dict | None:
+    code, body = azdo_request("GET", f"_apis/git/repositories/{urllib.parse.quote(name)}?api-version=7.1")
+    if code == 200:
+        return body
+    if code == 404:
+        return None
+    raise RuntimeError(body.get("message", f"Repository lookup failed with HTTP {code}"))
+
+
 def repository_exists(name: str) -> bool:
-    code, _ = azdo_request("GET", f"_apis/git/repositories/{urllib.parse.quote(name)}?api-version=7.1")
-    return code == 200
+    return get_repository(name) is not None
 
 
 def create_repository(name: str) -> dict:
-    code, body = azdo_request("POST", "_apis/git/repositories?api-version=7.1", {"name": name, "project": {"name": AZDO_PROJECT}})
+    # The project is already supplied in the Azure DevOps URI. Sending a
+    # project object in the request body can trigger a project-ID mismatch.
+    code, body = azdo_request(
+        "POST",
+        "_apis/git/repositories?api-version=7.1",
+        {"name": name},
+    )
     if code not in (200, 201):
         raise RuntimeError(body.get("message", f"Repository creation failed with HTTP {code}"))
     return body
@@ -203,11 +221,17 @@ def ensure_service(item: dict) -> str:
 def provision(item: dict) -> tuple[str, dict]:
     steps: dict[str, Any] = {}
     try:
-        if repository_exists(item["repository_name"]):
-            steps["repository"] = {"status": "Warning", "message": "Repository already exists"}
+        existing_repo = get_repository(item["repository_name"])
+        if existing_repo:
+            steps["repository"] = {
+                "status": "Warning",
+                "message": "Repository already exists",
+                "id": existing_repo.get("id"),
+                "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl"),
+            }
             return "Pending Action", steps
         repo = create_repository(item["repository_name"])
-        steps["repository"] = {"status": "Completed", "id": repo.get("id"), "url": repo.get("webUrl")}
+        steps["repository"] = {"status": "Completed", "id": repo.get("id"), "url": repo.get("webUrl") or repo.get("remoteUrl")}
     except Exception as exc:
         steps["repository"] = {"status": "Failed", "message": str(exc)}
 
