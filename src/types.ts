@@ -29,6 +29,7 @@ export interface PipelineRequestInput {
   application_type: ApplicationType;
   repository_name: string;
   reference_repository_name: string;
+  reference_branch?: string;
   pipeline_type?: string;
   ingress_path: string;
   ingress_name?: string;
@@ -45,6 +46,7 @@ export interface ProvisionStep {
   id?: string;
   url?: string;
   branch?: string;
+  source_branch?: string;
   files?: string[];
 }
 
