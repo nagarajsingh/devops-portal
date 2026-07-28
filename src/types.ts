@@ -5,4 +5,5 @@ export interface NavItem {
   key: PageKey;
   label: string;
   adminOnly?: boolean;
+  href?: string;
 }
