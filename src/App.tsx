@@ -4,6 +4,7 @@ import {
   Bell,
   Boxes,
   ChevronDown,
+  ClipboardList,
   FileUp,
   Home,
   Menu,
@@ -14,6 +15,7 @@ import {
 import type { NavItem, PageKey, Role } from "./types";
 import HomePage from "./pages/HomePage";
 import DashboardPage from "./pages/DashboardPage";
+import RequestsPage from "./pages/RequestsPage";
 import FilePlacementPage from "./pages/FilePlacementPage";
 import MonitoringPage from "./pages/MonitoringPage";
 import MsPortalPage from "./pages/MsPortalPage";
@@ -22,6 +24,7 @@ import AdminPage from "./pages/AdminPage";
 const navItems: NavItem[] = [
   { key: "home", label: "Home" },
   { key: "dashboard", label: "Dashboard" },
+  { key: "requests", label: "My Requests" },
   {
     key: "file-placement",
     label: "File Placement",
@@ -39,6 +42,7 @@ const navItems: NavItem[] = [
 const icons = {
   home: Home,
   dashboard: BarChart3,
+  requests: ClipboardList,
   "file-placement": FileUp,
   monitoring: Boxes,
   "ms-portal": Boxes,
@@ -60,10 +64,15 @@ export default function App() {
     item.label.toLowerCase().includes(query.toLowerCase()),
   );
 
+  function openMsSetup() {
+    window.location.assign("/devops-portal/ms-setup/");
+  }
+
   const renderPage = () =>
     ({
-      home: <HomePage />,
+      home: <HomePage onNavigate={setPage} onOpenMsSetup={openMsSetup} />,
       dashboard: <DashboardPage />,
+      requests: <RequestsPage />,
       "file-placement": <FilePlacementPage />,
       monitoring: <MonitoringPage />,
       "ms-portal": <MsPortalPage />,
