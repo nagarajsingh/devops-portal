@@ -8,11 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from .auth import authenticate, current_user, require_devops
 from .kubernetes_ops import cluster_namespaces, namespace_ingresses, namespace_services
 from .logging_config import get_logger
-from .models import ApproveRequest, LoginRequest, LoginResponse, PipelineRequest, PipelineRequestCreate, RejectRequest, ReviewUpdate, ServiceOption, UserContext
-from .request_service import approve_pipeline_request, create_pipeline_request, get_pipeline_request, list_pipeline_requests, reject_pipeline_request, update_pipeline_request
+from .models import ApproveRequest, CloseRequest, LoginRequest, LoginResponse, PipelineRequest, PipelineRequestCreate, RejectRequest, ReviewUpdate, ServiceOption, UserContext
+from .request_service import approve_pipeline_request, close_pipeline_request, create_pipeline_request, get_pipeline_request, list_pipeline_requests, reject_pipeline_request, update_pipeline_request
 
 logger = get_logger("api")
-app = FastAPI(title="DevOps Portal API", version="3.2.0")
+app = FastAPI(title="DevOps Portal API", version="3.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -81,6 +81,11 @@ def update_request(request_id: str, payload: ReviewUpdate, user: UserContext = D
 @app.post("/requests/{request_id}/reject", response_model=PipelineRequest)
 def reject_request(request_id: str, payload: RejectRequest, user: UserContext = Depends(require_devops)) -> PipelineRequest:
     return reject_pipeline_request(request_id, payload.reason, user)
+
+
+@app.post("/requests/{request_id}/close", response_model=PipelineRequest)
+def close_request(request_id: str, payload: CloseRequest, user: UserContext = Depends(require_devops)) -> PipelineRequest:
+    return close_pipeline_request(request_id, payload.comment, user)
 
 
 @app.post("/requests/{request_id}/approve", response_model=PipelineRequest)
