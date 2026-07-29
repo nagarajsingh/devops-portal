@@ -30,6 +30,7 @@ export interface PipelineRequestInput {
   repository_name: string;
   reference_repository_name: string;
   reference_branch?: string;
+  setup_pipeline: boolean;
   pipeline_type?: string;
   ingress_path: string;
   ingress_name?: string;
@@ -53,6 +54,8 @@ export interface ProvisionStep {
   branch?: string;
   source_branch?: string;
   files?: string[];
+  name?: string;
+  yaml_path?: string;
 }
 
 export interface TimelineEvent {
@@ -70,6 +73,7 @@ export interface PipelineRequest extends PipelineRequestInput {
   updated_at?: string;
   reviewed_by?: string;
   review_comments?: string;
+  closure_comment?: string;
   original_request?: PipelineRequestInput;
   provisioning?: Record<string, ProvisionStep>;
   timeline?: TimelineEvent[];
