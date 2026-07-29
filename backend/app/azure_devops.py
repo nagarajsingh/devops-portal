@@ -127,3 +127,25 @@ def bootstrap_repository(target_repository: dict, reference_repository_name: str
         raise RuntimeError(body.get("message", f"Repository bootstrap failed with HTTP {code}"))
     action = "Updated" if head else "Created"
     return {"status": "Completed", "message": f"{action} {BOOTSTRAP_BRANCH} using {reference_repository_name}:{reference_branch}", "branch": BOOTSTRAP_BRANCH, "source_branch": reference_branch, "files": [item["path"] for item in files], "url": target_repository.get("webUrl") or target_repository.get("remoteUrl")}
+
+
+def find_pipeline_by_name(name: str, pat: str) -> dict | None:
+    code, body = azdo_request("GET", "_apis/pipelines?api-version=7.1", pat)
+    if code != 200:
+        raise RuntimeError(body.get("message", f"Unable to list pipelines with HTTP {code}"))
+    return next((item for item in body.get("value", []) if item.get("name") == name), None)
+
+
+def create_build_pipeline(repository: dict, yaml_path: str, pat: str) -> dict[str, Any]:
+    pipeline_name = repository["name"]
+    existing = find_pipeline_by_name(pipeline_name, pat)
+    if existing:
+        pipeline_id = existing.get("id")
+        return {"status": "Already Exists", "message": f"Pipeline {pipeline_name} already exists", "id": pipeline_id, "name": pipeline_name, "yaml_path": yaml_path, "branch": BOOTSTRAP_BRANCH, "url": f"https://dev.azure.com/{AZDO_ORG}/{AZDO_PROJECT}/_build?definitionId={pipeline_id}"}
+    payload = {"name": pipeline_name, "folder": "\\DevOps-Portal", "configuration": {"type": "yaml", "path": yaml_path, "repository": {"id": repository["id"], "name": pipeline_name, "type": "azureReposGit"}}}
+    code, body = azdo_request("POST", "_apis/pipelines?api-version=7.1", pat, payload)
+    if code not in (200, 201):
+        raise RuntimeError(body.get("message", f"Pipeline creation failed with HTTP {code}"))
+    pipeline_id = body.get("id")
+    logger.info("Azure DevOps pipeline created pipeline=%s id=%s", pipeline_name, pipeline_id)
+    return {"status": "Completed", "message": f"Pipeline {pipeline_name} created using {yaml_path}", "id": pipeline_id, "name": pipeline_name, "yaml_path": yaml_path, "branch": BOOTSTRAP_BRANCH, "url": f"https://dev.azure.com/{AZDO_ORG}/{AZDO_PROJECT}/_build?definitionId={pipeline_id}"}
