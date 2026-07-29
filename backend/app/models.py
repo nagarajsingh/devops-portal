@@ -26,6 +26,7 @@ class PipelineRequestCreate(BaseModel):
     repository_name: str = Field(min_length=2, max_length=100, pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
     reference_repository_name: str = ""
     reference_branch: str = ""
+    setup_pipeline: bool = False
     pipeline_type: str | None = None
     ingress_path: str
     ingress_name: str | None = None
@@ -48,6 +49,10 @@ class RejectRequest(BaseModel):
     reason: str = Field(min_length=2, max_length=1000)
 
 
+class CloseRequest(BaseModel):
+    comment: str = Field(min_length=3, max_length=2000)
+
+
 class PipelineRequest(PipelineRequestCreate):
     id: str
     requested_by: str
@@ -56,6 +61,7 @@ class PipelineRequest(PipelineRequestCreate):
     updated_at: str | None = None
     reviewed_by: str | None = None
     review_comments: str | None = None
+    closure_comment: str | None = None
     original_request: dict[str, Any] | None = None
     provisioning: dict[str, Any] = Field(default_factory=dict)
     timeline: list[dict[str, str]] = Field(default_factory=list)
