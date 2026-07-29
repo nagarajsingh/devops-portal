@@ -17,8 +17,8 @@ logger = get_logger("requests")
 def create_pipeline_request(payload: PipelineRequestCreate, user: UserContext) -> PipelineRequest:
     if payload.namespace not in cluster_namespaces():
         raise HTTPException(status_code=400, detail="Namespace is not allowed")
-    if payload.application_type == "H2H" and not payload.reference_repository_name.strip():
-        raise HTTPException(status_code=400, detail="Reference repository name is required for H2H")
+    if payload.setup_pipeline and not payload.reference_repository_name.strip():
+        raise HTTPException(status_code=400, detail="Reference repository is required when pipeline setup is enabled")
     created = now_iso()
     original = payload.model_dump()
     request_id = f"PR-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:6].upper()}"
@@ -52,10 +52,10 @@ def update_pipeline_request(request_id: str, payload: ReviewUpdate, user: UserCo
         raise HTTPException(status_code=400, detail="Namespace is not allowed")
     if payload.ingress_name and payload.ingress_name not in namespace_ingresses(payload.namespace):
         raise HTTPException(status_code=400, detail=f"Ingress {payload.ingress_name} does not exist in namespace {payload.namespace}")
-    if payload.application_type == "H2H" and not payload.reference_repository_name.strip():
-        raise HTTPException(status_code=400, detail="Reference repository name is required for H2H")
-    if payload.application_type == "H2H" and not payload.reference_branch.strip():
-        raise HTTPException(status_code=400, detail="Reference repository branch must be provided by DevOps")
+    if payload.setup_pipeline and not payload.reference_repository_name.strip():
+        raise HTTPException(status_code=400, detail="Reference repository is required when pipeline setup is enabled")
+    if payload.reference_repository_name.strip() and not payload.reference_branch.strip():
+        raise HTTPException(status_code=400, detail="Reference repository branch must be provided when a reference repository is selected")
     original = current.get("original_request") or {key: current.get(key) for key in PipelineRequestCreate.model_fields}
     updated = {**current, **payload.model_dump(exclude={"review_comments"}), "review_comments": payload.review_comments, "reviewed_by": user.username, "updated_at": now_iso(), "original_request": original}
     updated.setdefault("timeline", []).append(timeline_event("Modified by DevOps", user.username, payload.review_comments or "Request values updated"))
@@ -74,19 +74,35 @@ def reject_pipeline_request(request_id: str, reason: str, user: UserContext) -> 
     return PipelineRequest(**current)
 
 
+def close_pipeline_request(request_id: str, comment: str, user: UserContext) -> PipelineRequest:
+    items = read_requests()
+    index, current = find_request(items, request_id)
+    if current.get("status") in ("Completed", "Rejected", "Closed"):
+        raise HTTPException(status_code=409, detail=f"Request cannot be closed from status {current.get('status')}")
+    current.update({"status": "Closed", "reviewed_by": user.username, "closure_comment": comment, "updated_at": now_iso()})
+    current.setdefault("timeline", []).append(timeline_event("Closed by DevOps", user.username, comment))
+    items[index] = current
+    write_requests(items)
+    logger.info("Pipeline request closed request_id=%s username=%s", request_id, user.username)
+    return PipelineRequest(**current)
+
+
 def approve_pipeline_request(request_id: str, user: UserContext, azure_devops_pat: str) -> PipelineRequest:
     items = read_requests()
     index, current = find_request(items, request_id)
     if current.get("status") not in ("Pending Approval", "Pending Action", "Partially Completed"):
         raise HTTPException(status_code=409, detail=f"Request cannot be approved from status {current.get('status')}")
-    if not current.get("reference_branch", "").strip():
+    if current.get("reference_repository_name", "").strip() and not current.get("reference_branch", "").strip():
         raise HTTPException(status_code=400, detail="Provide the reference repository branch before approval")
+    if current.get("setup_pipeline") and not current.get("reference_repository_name", "").strip():
+        raise HTTPException(status_code=400, detail="Pipeline setup requires a reference repository")
     if not current.get("ingress_name"):
         raise HTTPException(status_code=400, detail="Select an ingress resource before approval")
     if not azure_devops_pat.strip():
         raise HTTPException(status_code=400, detail="Azure DevOps PAT is required for provisioning")
     current.update({"status": "Provisioning", "reviewed_by": user.username, "updated_at": now_iso()})
-    current.setdefault("timeline", []).append(timeline_event("Approved", user.username, f"Reference branch: {current['reference_branch']}"))
+    detail = f"Reference branch: {current.get('reference_branch')}" if current.get("reference_repository_name") else "No reference repository selected"
+    current.setdefault("timeline", []).append(timeline_event("Approved", user.username, detail))
     final_status, steps = provision(current, azure_devops_pat)
     current.update({"provisioning": steps, "status": final_status, "updated_at": now_iso()})
     current["timeline"].append(timeline_event(final_status, "system", "Provisioning workflow finished"))
