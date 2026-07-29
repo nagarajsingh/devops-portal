@@ -77,13 +77,15 @@ def reject_pipeline_request(request_id: str, reason: str, user: UserContext) -> 
 def close_pipeline_request(request_id: str, comment: str, user: UserContext) -> PipelineRequest:
     items = read_requests()
     index, current = find_request(items, request_id)
-    if current.get("status") in ("Completed", "Rejected", "Closed"):
+    if current.get("status") in ("Rejected", "Closed", "Provisioning"):
         raise HTTPException(status_code=409, detail=f"Request cannot be closed from status {current.get('status')}")
-    current.update({"status": "Closed", "reviewed_by": user.username, "closure_comment": comment, "updated_at": now_iso()})
-    current.setdefault("timeline", []).append(timeline_event("Closed by DevOps", user.username, comment))
+    if not comment.strip():
+        raise HTTPException(status_code=400, detail="Closure comment is mandatory")
+    current.update({"status": "Closed", "reviewed_by": user.username, "closure_comment": comment.strip(), "updated_at": now_iso()})
+    current.setdefault("timeline", []).append(timeline_event("Closed by DevOps", user.username, comment.strip()))
     items[index] = current
     write_requests(items)
-    logger.info("Pipeline request closed request_id=%s username=%s", request_id, user.username)
+    logger.info("Pipeline request closed request_id=%s username=%s previous_status=%s", request_id, user.username, current.get("status"))
     return PipelineRequest(**current)
 
 
