@@ -23,6 +23,7 @@ class LoginResponse(BaseModel):
 
 class PipelineRequestCreate(BaseModel):
     application_type: ApplicationType = "H2H"
+    app_owner: str = ""
     repository_name: str = Field(min_length=2, max_length=100, pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
     reference_repository_name: str = ""
     reference_branch: str = ""
@@ -30,10 +31,10 @@ class PipelineRequestCreate(BaseModel):
     pipeline_type: str | None = None
     ingress_path: str
     ingress_name: str | None = None
-    create_service: bool = True
-    service_name: str
+    create_service: bool = False
+    service_name: str = ""
     service_port: int = Field(default=8080, ge=1, le=65535)
-    namespace: str
+    namespace: str = ""
     comments: str | None = None
 
 
@@ -62,6 +63,9 @@ class PipelineRequest(PipelineRequestCreate):
     reviewed_by: str | None = None
     review_comments: str | None = None
     closure_comment: str | None = None
+    app_owner_decision_by: str | None = None
+    app_owner_decision_at: str | None = None
+    app_owner_comment: str | None = None
     original_request: dict[str, Any] | None = None
     provisioning: dict[str, Any] = Field(default_factory=dict)
     timeline: list[dict[str, str]] = Field(default_factory=list)
