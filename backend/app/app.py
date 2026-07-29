@@ -1,18 +1,20 @@
 from __future__ import annotations
 
+import html
 import time
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
 from .auth import authenticate, current_user, require_devops
 from .kubernetes_ops import cluster_namespaces, namespace_ingresses, namespace_services
 from .logging_config import get_logger
 from .models import ApproveRequest, CloseRequest, LoginRequest, LoginResponse, PipelineRequest, PipelineRequestCreate, RejectRequest, ReviewUpdate, ServiceOption, UserContext
-from .request_service import approve_pipeline_request, close_pipeline_request, create_pipeline_request, get_pipeline_request, list_pipeline_requests, reject_pipeline_request, update_pipeline_request
+from .request_service import approve_pipeline_request, close_pipeline_request, create_pipeline_request, get_pipeline_request, list_pipeline_requests, process_app_owner_action, reject_pipeline_request, update_pipeline_request
 
 logger = get_logger("api")
-app = FastAPI(title="DevOps Portal API", version="3.3.0")
+app = FastAPI(title="DevOps Portal API", version="3.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -36,6 +38,25 @@ async def log_http_requests(request: Request, call_next):
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "healthy"}
+
+
+@app.get("/app-owner/action", response_class=HTMLResponse)
+def app_owner_action(token: str) -> HTMLResponse:
+    status, detail = process_app_owner_action(token)
+    success = status in ("Pending Approval", "Completed", "Closed")
+    accent = "#23824d" if success else "#c73e37"
+    page = f"""
+    <html><body style='font-family:Arial,sans-serif;background:#f5f7fb;padding:40px;color:#24334a'>
+      <div style='max-width:650px;margin:auto;background:white;border:1px solid #e5eaf0;border-radius:18px;padding:32px;text-align:center'>
+        <div style='color:#ef641f;font-weight:800;letter-spacing:1px;font-size:12px'>DEVOPS PORTAL</div>
+        <h2 style='color:#183b68'>Application owner response recorded</h2>
+        <div style='display:inline-block;padding:9px 14px;border-radius:999px;background:{accent}18;color:{accent};font-weight:800'>{html.escape(status)}</div>
+        <p style='line-height:1.7;color:#52657b'>{html.escape(detail)}</p>
+        <p style='font-size:13px;color:#788392'>You may close this browser window.</p>
+      </div>
+    </body></html>
+    """
+    return HTMLResponse(page)
 
 
 @app.post("/auth/login", response_model=LoginResponse)
