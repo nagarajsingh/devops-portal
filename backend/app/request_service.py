@@ -5,6 +5,8 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
+from .config import APP_OWNER_EMAILS, LANGUAGE_PORTS
+from .email_service import decode_approval_token, send_app_owner_approval_email
 from .kubernetes_ops import cluster_namespaces, namespace_ingresses
 from .logging_config import get_logger
 from .models import PipelineRequest, PipelineRequestCreate, ReviewUpdate, UserContext
@@ -15,24 +17,104 @@ logger = get_logger("requests")
 
 
 def create_pipeline_request(payload: PipelineRequestCreate, user: UserContext) -> PipelineRequest:
-    if payload.namespace not in cluster_namespaces():
-        raise HTTPException(status_code=400, detail="Namespace is not allowed")
-    if payload.setup_pipeline and not payload.reference_repository_name.strip():
-        raise HTTPException(status_code=400, detail="Reference repository is required when pipeline setup is enabled")
-    created = now_iso()
+    app_owner = APP_OWNER_EMAILS.get(payload.application_type)
+    if not app_owner:
+        raise HTTPException(status_code=400, detail=f"No app owner is configured for {payload.application_type}")
+
+    pipeline_type = (payload.pipeline_type or "").strip()
+    default_port = LANGUAGE_PORTS.get(pipeline_type, 8080)
     original = payload.model_dump()
+    original.update({
+        "app_owner": app_owner,
+        "namespace": "",
+        "setup_pipeline": False,
+        "create_service": False,
+        "service_name": payload.repository_name,
+        "service_port": default_port,
+    })
+
+    created = now_iso()
     request_id = f"PR-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:6].upper()}"
-    item = PipelineRequest(**original, id=request_id, requested_by=user.username, status="Pending Approval", created_at=created, updated_at=created, original_request=original, timeline=[timeline_event("Submitted", user.username)])
+    item = PipelineRequest(
+        **original,
+        id=request_id,
+        requested_by=user.username,
+        status="Pending App Owner Approval",
+        created_at=created,
+        updated_at=created,
+        original_request=original,
+        timeline=[timeline_event("Submitted", user.username, f"Sent to app owner {app_owner} for approval")],
+    )
     items = read_requests()
     items.append(item.model_dump())
     write_requests(items)
-    logger.info("Pipeline request submitted request_id=%s username=%s repository=%s", item.id, user.username, item.repository_name)
+
+    try:
+        send_app_owner_approval_email(item.model_dump())
+        items = read_requests()
+        index, current = find_request(items, request_id)
+        current.setdefault("timeline", []).append(timeline_event("Approval Email Sent", "system", app_owner))
+        items[index] = current
+        write_requests(items)
+        item = PipelineRequest(**current)
+    except Exception as exc:
+        logger.exception("Unable to send app owner email request_id=%s app_owner=%s", request_id, app_owner)
+        items = read_requests()
+        index, current = find_request(items, request_id)
+        current.setdefault("timeline", []).append(timeline_event("Approval Email Failed", "system", str(exc)))
+        items[index] = current
+        write_requests(items)
+        item = PipelineRequest(**current)
+
+    logger.info("Pipeline request submitted request_id=%s username=%s repository=%s app_owner=%s", item.id, user.username, item.repository_name, app_owner)
     return item
+
+
+def process_app_owner_action(token: str) -> tuple[str, str]:
+    try:
+        payload = decode_approval_token(token)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="The approval link is invalid or has expired") from exc
+
+    request_id = payload.get("request_id", "")
+    decision = payload.get("decision", "")
+    app_owner = payload.get("sub", "")
+    if decision not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="Invalid approval decision")
+
+    items = read_requests()
+    index, current = find_request(items, request_id)
+    if current.get("status") != "Pending App Owner Approval":
+        return current.get("status", "Unknown"), f"Request {request_id} has already been processed."
+    if current.get("app_owner", "").lower() != app_owner.lower():
+        raise HTTPException(status_code=403, detail="This approval link does not match the configured app owner")
+
+    decided_at = now_iso()
+    if decision == "approve":
+        status = "Pending Approval"
+        detail = "Approved by app owner and moved to the DevOps provisioning queue"
+        action = "Approved by App Owner"
+    else:
+        status = "Rejected"
+        detail = "Rejected by app owner"
+        action = "Rejected by App Owner"
+
+    current.update({
+        "status": status,
+        "app_owner_decision_by": app_owner,
+        "app_owner_decision_at": decided_at,
+        "updated_at": decided_at,
+    })
+    current.setdefault("timeline", []).append(timeline_event(action, app_owner, detail))
+    items[index] = current
+    write_requests(items)
+    logger.info("App owner decision recorded request_id=%s decision=%s app_owner=%s", request_id, decision, app_owner)
+    return status, detail
 
 
 def list_pipeline_requests(user: UserContext) -> list[PipelineRequest]:
     items = [PipelineRequest(**item) for item in read_requests()]
-    visible = items if user.role == "devops" else [item for item in items if item.requested_by == user.username]
+    visible = [item for item in items if item.status != "Pending App Owner Approval"] if user.role == "devops" else [item for item in items if item.requested_by == user.username]
     return list(reversed(visible))
 
 
@@ -47,7 +129,7 @@ def update_pipeline_request(request_id: str, payload: ReviewUpdate, user: UserCo
     items = read_requests()
     index, current = find_request(items, request_id)
     if current.get("status") not in ("Pending Approval", "Pending Action", "Partially Completed"):
-        raise HTTPException(status_code=409, detail="Only pending requests can be modified")
+        raise HTTPException(status_code=409, detail="Only requests in the DevOps queue can be modified")
     if payload.namespace not in cluster_namespaces():
         raise HTTPException(status_code=400, detail="Namespace is not allowed")
     if payload.ingress_name and payload.ingress_name not in namespace_ingresses(payload.namespace):
@@ -56,8 +138,17 @@ def update_pipeline_request(request_id: str, payload: ReviewUpdate, user: UserCo
         raise HTTPException(status_code=400, detail="Reference repository is required when pipeline setup is enabled")
     if payload.reference_repository_name.strip() and not payload.reference_branch.strip():
         raise HTTPException(status_code=400, detail="Reference repository branch must be provided when a reference repository is selected")
+
     original = current.get("original_request") or {key: current.get(key) for key in PipelineRequestCreate.model_fields}
-    updated = {**current, **payload.model_dump(exclude={"review_comments"}), "review_comments": payload.review_comments, "reviewed_by": user.username, "updated_at": now_iso(), "original_request": original}
+    updated = {
+        **current,
+        **payload.model_dump(exclude={"review_comments", "app_owner"}),
+        "app_owner": current.get("app_owner") or APP_OWNER_EMAILS.get(payload.application_type, ""),
+        "review_comments": payload.review_comments,
+        "reviewed_by": user.username,
+        "updated_at": now_iso(),
+        "original_request": original,
+    }
     updated.setdefault("timeline", []).append(timeline_event("Modified by DevOps", user.username, payload.review_comments or "Request values updated"))
     items[index] = updated
     write_requests(items)
@@ -77,7 +168,7 @@ def reject_pipeline_request(request_id: str, reason: str, user: UserContext) -> 
 def close_pipeline_request(request_id: str, comment: str, user: UserContext) -> PipelineRequest:
     items = read_requests()
     index, current = find_request(items, request_id)
-    if current.get("status") in ("Rejected", "Closed", "Provisioning"):
+    if current.get("status") in ("Rejected", "Closed", "Provisioning", "Pending App Owner Approval"):
         raise HTTPException(status_code=409, detail=f"Request cannot be closed from status {current.get('status')}")
     if not comment.strip():
         raise HTTPException(status_code=400, detail="Closure comment is mandatory")
@@ -85,7 +176,6 @@ def close_pipeline_request(request_id: str, comment: str, user: UserContext) -> 
     current.setdefault("timeline", []).append(timeline_event("Closed by DevOps", user.username, comment.strip()))
     items[index] = current
     write_requests(items)
-    logger.info("Pipeline request closed request_id=%s username=%s previous_status=%s", request_id, user.username, current.get("status"))
     return PipelineRequest(**current)
 
 
@@ -98,13 +188,15 @@ def approve_pipeline_request(request_id: str, user: UserContext, azure_devops_pa
         raise HTTPException(status_code=400, detail="Provide the reference repository branch before approval")
     if current.get("setup_pipeline") and not current.get("reference_repository_name", "").strip():
         raise HTTPException(status_code=400, detail="Pipeline setup requires a reference repository")
+    if not current.get("namespace"):
+        raise HTTPException(status_code=400, detail="Select a namespace before approval")
     if not current.get("ingress_name"):
         raise HTTPException(status_code=400, detail="Select an ingress resource before approval")
     if not azure_devops_pat.strip():
         raise HTTPException(status_code=400, detail="Azure DevOps PAT is required for provisioning")
+
     current.update({"status": "Provisioning", "reviewed_by": user.username, "updated_at": now_iso()})
-    detail = f"Reference branch: {current.get('reference_branch')}" if current.get("reference_repository_name") else "No reference repository selected"
-    current.setdefault("timeline", []).append(timeline_event("Approved", user.username, detail))
+    current.setdefault("timeline", []).append(timeline_event("Approved by DevOps", user.username, "Provisioning started"))
     final_status, steps = provision(current, azure_devops_pat)
     current.update({"provisioning": steps, "status": final_status, "updated_at": now_iso()})
     current["timeline"].append(timeline_event(final_status, "system", "Provisioning workflow finished"))
