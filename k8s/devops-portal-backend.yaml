@@ -33,6 +33,18 @@ roleRef:
   name: devops-portal-provisioner
 ---
 apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: devops-portal-data
+  namespace: automation
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: devops-portal-config
@@ -58,7 +70,6 @@ stringData:
   DEVOPS_PASSWORD: "change-me"
   DEVELOPER_USERNAME: "developer"
   DEVELOPER_PASSWORD: "change-me"
-  AZURE_DEVOPS_PAT: "replace-me"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -106,7 +117,8 @@ spec:
             periodSeconds: 20
       volumes:
         - name: request-data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: devops-portal-data
 ---
 apiVersion: v1
 kind: Service
