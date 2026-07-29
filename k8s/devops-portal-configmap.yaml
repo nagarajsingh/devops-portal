@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: devops-portal-config
+  namespace: automation
+data:
+  ALLOWED_NAMESPACES: "automation,h2h-dev,h2h-sit,mobile-orchestration-dev,mobile-orchestration-sit,collections,safenet-dev,safenet-sit"
+  AZURE_DEVOPS_ORGANIZATION: "MashreqCorpTech"
+  AZURE_DEVOPS_PROJECT: "Titan"
+  BOOTSTRAP_BRANCH: "feature/devops"
+  REQUEST_DATA_FILE: "/data/requests.json"
+  LOG_LEVEL: "INFO"
+
+  # Public portal URL used to generate the Approve and Reject buttons in email.
+  # Keep the /devops-portal path but do not add a trailing slash.
+  PORTAL_PUBLIC_URL: "https://h2h-dev.mashreqdev.com/devops-portal"
+  APPROVAL_TOKEN_HOURS: "72"
+
+  # Update this JSON mapping whenever an application owner changes.
+  APP_OWNER_EMAILS: >-
+    {"H2H":"Nagarajs@mashreq.com","Native-Mobile":"mujahid@mashreq.com","Collections":"mohanreddy1@mashreq.com","Safenet":"krishnakants@mashreq.com"}
+
+  SMTP_HOST: ""
+  SMTP_PORT: "25"
+  SMTP_USERNAME: ""
+  SMTP_STARTTLS: "false"
+  SMTP_SSL: "false"
+  SMTP_TIMEOUT_SECONDS: "30"
+  MAIL_FROM: ""
+  MASHREQ_EMAIL_BCC: ""
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: devops-portal-smtp-secret
+  namespace: automation
+type: Opaque
+stringData:
+  # Leave empty when the SMTP relay does not require authentication.
+  SMTP_PASSWORD: ""
