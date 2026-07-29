@@ -27,6 +27,7 @@ export type ApplicationType = "H2H" | "Collections" | "Native-Mobile" | "Safenet
 
 export interface PipelineRequestInput {
   application_type: ApplicationType;
+  app_owner: string;
   repository_name: string;
   reference_repository_name: string;
   reference_branch?: string;
@@ -74,6 +75,9 @@ export interface PipelineRequest extends PipelineRequestInput {
   reviewed_by?: string;
   review_comments?: string;
   closure_comment?: string;
+  app_owner_decision_by?: string;
+  app_owner_decision_at?: string;
+  app_owner_comment?: string;
   original_request?: PipelineRequestInput;
   provisioning?: Record<string, ProvisionStep>;
   timeline?: TimelineEvent[];
