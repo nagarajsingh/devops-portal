@@ -23,6 +23,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
   const [requests, setRequests] = useState<PipelineRequest[]>([]);
   const [selected, setSelected] = useState<PipelineRequest | null>(null);
   const [draft, setDraft] = useState<ReviewUpdate | null>(null);
+  const [azureDevOpsPat, setAzureDevOpsPat] = useState("");
   const [ingresses, setIngresses] = useState<string[]>([]);
   const [services, setServices] = useState<KubernetesService[]>([]);
   const [loadingIngresses, setLoadingIngresses] = useState(false);
@@ -33,15 +34,13 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
   const [notice, setNotice] = useState("");
 
   const load = async () => {
-    setLoading(true);
-    setError("");
+    setLoading(true); setError("");
     try {
       const items = await getPipelineRequests(token);
       setRequests(items);
       if (selected) setSelected(items.find((item) => item.id === selected.id) ?? null);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to load requests");
-    } finally { setLoading(false); }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load requests"); }
+    finally { setLoading(false); }
   };
 
   useEffect(() => { void load(); }, [token, refreshKey]);
@@ -50,10 +49,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
     if (role !== "devops" || !draft?.namespace) return;
     setLoadingIngresses(true);
     getIngresses(draft.namespace, token)
-      .then((items) => {
-        setIngresses(items);
-        setDraft((current) => current ? { ...current, ingress_name: current.ingress_name && items.includes(current.ingress_name) ? current.ingress_name : "" } : current);
-      })
+      .then((items) => { setIngresses(items); setDraft((current) => current ? { ...current, ingress_name: current.ingress_name && items.includes(current.ingress_name) ? current.ingress_name : "" } : current); })
       .catch((reason) => { setIngresses([]); setError(reason instanceof Error ? reason.message : "Unable to load ingresses"); })
       .finally(() => setLoadingIngresses(false));
   }, [draft?.namespace, role, token]);
@@ -66,15 +62,8 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
         setServices(items);
         setDraft((current) => {
           if (!current) return current;
-          const selectedService = items.find((item) => item.name === current.service_name);
-          if (selectedService) {
-            return {
-              ...current,
-              service_port: selectedService.ports.includes(current.service_port)
-                ? current.service_port
-                : selectedService.ports[0] ?? current.service_port,
-            };
-          }
+          const service = items.find((item) => item.name === current.service_name);
+          if (service) return { ...current, service_port: service.ports.includes(current.service_port) ? current.service_port : service.ports[0] ?? current.service_port };
           return { ...current, service_name: "" };
         });
       })
@@ -90,31 +79,15 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
   }, [selected]);
 
   const openPreview = (request: PipelineRequest) => {
-    setSelected(request); setNotice(""); setError("");
-    setDraft({
-      application_type: request.application_type,
-      repository_name: request.repository_name,
-      reference_repository_name: request.reference_repository_name,
-      reference_branch: request.reference_branch ?? "release/uat",
-      pipeline_type: request.pipeline_type,
-      ingress_path: request.ingress_path,
-      ingress_name: request.ingress_name ?? "",
-      create_service: request.create_service,
-      service_name: request.service_name,
-      service_port: request.service_port,
-      namespace: request.namespace,
-      comments: request.comments,
-      review_comments: request.review_comments,
-    });
+    setSelected(request); setNotice(""); setError(""); setAzureDevOpsPat("");
+    setDraft({ application_type: request.application_type, repository_name: request.repository_name, reference_repository_name: request.reference_repository_name, reference_branch: request.reference_branch ?? "release/uat", pipeline_type: request.pipeline_type, ingress_path: request.ingress_path, ingress_name: request.ingress_name ?? "", create_service: request.create_service, service_name: request.service_name, service_port: request.service_port, namespace: request.namespace, comments: request.comments, review_comments: request.review_comments });
   };
 
   const saveChanges = async () => {
     if (!selected || !draft) return;
     setBusy(true); setError("");
-    try {
-      const updated = await updatePipelineRequest(selected.id, draft, token);
-      setSelected(updated); setNotice("Request changes saved. The developer will see the approved values."); await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to save changes"); }
+    try { const updated = await updatePipelineRequest(selected.id, draft, token); setSelected(updated); setNotice("Request changes saved."); await load(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to save changes"); }
     finally { setBusy(false); }
   };
 
@@ -122,13 +95,15 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
     if (!selected || !draft) return;
     if (!draft.reference_branch?.trim()) { setError("Provide the reference repository branch before approval."); return; }
     if (!draft.ingress_name) { setError("Select an ingress from the requested namespace before approval."); return; }
-    if (!draft.service_name.trim()) { setError(draft.create_service ? "Provide the Kubernetes service name." : "Select an existing Kubernetes service for ingress provisioning."); return; }
+    if (!draft.service_name.trim()) { setError(draft.create_service ? "Provide the Kubernetes service name." : "Select an existing Kubernetes service."); return; }
+    if (!azureDevOpsPat.trim()) { setError("Provide your Azure DevOps PAT before approval."); return; }
     setBusy(true); setError(""); setNotice("");
     try {
       await updatePipelineRequest(selected.id, draft, token);
-      const updated = await approvePipelineRequest(selected.id, token);
-      setSelected(updated); setNotice(`Provisioning finished with status: ${updated.status}`); await load();
+      const updated = await approvePipelineRequest(selected.id, azureDevOpsPat, token);
+      setAzureDevOpsPat(""); setSelected(updated); setNotice(`Provisioning finished with status: ${updated.status}`); await load();
     } catch (reason) {
+      setAzureDevOpsPat("");
       const message = reason instanceof Error ? reason.message : "Approval failed";
       setError(message.includes("already exists") ? `${message}. Rename the repository and save before approving again.` : message);
       await load();
@@ -140,7 +115,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
     const reason = window.prompt("Provide rejection reason");
     if (!reason) return;
     setBusy(true);
-    try { const updated = await rejectPipelineRequest(selected.id, reason, token); setSelected(updated); setNotice("Request rejected and status updated for the developer."); await load(); }
+    try { const updated = await rejectPipelineRequest(selected.id, reason, token); setSelected(updated); setNotice("Request rejected."); await load(); }
     catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Unable to reject request"); }
     finally { setBusy(false); }
   };
@@ -167,6 +142,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
         {draft.create_service ? <label>Service Name<input disabled={role !== "devops"} value={draft.service_name} onChange={(e) => setDraft({ ...draft, service_name: e.target.value })} /></label> : <label>Existing Service{role === "devops" ? <select required value={draft.service_name} disabled={loadingServices} onChange={(e) => { const service = services.find((item) => item.name === e.target.value); setDraft({ ...draft, service_name: e.target.value, service_port: service?.ports[0] ?? draft.service_port }); }}><option value="">{loadingServices ? "Loading services..." : "Select existing service"}</option>{services.map((service) => <option key={service.name} value={service.name}>{service.name}</option>)}</select> : <input disabled value={draft.service_name || "Not selected"} />}</label>}
         <label>Service Port{!draft.create_service && role === "devops" && selectedService?.ports.length ? <select value={draft.service_port} onChange={(e) => setDraft({ ...draft, service_port: Number(e.target.value) })}>{selectedService.ports.map((port) => <option key={port} value={port}>{port}</option>)}</select> : <input disabled={role !== "devops"} type="number" value={draft.service_port} onChange={(e) => setDraft({ ...draft, service_port: Number(e.target.value) })} />}</label>
         <label className="checkbox-line"><input disabled={role !== "devops"} type="checkbox" checked={draft.create_service} onChange={(e) => setDraft({ ...draft, create_service: e.target.checked, service_name: e.target.checked ? draft.repository_name : "" })} />Create Kubernetes Service</label>
+        {role === "devops" && <label className="full-width">Azure DevOps PAT<input type="password" autoComplete="new-password" value={azureDevOpsPat} placeholder="PAT is used once and is never stored" onChange={(e) => setAzureDevOpsPat(e.target.value)} /><small>Required only when approving. The token is sent directly to the backend for this provisioning attempt.</small></label>}
         <label className="full-width">Developer Comments<textarea disabled rows={3} value={draft.comments ?? ""} /></label>
         <label className="full-width">DevOps Review Comments<textarea disabled={role !== "devops"} rows={3} value={draft.review_comments ?? ""} onChange={(e) => setDraft({ ...draft, review_comments: e.target.value })} /></label>
       </div>
