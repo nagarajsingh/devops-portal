@@ -8,35 +8,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from .auth import authenticate, current_user, require_devops
 from .kubernetes_ops import cluster_namespaces, namespace_ingresses, namespace_services
 from .logging_config import get_logger
-from .models import (
-    LoginRequest,
-    LoginResponse,
-    PipelineRequest,
-    PipelineRequestCreate,
-    RejectRequest,
-    ReviewUpdate,
-    ServiceOption,
-    UserContext,
-)
-from .request_service import (
-    approve_pipeline_request,
-    create_pipeline_request,
-    get_pipeline_request,
-    list_pipeline_requests,
-    reject_pipeline_request,
-    update_pipeline_request,
-)
+from .models import ApproveRequest, LoginRequest, LoginResponse, PipelineRequest, PipelineRequestCreate, RejectRequest, ReviewUpdate, ServiceOption, UserContext
+from .request_service import approve_pipeline_request, create_pipeline_request, get_pipeline_request, list_pipeline_requests, reject_pipeline_request, update_pipeline_request
 
 logger = get_logger("api")
-
-app = FastAPI(title="DevOps Portal API", version="3.1.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = FastAPI(title="DevOps Portal API", version="3.2.0")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
 @app.on_event("startup")
@@ -50,23 +27,9 @@ async def log_http_requests(request: Request, call_next):
     try:
         response = await call_next(request)
     except Exception:
-        elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
-        logger.exception(
-            "HTTP request failed method=%s path=%s duration_ms=%s",
-            request.method,
-            request.url.path,
-            elapsed_ms,
-        )
+        logger.exception("HTTP request failed method=%s path=%s duration_ms=%s", request.method, request.url.path, round((time.perf_counter() - started) * 1000, 2))
         raise
-
-    elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
-    logger.info(
-        "HTTP request method=%s path=%s status=%s duration_ms=%s",
-        request.method,
-        request.url.path,
-        response.status_code,
-        elapsed_ms,
-    )
+    logger.info("HTTP request method=%s path=%s status=%s duration_ms=%s", request.method, request.url.path, response.status_code, round((time.perf_counter() - started) * 1000, 2))
     return response
 
 
@@ -121,5 +84,5 @@ def reject_request(request_id: str, payload: RejectRequest, user: UserContext = 
 
 
 @app.post("/requests/{request_id}/approve", response_model=PipelineRequest)
-def approve_request(request_id: str, user: UserContext = Depends(require_devops)) -> PipelineRequest:
-    return approve_pipeline_request(request_id, user)
+def approve_request(request_id: str, payload: ApproveRequest, user: UserContext = Depends(require_devops)) -> PipelineRequest:
+    return approve_pipeline_request(request_id, user, payload.azure_devops_pat.get_secret_value())
