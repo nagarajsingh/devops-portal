@@ -22,10 +22,7 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 }
 
 export function login(username: string, password: string, role: Role): Promise<AuthSession> {
-  return request<AuthSession>("/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ username, password, role }),
-  });
+  return request<AuthSession>("/auth/login", { method: "POST", body: JSON.stringify({ username, password, role }) });
 }
 
 export function getNamespaces(token: string): Promise<string[]> {
@@ -41,10 +38,7 @@ export function getServices(namespace: string, token: string): Promise<Kubernete
 }
 
 export function createPipelineRequest(payload: PipelineRequestInput, token: string): Promise<PipelineRequest> {
-  return request<PipelineRequest>("/requests", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  }, token);
+  return request<PipelineRequest>("/requests", { method: "POST", body: JSON.stringify(payload) }, token);
 }
 
 export function getPipelineRequests(token: string): Promise<PipelineRequest[]> {
@@ -52,19 +46,16 @@ export function getPipelineRequests(token: string): Promise<PipelineRequest[]> {
 }
 
 export function updatePipelineRequest(id: string, payload: ReviewUpdate, token: string): Promise<PipelineRequest> {
-  return request<PipelineRequest>(`/requests/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(payload),
-  }, token);
+  return request<PipelineRequest>(`/requests/${id}`, { method: "PUT", body: JSON.stringify(payload) }, token);
 }
 
-export function approvePipelineRequest(id: string, token: string): Promise<PipelineRequest> {
-  return request<PipelineRequest>(`/requests/${id}/approve`, { method: "POST" }, token);
+export function approvePipelineRequest(id: string, azureDevOpsPat: string, token: string): Promise<PipelineRequest> {
+  return request<PipelineRequest>(`/requests/${id}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ azure_devops_pat: azureDevOpsPat }),
+  }, token);
 }
 
 export function rejectPipelineRequest(id: string, reason: string, token: string): Promise<PipelineRequest> {
-  return request<PipelineRequest>(`/requests/${id}/reject`, {
-    method: "POST",
-    body: JSON.stringify({ reason }),
-  }, token);
+  return request<PipelineRequest>(`/requests/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) }, token);
 }
