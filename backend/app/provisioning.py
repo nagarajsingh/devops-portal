@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .azure_devops import bootstrap_repository, create_repository, get_repository
-from .config import BOOTSTRAP_BRANCH
+from .azure_devops import bootstrap_repository, create_build_pipeline, create_repository, get_repository
 from .kubernetes_ops import ensure_ingress_path, ensure_service
 from .logging_config import get_logger
 
@@ -32,19 +31,35 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
         logger.exception("Repository provisioning failed request_id=%s repository=%s", request_id, item.get("repository_name"))
         steps["repository"] = {"status": "Failed", "message": str(exc)}
 
-    if target_repo:
+    bootstrap_result: dict[str, Any] | None = None
+    reference_repo = (item.get("reference_repository_name") or "").strip()
+    if target_repo and reference_repo:
         try:
-            bootstrap_result = bootstrap_repository(target_repo, item.get("reference_repository_name", ""), item.get("reference_branch", ""), item.get("application_type", "H2H"), azure_devops_pat)
+            bootstrap_result = bootstrap_repository(target_repo, reference_repo, item.get("reference_branch", ""), item.get("application_type", "H2H"), azure_devops_pat)
             steps["repository_bootstrap"] = bootstrap_result
-            pipeline_file = next((path.lstrip("/") for path in bootstrap_result.get("files", []) if path in ("/azure-pipelines.yml", "/azure-pipelines.yaml")), "azure-pipelines.yml or azure-pipelines.yaml")
-            steps["pipeline"] = {"status": "Completed", "message": f"{pipeline_file} committed to {BOOTSTRAP_BRANCH}"}
         except Exception as exc:
             logger.exception("Repository bootstrap failed request_id=%s repository=%s", request_id, item.get("repository_name"))
             steps["repository_bootstrap"] = {"status": "Failed", "message": str(exc)}
-            steps["pipeline"] = {"status": "Failed", "message": "Pipeline file could not be bootstrapped"}
+    elif target_repo:
+        steps["repository_bootstrap"] = {"status": "Skipped", "message": "No reference repository was selected"}
     else:
         steps["repository_bootstrap"] = {"status": "Pending", "message": "Waiting for repository creation"}
-        steps["pipeline"] = {"status": "Pending", "message": "Waiting for repository bootstrap"}
+
+    if item.get("setup_pipeline"):
+        try:
+            if not target_repo:
+                raise RuntimeError("Repository must be created before pipeline setup")
+            if not bootstrap_result:
+                raise RuntimeError("Pipeline setup requires a reference repository containing azure-pipelines.yml or azure-pipelines.yaml")
+            yaml_path = next((path for path in bootstrap_result.get("files", []) if path in ("/azure-pipelines.yml", "/azure-pipelines.yaml")), None)
+            if not yaml_path:
+                raise RuntimeError("Pipeline YAML file was not found in the bootstrapped repository")
+            steps["pipeline"] = create_build_pipeline(target_repo, yaml_path, azure_devops_pat)
+        except Exception as exc:
+            logger.exception("Pipeline creation failed request_id=%s repository=%s", request_id, item.get("repository_name"))
+            steps["pipeline"] = {"status": "Failed", "message": str(exc)}
+    else:
+        steps["pipeline"] = {"status": "Skipped", "message": "Pipeline setup was disabled by DevOps"}
 
     try:
         steps["service"] = {"status": ensure_service(item)}
