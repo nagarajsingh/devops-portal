@@ -50,13 +50,24 @@ metadata:
   name: devops-portal-config
   namespace: automation
 data:
-  ALLOWED_NAMESPACES: "automation,h2h-dev,h2h-sit,mobile-orchestration-dev,mobile-orchestration-sit"
-  AZURE_DEVOPS_ORGANIZATION: "update-me"
-  AZURE_DEVOPS_PROJECT: "update-me"
+  ALLOWED_NAMESPACES: "automation,h2h-dev,h2h-sit,mobile-orchestration-dev,mobile-orchestration-sit,collections,safenet-dev,safenet-sit"
+  AZURE_DEVOPS_ORGANIZATION: "MashreqCorpTech"
+  AZURE_DEVOPS_PROJECT: "Titan"
   BOOTSTRAP_BRANCH: "feature/devops"
-  DEFAULT_IMAGE_PULL_SECRET: "docker-secret"
   REQUEST_DATA_FILE: "/data/requests.json"
   LOG_LEVEL: "INFO"
+  PORTAL_PUBLIC_URL: "https://h2h-dev.mashreqdev.com/devops-portal"
+  APPROVAL_TOKEN_HOURS: "72"
+  APP_OWNER_EMAILS: >-
+    {"H2H":"Nagarajs@mashreq.com","Native-Mobile":"mujahid@mashreq.com","Collections":"mohanreddy1@mashreq.com","Safenet":"krishnakants@mashreq.com"}
+  SMTP_HOST: ""
+  SMTP_PORT: "25"
+  SMTP_USERNAME: ""
+  SMTP_STARTTLS: "false"
+  SMTP_SSL: "false"
+  SMTP_TIMEOUT_SECONDS: "30"
+  MAIL_FROM: ""
+  MASHREQ_EMAIL_BCC: ""
 ---
 apiVersion: v1
 kind: Secret
@@ -70,6 +81,7 @@ stringData:
   DEVOPS_PASSWORD: "change-me"
   DEVELOPER_USERNAME: "developer"
   DEVELOPER_PASSWORD: "change-me"
+  SMTP_PASSWORD: ""
 ---
 apiVersion: apps/v1
 kind: Deployment
