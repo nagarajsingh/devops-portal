@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 Role = Literal["developer", "devops"]
 ApplicationType = Literal["H2H", "Collections", "Native-Mobile", "Safenet"]
@@ -40,6 +40,10 @@ class ReviewUpdate(PipelineRequestCreate):
     review_comments: str | None = None
 
 
+class ApproveRequest(BaseModel):
+    azure_devops_pat: SecretStr = Field(min_length=10)
+
+
 class RejectRequest(BaseModel):
     reason: str = Field(min_length=2, max_length=1000)
 
@@ -53,8 +57,8 @@ class PipelineRequest(PipelineRequestCreate):
     reviewed_by: str | None = None
     review_comments: str | None = None
     original_request: dict[str, Any] | None = None
-    provisioning: dict[str, Any] = {}
-    timeline: list[dict[str, str]] = []
+    provisioning: dict[str, Any] = Field(default_factory=dict)
+    timeline: list[dict[str, str]] = Field(default_factory=list)
 
 
 class UserContext(BaseModel):
