@@ -59,3 +59,7 @@ export function approvePipelineRequest(id: string, azureDevOpsPat: string, token
 export function rejectPipelineRequest(id: string, reason: string, token: string): Promise<PipelineRequest> {
   return request<PipelineRequest>(`/requests/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) }, token);
 }
+
+export function closePipelineRequest(id: string, comment: string, token: string): Promise<PipelineRequest> {
+  return request<PipelineRequest>(`/requests/${id}/close`, { method: "POST", body: JSON.stringify({ comment }) }, token);
+}
