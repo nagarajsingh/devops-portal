@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
 
 from .config import DATA_FILE
+from .logging_config import get_logger
+
+logger = get_logger("storage")
+_storage_lock = threading.RLock()
 
 
 def now_iso() -> str:
@@ -22,23 +28,40 @@ def normalize_stored_request(item: dict[str, Any]) -> dict[str, Any]:
     item.setdefault("reference_repository_name", "")
     item.setdefault("reference_branch", "")
     item.setdefault("ingress_name", None)
+    item.setdefault("provisioning", {})
+    item.setdefault("timeline", [])
     item.pop("application_name", None)
+    item.pop("azure_devops_pat", None)
     return item
 
 
 def read_requests() -> list[dict[str, Any]]:
-    if not DATA_FILE.exists():
-        return []
-    try:
-        items = json.loads(DATA_FILE.read_text(encoding="utf-8"))
-        return [normalize_stored_request(item) for item in items]
-    except (json.JSONDecodeError, OSError):
-        return []
+    with _storage_lock:
+        if not DATA_FILE.exists():
+            return []
+        try:
+            items = json.loads(DATA_FILE.read_text(encoding="utf-8"))
+            return [normalize_stored_request(item) for item in items]
+        except (json.JSONDecodeError, OSError):
+            logger.exception("Unable to read request storage file=%s", DATA_FILE)
+            return []
 
 
 def write_requests(items: list[dict[str, Any]]) -> None:
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    DATA_FILE.write_text(json.dumps(items, indent=2), encoding="utf-8")
+    with _storage_lock:
+        DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temporary = DATA_FILE.with_suffix(f"{DATA_FILE.suffix}.tmp")
+        payload = json.dumps(items, indent=2)
+        try:
+            temporary.write_text(payload, encoding="utf-8")
+            os.replace(temporary, DATA_FILE)
+        except OSError:
+            logger.exception("Unable to write request storage file=%s", DATA_FILE)
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
 
 
 def find_request(items: list[dict[str, Any]], request_id: str) -> tuple[int, dict[str, Any]]:
