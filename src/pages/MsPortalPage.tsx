@@ -24,6 +24,7 @@ const initial: PipelineRequestInput = {
   service_name: "",
   service_port: 8080,
   namespace: "",
+  target_cluster: "local-cluster",
   comments: "",
 };
 
