@@ -49,8 +49,18 @@ export default function MsPortalPage({ token, onCreated }: Props) {
   }
 
   function setRepositoryName(value: string) {
-    const normalized = value.toLowerCase().trim().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
-    setForm((current) => ({ ...current, repository_name: normalized, ingress_path: `/api/${normalized}`, service_name: normalized }));
+    const normalized = value
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^[-_]+|[-_]+$/g, "");
+    const serviceName = normalized.replace(/_/g, "-");
+    setForm((current) => ({
+      ...current,
+      repository_name: normalized,
+      ingress_path: `/api/${normalized}`,
+      service_name: serviceName,
+    }));
   }
 
   function setLanguage(value: string) {
@@ -79,7 +89,7 @@ export default function MsPortalPage({ token, onCreated }: Props) {
     <form className="form-card two-column" onSubmit={submit}>
       <label>Application<select value={form.application_type} onChange={(e) => setApplicationType(e.target.value as ApplicationType)}><option value="H2H">H2H</option><option value="Collections">Collections</option><option value="Native-Mobile">Native-Mobile</option><option value="Safenet">Safenet</option></select></label>
       <label>Application Owner<input disabled value={form.app_owner} /></label>
-      <label>Repository Name<input required value={form.repository_name} onChange={(e) => setRepositoryName(e.target.value)} placeholder="payment-api" /></label>
+      <label>Repository Name<input required value={form.repository_name} onChange={(e) => setRepositoryName(e.target.value)} placeholder="payment_api-service" /><small>Lowercase letters, numbers, underscores and hyphens are supported.</small></label>
       <label>Reference Repository Name <small>(Optional)</small><input value={form.reference_repository_name} onChange={(e) => setForm({ ...form, reference_repository_name: e.target.value.trim() })} placeholder="h2h-reference-service" /></label>
       <label>Type of Language<select required value={form.pipeline_type} onChange={(e) => setLanguage(e.target.value)}><option value="">Select language</option><option value="java-maven">Java / Maven</option><option value="node">Node.js</option><option value="python">Python</option><option value="container">Container only</option></select></label>
       <label>Service Port<input type="number" min="1" max="65535" value={form.service_port} onChange={(e) => setForm({ ...form, service_port: Number(e.target.value) })} /><small>Automatically selected from the language and can be changed.</small></label>
