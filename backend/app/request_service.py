@@ -1,19 +1,31 @@
 from __future__ import annotations
 
+import hmac
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import HTTPException
 
-from .config import APP_OWNER_EMAILS, LANGUAGE_PORTS
+from .config import APP_OWNER_EMAILS, LANGUAGE_PORTS, POWER_AUTOMATE_CALLBACK_TOKEN
 from .email_service import decode_approval_token, send_app_owner_approval_email
 from .kubernetes_ops import cluster_namespaces, namespace_ingresses
 from .logging_config import get_logger
-from .models import PipelineRequest, PipelineRequestCreate, ReviewUpdate, UserContext
+from .models import PipelineRequest, PipelineRequestCreate, PowerAutomateApprovalCallback, ReviewUpdate, UserContext
+from .power_automate_service import send_power_automate_approval
 from .provisioning import provision
 from .storage import find_request, now_iso, read_requests, timeline_event, write_requests
 
 logger = get_logger("requests")
+
+
+def _record_notification_event(request_id: str, action: str, detail: str) -> PipelineRequest:
+    items = read_requests()
+    index, current = find_request(items, request_id)
+    current.setdefault("timeline", []).append(timeline_event(action, "system", detail))
+    current["updated_at"] = now_iso()
+    items[index] = current
+    write_requests(items)
+    return PipelineRequest(**current)
 
 
 def create_pipeline_request(payload: PipelineRequestCreate, user: UserContext) -> PipelineRequest:
@@ -29,7 +41,7 @@ def create_pipeline_request(payload: PipelineRequestCreate, user: UserContext) -
         "namespace": "",
         "setup_pipeline": False,
         "create_service": False,
-        "service_name": payload.repository_name,
+        "service_name": payload.repository_name.replace("_", "-"),
         "service_port": default_port,
     })
 
@@ -51,23 +63,69 @@ def create_pipeline_request(payload: PipelineRequestCreate, user: UserContext) -
 
     try:
         send_app_owner_approval_email(item.model_dump())
-        items = read_requests()
-        index, current = find_request(items, request_id)
-        current.setdefault("timeline", []).append(timeline_event("Approval Email Sent", "system", app_owner))
-        items[index] = current
-        write_requests(items)
-        item = PipelineRequest(**current)
+        item = _record_notification_event(request_id, "Approval Email Sent", app_owner)
     except Exception as exc:
         logger.exception("Unable to send app owner email request_id=%s app_owner=%s", request_id, app_owner)
-        items = read_requests()
-        index, current = find_request(items, request_id)
-        current.setdefault("timeline", []).append(timeline_event("Approval Email Failed", "system", str(exc)))
-        items[index] = current
-        write_requests(items)
-        item = PipelineRequest(**current)
+        item = _record_notification_event(request_id, "Approval Email Failed", str(exc))
+
+    try:
+        if send_power_automate_approval(item.model_dump()):
+            item = _record_notification_event(request_id, "Teams Approval Sent", f"Power Automate approval sent to {app_owner}")
+    except Exception as exc:
+        logger.exception("Unable to send Power Automate approval request_id=%s app_owner=%s", request_id, app_owner)
+        item = _record_notification_event(request_id, "Teams Approval Failed", str(exc))
 
     logger.info("Pipeline request submitted request_id=%s username=%s repository=%s app_owner=%s", item.id, user.username, item.repository_name, app_owner)
     return item
+
+
+def _apply_app_owner_decision(
+    request_id: str,
+    decision: str,
+    app_owner: str,
+    comment: str | None = None,
+    source: str = "approval link",
+) -> tuple[str, str]:
+    normalized_decision = decision.strip().lower()
+    if normalized_decision not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="Invalid approval decision")
+
+    items = read_requests()
+    index, current = find_request(items, request_id)
+    if current.get("status") != "Pending App Owner Approval":
+        return current.get("status", "Unknown"), f"Request {request_id} has already been processed."
+    if current.get("app_owner", "").lower() != app_owner.strip().lower():
+        raise HTTPException(status_code=403, detail="The approver does not match the configured application owner")
+
+    decided_at = now_iso()
+    clean_comment = (comment or "").strip()
+    if normalized_decision == "approve":
+        status = "Pending Approval"
+        detail = "Approved by app owner and moved to the DevOps provisioning queue"
+        action = "Approved by App Owner"
+    else:
+        status = "Rejected"
+        detail = clean_comment or "Rejected by app owner"
+        action = "Rejected by App Owner"
+
+    current.update({
+        "status": status,
+        "app_owner_decision_by": app_owner,
+        "app_owner_decision_at": decided_at,
+        "app_owner_comment": clean_comment or None,
+        "updated_at": decided_at,
+    })
+    current.setdefault("timeline", []).append(timeline_event(action, app_owner, f"{detail} via {source}"))
+    items[index] = current
+    write_requests(items)
+    logger.info(
+        "App owner decision recorded request_id=%s decision=%s app_owner=%s source=%s",
+        request_id,
+        normalized_decision,
+        app_owner,
+        source,
+    )
+    return status, detail
 
 
 def process_app_owner_action(token: str) -> tuple[str, str]:
@@ -76,40 +134,30 @@ def process_app_owner_action(token: str) -> tuple[str, str]:
     except Exception as exc:
         raise HTTPException(status_code=400, detail="The approval link is invalid or has expired") from exc
 
-    request_id = payload.get("request_id", "")
-    decision = payload.get("decision", "")
-    app_owner = payload.get("sub", "")
-    if decision not in ("approve", "reject"):
-        raise HTTPException(status_code=400, detail="Invalid approval decision")
+    return _apply_app_owner_decision(
+        request_id=payload.get("request_id", ""),
+        decision=payload.get("decision", ""),
+        app_owner=payload.get("sub", ""),
+        source="email approval link",
+    )
 
-    items = read_requests()
-    index, current = find_request(items, request_id)
-    if current.get("status") != "Pending App Owner Approval":
-        return current.get("status", "Unknown"), f"Request {request_id} has already been processed."
-    if current.get("app_owner", "").lower() != app_owner.lower():
-        raise HTTPException(status_code=403, detail="This approval link does not match the configured app owner")
 
-    decided_at = now_iso()
-    if decision == "approve":
-        status = "Pending Approval"
-        detail = "Approved by app owner and moved to the DevOps provisioning queue"
-        action = "Approved by App Owner"
-    else:
-        status = "Rejected"
-        detail = "Rejected by app owner"
-        action = "Rejected by App Owner"
+def process_power_automate_callback(payload: PowerAutomateApprovalCallback) -> tuple[str, str]:
+    if not POWER_AUTOMATE_CALLBACK_TOKEN:
+        raise HTTPException(status_code=503, detail="Power Automate callback is not configured")
 
-    current.update({
-        "status": status,
-        "app_owner_decision_by": app_owner,
-        "app_owner_decision_at": decided_at,
-        "updated_at": decided_at,
-    })
-    current.setdefault("timeline", []).append(timeline_event(action, app_owner, detail))
-    items[index] = current
-    write_requests(items)
-    logger.info("App owner decision recorded request_id=%s decision=%s app_owner=%s", request_id, decision, app_owner)
-    return status, detail
+    supplied_token = payload.callback_token.get_secret_value()
+    if not hmac.compare_digest(supplied_token, POWER_AUTOMATE_CALLBACK_TOKEN):
+        logger.warning("Rejected Power Automate callback with invalid token request_id=%s", payload.request_id)
+        raise HTTPException(status_code=401, detail="Invalid callback token")
+
+    return _apply_app_owner_decision(
+        request_id=payload.request_id,
+        decision=payload.decision,
+        app_owner=payload.approver,
+        comment=payload.comment,
+        source="Microsoft Teams approval",
+    )
 
 
 def list_pipeline_requests(user: UserContext) -> list[PipelineRequest]:
