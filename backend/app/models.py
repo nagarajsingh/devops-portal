@@ -39,6 +39,7 @@ class PipelineRequestCreate(BaseModel):
     service_name: str = ""
     service_port: int = Field(default=8080, ge=1, le=65535)
     namespace: str = ""
+    target_cluster: str = "local-cluster"
     comments: str | None = None
 
 
@@ -83,3 +84,8 @@ class UserContext(BaseModel):
 class ServiceOption(BaseModel):
     name: str
     ports: list[int]
+
+
+class KubernetesTargetOption(BaseModel):
+    name: str
+    mode: Literal["direct", "azure_pipeline"]
