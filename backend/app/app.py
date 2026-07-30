@@ -11,11 +11,11 @@ from .auth import authenticate, current_user, require_devops
 from .config import APP_OWNER_EMAILS
 from .kubernetes_ops import cluster_namespaces, namespace_ingresses, namespace_services
 from .logging_config import get_logger
-from .models import ApproveRequest, CloseRequest, LoginRequest, LoginResponse, PipelineRequest, PipelineRequestCreate, PowerAutomateApprovalCallback, RejectRequest, ReviewUpdate, ServiceOption, UserContext
-from .request_service import approve_pipeline_request, close_pipeline_request, create_pipeline_request, get_pipeline_request, list_pipeline_requests, process_app_owner_action, process_power_automate_callback, reject_pipeline_request, update_pipeline_request
+from .models import ApproveRequest, CloseRequest, LoginRequest, LoginResponse, PipelineRequest, PipelineRequestCreate, RejectRequest, ReviewUpdate, ServiceOption, UserContext
+from .request_service import approve_pipeline_request, close_pipeline_request, create_pipeline_request, get_pipeline_request, list_pipeline_requests, process_app_owner_action, reject_pipeline_request, update_pipeline_request
 
 logger = get_logger("api")
-app = FastAPI(title="DevOps Portal API", version="3.5.0")
+app = FastAPI(title="DevOps Portal API", version="3.4.2")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -58,13 +58,6 @@ def app_owner_action(token: str) -> HTMLResponse:
     </body></html>
     """
     return HTMLResponse(page)
-
-
-@app.post("/app-owner/power-automate-callback", response_model=dict[str, str])
-def power_automate_callback(payload: PowerAutomateApprovalCallback) -> dict[str, str]:
-    """Receive an authenticated approval result from Power Automate."""
-    status, detail = process_power_automate_callback(payload)
-    return {"status": status, "detail": detail}
 
 
 @app.post("/auth/login", response_model=LoginResponse)
