@@ -30,7 +30,9 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
   const [services, setServices] = useState<KubernetesService[]>([]);
   const [azureDevOpsPat, setAzureDevOpsPat] = useState("");
   const [closureComment, setClosureComment] = useState("");
+  const [rejectionComment, setRejectionComment] = useState("");
   const [showClosureForm, setShowClosureForm] = useState(false);
+  const [showRejectionForm, setShowRejectionForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [loadingIngresses, setLoadingIngresses] = useState(false);
@@ -103,7 +105,8 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
   }, [selected]);
 
   const openPreview = (request: PipelineRequest) => {
-    setOperationStatus("Opening request preview..."); setPreviewLoading(true); setSelected(request); setNotice(""); setError(""); setAzureDevOpsPat(""); setClosureComment(""); setShowClosureForm(false);
+    setOperationStatus("Opening request preview..."); setPreviewLoading(true); setSelected(request); setNotice(""); setError(""); setAzureDevOpsPat("");
+    setClosureComment(""); setRejectionComment(""); setShowClosureForm(false); setShowRejectionForm(false);
     setDraft({
       application_type: request.application_type,
       app_owner: request.app_owner,
@@ -115,7 +118,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
       ingress_path: request.ingress_path,
       ingress_name: request.ingress_name ?? "",
       create_service: request.create_service,
-      service_name: request.service_name || request.repository_name,
+      service_name: request.service_name || request.repository_name.replace(/_/g, "-"),
       service_port: request.service_port,
       namespace: request.namespace,
       comments: request.comments,
@@ -155,11 +158,13 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
 
   const reject = async () => {
     if (!selected) return;
-    const reason = window.prompt("Provide rejection reason");
-    if (!reason?.trim()) return;
-    setBusy(true); setOperationStatus("Rejecting request...");
-    try { const updated = await rejectPipelineRequest(selected.id, reason.trim(), token); setSelected(updated); setNotice("Request rejected."); await load(); }
-    catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Unable to reject request"); }
+    const reason = rejectionComment.trim();
+    if (!reason) return setError("Rejection comment is mandatory.");
+    setBusy(true); setOperationStatus("Rejecting request..."); setError("");
+    try {
+      const updated = await rejectPipelineRequest(selected.id, reason, token);
+      setSelected(updated); setShowRejectionForm(false); setRejectionComment(""); setNotice("Request rejected with the provided comment."); await load();
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Unable to reject request"); }
     finally { setBusy(false); setOperationStatus(""); }
   };
 
@@ -183,18 +188,18 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
       <div className="form-card two-column review-form">
         <label>Application<input disabled value={draft.application_type}/></label>
         <label>Application Owner<input disabled value={draft.app_owner}/></label>
-        <label>Repository Name<input disabled={role !== "devops"} value={draft.repository_name} onChange={(e) => setDraft({...draft, repository_name:e.target.value})}/></label>
+        <label>Repository Name<input disabled={role !== "devops"} value={draft.repository_name} onChange={(e) => setDraft({...draft, repository_name:e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "")})}/></label>
         <label>Type of Language<input disabled value={draft.pipeline_type ?? "Not selected"}/></label>
         <label>Reference Repository (Optional)<input disabled={role !== "devops"} value={draft.reference_repository_name} onChange={(e) => setDraft({...draft, reference_repository_name:e.target.value})}/></label>
         <label>Ingress Path<input disabled={role !== "devops"} value={draft.ingress_path} onChange={(e) => setDraft({...draft, ingress_path:e.target.value})}/></label>
         <label>Service Port<input disabled={role !== "devops"} type="number" value={draft.service_port} onChange={(e) => setDraft({...draft, service_port:Number(e.target.value)})}/></label>
         {role === "devops" && <>
-          <label>Namespace<select value={draft.namespace} onChange={(e) => setDraft({...draft, namespace:e.target.value, ingress_name:"", service_name:draft.create_service?draft.repository_name:""})}><option value="">Select namespace</option>{namespaces.map((name)=><option key={name} value={name}>{name}</option>)}</select></label>
+          <label>Namespace<select value={draft.namespace} onChange={(e) => setDraft({...draft, namespace:e.target.value, ingress_name:"", service_name:draft.create_service?draft.repository_name.replace(/_/g,"-"):""})}><option value="">Select namespace</option>{namespaces.map((name)=><option key={name} value={name}>{name}</option>)}</select></label>
           <label>Pipeline Setup<select value={String(draft.setup_pipeline)} onChange={(e) => setDraft({...draft, setup_pipeline:e.target.value==="true"})}><option value="true">Yes</option><option value="false">No</option></select></label>
           <label>Reference Branch<input disabled={!draft.reference_repository_name.trim()} value={draft.reference_branch ?? ""} placeholder="release/uat" onChange={(e) => setDraft({...draft, reference_branch:e.target.value.trim()})}/></label>
           <label>Ingress Resource<select value={draft.ingress_name ?? ""} disabled={!draft.namespace || loadingIngresses} onChange={(e) => setDraft({...draft, ingress_name:e.target.value})}><option value="">{loadingIngresses?"Loading ingresses...":"Select ingress"}</option>{ingresses.map((name)=><option key={name} value={name}>{name}</option>)}</select></label>
-          <label className="checkbox-line"><input type="checkbox" checked={draft.create_service} onChange={(e) => setDraft({...draft, create_service:e.target.checked, service_name:e.target.checked?draft.repository_name:""})}/>Create Kubernetes Service</label>
-          {draft.create_service ? <label>Service Name<input value={draft.service_name} onChange={(e) => setDraft({...draft, service_name:e.target.value})}/></label> : <label>Existing Service<select value={draft.service_name} disabled={!draft.namespace || loadingServices} onChange={(e)=>{const service=services.find((item)=>item.name===e.target.value);setDraft({...draft,service_name:e.target.value,service_port:service?.ports[0]??draft.service_port});}}><option value="">{loadingServices?"Loading services...":"Select existing service"}</option>{services.map((service)=><option key={service.name} value={service.name}>{service.name}</option>)}</select></label>}
+          <label className="checkbox-line"><input type="checkbox" checked={draft.create_service} onChange={(e) => setDraft({...draft, create_service:e.target.checked, service_name:e.target.checked?draft.repository_name.replace(/_/g,"-"):""})}/>Create Kubernetes Service</label>
+          {draft.create_service ? <label>Service Name<input value={draft.service_name} onChange={(e) => setDraft({...draft, service_name:e.target.value.replace(/_/g,"-")})}/></label> : <label>Existing Service<select value={draft.service_name} disabled={!draft.namespace || loadingServices} onChange={(e)=>{const service=services.find((item)=>item.name===e.target.value);setDraft({...draft,service_name:e.target.value,service_port:service?.ports[0]??draft.service_port});}}><option value="">{loadingServices?"Loading services...":"Select existing service"}</option>{services.map((service)=><option key={service.name} value={service.name}>{service.name}</option>)}</select></label>}
           {!draft.create_service && selectedService?.ports.length ? <label>Existing Service Port<select value={draft.service_port} onChange={(e)=>setDraft({...draft,service_port:Number(e.target.value)})}>{selectedService.ports.map((port)=><option key={port}>{port}</option>)}</select></label> : null}
           {editableStatuses.includes(selected.status) && <label className="full-width">Azure DevOps PAT<input type="password" autoComplete="new-password" value={azureDevOpsPat} placeholder="PAT is used once and never stored" onChange={(e)=>setAzureDevOpsPat(e.target.value)}/></label>}
         </>}
@@ -202,12 +207,13 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
         {role === "devops" && <label className="full-width">DevOps Review Comments<textarea disabled={!editableStatuses.includes(selected.status)} rows={3} value={draft.review_comments ?? ""} onChange={(e)=>setDraft({...draft,review_comments:e.target.value})}/></label>}
       </div>
 
+      {showRejectionForm && role === "devops" && editableStatuses.includes(selected.status) && <div className="ticket-closure-form rejection-form"><div><span className="eyebrow">REJECTION REVIEW</span><h3>Reject this request</h3><p>The mandatory rejection comment will be recorded in the timeline and visible to the developer.</p></div><label>Mandatory rejection comment<textarea autoFocus rows={4} maxLength={1000} value={rejectionComment} placeholder="Explain why this request is being rejected." onChange={(e)=>setRejectionComment(e.target.value)}/><small>{rejectionComment.trim().length}/1000 characters</small></label><div className="ticket-closure-actions"><button className="secondary-button" onClick={()=>{setShowRejectionForm(false);setRejectionComment("");setError("");}}>Cancel</button><button className="danger-button" disabled={!rejectionComment.trim()||busy} onClick={reject}>Confirm & Reject Request</button></div></div>}
       {showClosureForm && role === "devops" && <div className="ticket-closure-form"><div><span className="eyebrow">FINAL REVIEW</span><h3>Close this ticket</h3><p>The comment and resource URLs will be visible to the developer.</p></div><label>Mandatory closure comment<textarea autoFocus rows={4} maxLength={1000} value={closureComment} onChange={(e)=>setClosureComment(e.target.value)}/><small>{closureComment.trim().length}/1000 characters</small></label><div className="ticket-closure-actions"><button className="secondary-button" onClick={()=>{setShowClosureForm(false);setClosureComment("");}}>Cancel</button><button className="primary-button" disabled={!closureComment.trim()||busy} onClick={closeTicket}>Confirm & Close Ticket</button></div></div>}
       {selected.status === "Closed" && <div className="closure-summary"><h3>Provisioning Completed and Ticket Closed</h3><p><strong>DevOps closure comment:</strong> {selected.closure_comment}</p><div className="resource-links"><div><span>Repository</span>{repositoryUrl?<a href={repositoryUrl} target="_blank" rel="noreferrer">Open repository</a>:<strong>Not created or unavailable</strong>}</div><div><span>Build Pipeline</span>{pipelineUrl?<a href={pipelineUrl} target="_blank" rel="noreferrer">Open pipeline</a>:<strong>Not created or skipped</strong>}</div></div></div>}
       {originalChanges.length>0&&<div className="change-summary"><h3>Changes made by DevOps</h3>{originalChanges.map((change)=><div key={change.key}><strong>{change.key.replace(/_/g," ")}</strong><span>{change.requested}</span><span>→</span><span>{change.approved}</span></div>)}</div>}
       {selected.provisioning&&Object.keys(selected.provisioning).length>0&&<div className="provision-grid"><h3>Provisioning Status</h3>{Object.entries(selected.provisioning).map(([name,step])=><div className="provision-step" key={name}><strong>{name}</strong><span className={`status ${statusClass(step.status)}`}>{step.status}</span><small>{step.message}</small>{step.url&&<a href={step.url} target="_blank" rel="noreferrer">Open resource</a>}</div>)}</div>}
       {selected.timeline&&selected.timeline.length>0&&<div className="timeline"><h3>Timeline</h3>{selected.timeline.map((event,index)=><div key={`${event.at}-${index}`}><strong>{event.action}</strong><span>{event.actor} · {new Date(event.at).toLocaleString()}</span><small>{event.detail}</small></div>)}</div>}
-      {role==="devops"&&closableStatuses.includes(selected.status)&&!showClosureForm&&<div className="modal-actions">{editableStatuses.includes(selected.status)&&<><button disabled={busy} className="secondary-button" onClick={saveChanges}>Save Changes</button><button disabled={busy} className="danger-button" onClick={reject}>Reject</button><button disabled={busy} className="primary-button" onClick={approve}>Approve & Provision</button></>}<button disabled={busy} className="secondary-button close-ticket-button" onClick={()=>{setError("");setNotice("");setClosureComment("");setShowClosureForm(true);}}>Close Ticket</button></div>}
+      {role==="devops"&&closableStatuses.includes(selected.status)&&!showClosureForm&&!showRejectionForm&&<div className="modal-actions">{editableStatuses.includes(selected.status)&&<><button disabled={busy} className="secondary-button" onClick={saveChanges}>Save Changes</button><button disabled={busy} className="danger-button" onClick={()=>{setError("");setNotice("");setRejectionComment("");setShowRejectionForm(true);}}>Reject</button><button disabled={busy} className="primary-button" onClick={approve}>Approve & Provision</button></>}<button disabled={busy} className="secondary-button close-ticket-button" onClick={()=>{setError("");setNotice("");setClosureComment("");setShowClosureForm(true);}}>Close Ticket</button></div>}
     </article></div>}
   </section>;
 }
