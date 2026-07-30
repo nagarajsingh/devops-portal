@@ -1,4 +1,4 @@
-import type { AuthSession, KubernetesService, PipelineRequest, PipelineRequestInput, ReviewUpdate, Role } from "../types";
+import type { ApplicationType, AuthSession, KubernetesService, PipelineRequest, PipelineRequestInput, ReviewUpdate, Role } from "../types";
 
 const API_BASE = "/devops-portal/api";
 
@@ -23,6 +23,10 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 
 export function login(username: string, password: string, role: Role): Promise<AuthSession> {
   return request<AuthSession>("/auth/login", { method: "POST", body: JSON.stringify({ username, password, role }) });
+}
+
+export function getApplicationOwners(token: string): Promise<Record<ApplicationType, string>> {
+  return request<Record<ApplicationType, string>>("/configuration/app-owners", {}, token);
 }
 
 export function getNamespaces(token: string): Promise<string[]> {
