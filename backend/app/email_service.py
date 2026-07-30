@@ -83,78 +83,52 @@ def send_app_owner_approval_email(item: dict) -> None:
         for label, value in details
     )
 
+    approve_href = html.escape(approve_url, quote=True)
+    reject_href = html.escape(reject_url, quote=True)
+
     body = f"""
     <!doctype html>
-    <html>
+    <html xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+      <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
+      </head>
       <body style="margin:0;padding:0;background:#f4f6fa;font-family:Arial,Helvetica,sans-serif;color:#24334a">
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f4f6fa">
-          <tr>
-            <td align="center" style="padding:32px 16px">
-              <table role="presentation" width="720" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:720px;background:#ffffff;border:1px solid #e7ebf0;border-radius:22px;overflow:hidden;box-shadow:0 20px 55px rgba(24,59,104,.10)">
-                <tr>
-                  <td style="padding:0;background:linear-gradient(135deg,#173d70 0%,#214f88 62%,#ef6b22 160%)">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                      <tr>
-                        <td style="padding:28px 32px 26px">
-                          <table role="presentation" cellspacing="0" cellpadding="0" border="0">
-                            <tr>
-                              <td style="width:46px;height:46px;border-radius:14px;background:#ef6b22;color:#ffffff;text-align:center;font-size:24px;font-weight:800;vertical-align:middle">D</td>
-                              <td style="padding-left:14px">
-                                <div style="font-size:20px;line-height:24px;font-weight:800;color:#ffffff">DevOps Portal</div>
-                                <div style="margin-top:3px;font-size:11px;line-height:16px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:#cdd9e8">Microservice Onboarding</div>
-                              </td>
-                            </tr>
-                          </table>
-                          <div style="margin-top:28px;display:inline-block;padding:7px 11px;border-radius:999px;background:#fff1e8;color:#d95713;font-size:11px;line-height:14px;font-weight:800;letter-spacing:.08em;text-transform:uppercase">Approval required</div>
-                          <h1 style="margin:14px 0 8px;font-size:28px;line-height:36px;color:#ffffff;letter-spacing:-.4px">Review a new onboarding request</h1>
-                          <p style="margin:0;max-width:600px;font-size:14px;line-height:23px;color:#dbe5f0">A developer submitted a microservice onboarding request that requires your approval before it can move to the DevOps provisioning queue.</p>
-                        </td>
-                      </tr>
-                    </table>
+          <tr><td align="center" style="padding:32px 16px">
+            <table role="presentation" width="720" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:720px;background:#ffffff;border:1px solid #e7ebf0;border-radius:22px;overflow:hidden;box-shadow:0 20px 55px rgba(24,59,104,.10)">
+              <tr><td style="padding:28px 32px 26px;background:#173d70;background-image:linear-gradient(135deg,#173d70 0%,#214f88 62%,#ef6b22 160%)">
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr>
+                  <td style="width:46px;height:46px;border-radius:14px;background:#ef6b22;color:#ffffff;text-align:center;font-size:24px;font-weight:800;vertical-align:middle">D</td>
+                  <td style="padding-left:14px"><div style="font-size:20px;line-height:24px;font-weight:800;color:#ffffff">DevOps Portal</div><div style="margin-top:3px;font-size:11px;line-height:16px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:#cdd9e8">Microservice Onboarding</div></td>
+                </tr></table>
+                <div style="margin-top:28px;display:inline-block;padding:7px 11px;border-radius:999px;background:#fff1e8;color:#d95713;font-size:11px;line-height:14px;font-weight:800;letter-spacing:.08em;text-transform:uppercase">Approval required</div>
+                <h1 style="margin:14px 0 8px;font-size:28px;line-height:36px;color:#ffffff;letter-spacing:-.4px">Review a new onboarding request</h1>
+                <p style="margin:0;max-width:600px;font-size:14px;line-height:23px;color:#dbe5f0">A developer submitted a microservice onboarding request that requires your approval before it can move to the DevOps provisioning queue.</p>
+              </td></tr>
+              <tr><td style="padding:28px 32px 10px">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border:1px solid #e7ebf0;border-radius:16px;overflow:hidden;border-collapse:separate">
+                  <tr><td colspan="2" style="padding:16px 18px;background:#fff7f1;background-image:linear-gradient(90deg,#fff7f1,#ffffff);border-bottom:1px solid #e7ebf0"><div style="font-size:12px;line-height:16px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#ef641f">Request summary</div><div style="margin-top:5px;font-size:18px;line-height:24px;font-weight:800;color:#183b68">{html.escape(item['repository_name'])}</div></td></tr>
+                  {rows}
+                </table>
+              </td></tr>
+              <tr><td align="center" style="padding:24px 32px 8px">
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center"><tr>
+                  <td align="center" style="padding:0 7px 12px 0">
+                    <!--[if mso]><v:roundrect href="{approve_href}" style="height:48px;v-text-anchor:middle;width:190px" arcsize="22%" stroke="f" fillcolor="#ff7a1a"><v:fill type="gradient" color="#ff6817" color2="#ff8a21" angle="0"/><w:anchorlock/><center style="color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:bold">Approve request</center></v:roundrect><![endif]-->
+                    <!--[if !mso]><!-- --><a href="{approve_href}" style="display:inline-block;width:190px;padding:15px 0;border:1px solid rgba(255,255,255,.45);border-radius:12px;background:#ff7a1a;background-image:linear-gradient(90deg,#ff6817,#ff8a21);color:#ffffff;text-align:center;text-decoration:none;font-size:14px;line-height:18px;font-weight:800;box-shadow:0 10px 24px rgba(244,103,28,.28);text-shadow:0 1px 0 rgba(0,0,0,.08)">Approve request</a><!--<![endif]-->
                   </td>
-                </tr>
-                <tr>
-                  <td style="padding:28px 32px 10px">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border:1px solid #e7ebf0;border-radius:16px;overflow:hidden;border-collapse:separate">
-                      <tr>
-                        <td colspan="2" style="padding:16px 18px;background:linear-gradient(90deg,#fff7f1,#ffffff);border-bottom:1px solid #e7ebf0">
-                          <div style="font-size:12px;line-height:16px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#ef641f">Request summary</div>
-                          <div style="margin-top:5px;font-size:18px;line-height:24px;font-weight:800;color:#183b68">{html.escape(item['repository_name'])}</div>
-                        </td>
-                      </tr>
-                      {rows}
-                    </table>
+                  <td align="center" style="padding:0 0 12px 7px">
+                    <!--[if mso]><v:roundrect href="{reject_href}" style="height:48px;v-text-anchor:middle;width:190px" arcsize="22%" strokecolor="#e5b9b5" fillcolor="#fff5f4"><w:anchorlock/><center style="color:#b83d36;font-family:Arial,sans-serif;font-size:14px;font-weight:bold">Reject request</center></v:roundrect><![endif]-->
+                    <!--[if !mso]><!-- --><a href="{reject_href}" style="display:inline-block;width:190px;padding:14px 0;border:1px solid rgba(229,185,181,.9);border-radius:12px;background:#fff5f4;background-image:linear-gradient(180deg,rgba(255,255,255,.96),rgba(255,240,239,.96));color:#b83d36;text-align:center;text-decoration:none;font-size:14px;line-height:18px;font-weight:800;box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 9px 20px rgba(184,61,54,.10)">Reject request</a><!--<![endif]-->
                   </td>
-                </tr>
-                <tr>
-                  <td style="padding:22px 32px 10px">
-                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center">
-                      <tr>
-                        <td style="padding:0 7px 0 0">
-                          <a href="{html.escape(approve_url)}" style="display:inline-block;min-width:150px;padding:14px 22px;border-radius:11px;background:linear-gradient(90deg,#ff6817,#ff8a21);color:#ffffff;text-align:center;text-decoration:none;font-size:14px;line-height:18px;font-weight:800;box-shadow:0 9px 20px rgba(244,103,28,.24)">Approve request</a>
-                        </td>
-                        <td style="padding:0 0 0 7px">
-                          <a href="{html.escape(reject_url)}" style="display:inline-block;min-width:150px;padding:13px 22px;border:1px solid #e3b8b4;border-radius:11px;background:#fff4f3;color:#bd3e37;text-align:center;text-decoration:none;font-size:14px;line-height:18px;font-weight:800">Reject request</a>
-                        </td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding:18px 32px 30px">
-                    <div style="padding:14px 16px;border-radius:12px;background:#f7f9fc;border:1px solid #e7ebf0;font-size:12px;line-height:19px;color:#6f7c8c">
-                      These secure action links expire in <strong style="color:#354d69">{APPROVAL_TOKEN_HOURS} hours</strong> and remain valid only while the request is waiting for application-owner approval.
-                    </div>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding:18px 32px;background:#f8fafc;border-top:1px solid #e7ebf0;text-align:center;font-size:11px;line-height:17px;color:#8a95a3">
-                    This is an automated notification from the DevOps Portal. Please do not forward this email because it contains secure approval links.
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
+                </tr></table>
+              </td></tr>
+              <tr><td style="padding:16px 32px 30px"><div style="padding:14px 16px;border-radius:12px;background:#f7f9fc;border:1px solid #e7ebf0;font-size:12px;line-height:19px;color:#6f7c8c">These secure action links expire in <strong style="color:#354d69">{APPROVAL_TOKEN_HOURS} hours</strong> and remain valid only while the request is waiting for application-owner approval.</div></td></tr>
+              <tr><td style="padding:18px 32px;background:#f8fafc;border-top:1px solid #e7ebf0;text-align:center;font-size:11px;line-height:17px;color:#8a95a3">This is an automated notification from the DevOps Portal. Please do not forward this email because it contains secure approval links.</td></tr>
+            </table>
+          </td></tr>
         </table>
       </body>
     </html>
