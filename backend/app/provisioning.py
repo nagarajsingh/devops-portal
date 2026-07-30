@@ -51,10 +51,11 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
                 raise RuntimeError("Repository must be created before pipeline setup")
             if not bootstrap_result:
                 raise RuntimeError("Pipeline setup requires a reference repository containing azure-pipelines.yml or azure-pipelines.yaml")
-            yaml_path = next((path for path in bootstrap_result.get("files", []) if path in ("/azure-pipelines.yml", "/azure-pipelines.yaml")), None)
+            yaml_path = next((path for path in bootstrap_result.get("files", []) if path.lower() in ("/azure-pipelines.yml", "/azure-pipelines.yaml")), None)
             if not yaml_path:
                 raise RuntimeError("Pipeline YAML file was not found in the bootstrapped repository")
-            steps["pipeline"] = create_build_pipeline(target_repo, yaml_path, azure_devops_pat)
+            target_branch = bootstrap_result.get("branch") or "feature/devops"
+            steps["pipeline"] = create_build_pipeline(target_repo, yaml_path, target_branch, azure_devops_pat)
         except Exception as exc:
             logger.exception("Pipeline creation failed request_id=%s repository=%s", request_id, item.get("repository_name"))
             steps["pipeline"] = {"status": "Failed", "message": str(exc)}
