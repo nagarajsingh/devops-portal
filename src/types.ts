@@ -39,6 +39,7 @@ export interface PipelineRequestInput {
   service_name: string;
   service_port: number;
   namespace: string;
+  target_cluster: string;
   comments?: string;
 }
 
@@ -47,16 +48,23 @@ export interface KubernetesService {
   ports: number[];
 }
 
+export interface KubernetesTarget {
+  name: string;
+  mode: "direct" | "azure_pipeline";
+}
+
 export interface ProvisionStep {
   status: string;
   message?: string;
   id?: string;
+  run_id?: number;
   url?: string;
   branch?: string;
   source_branch?: string;
   files?: string[];
   name?: string;
   yaml_path?: string;
+  target_cluster?: string;
 }
 
 export interface TimelineEvent {
