@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-import hmac
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import HTTPException
 
-from .config import APP_OWNER_EMAILS, LANGUAGE_PORTS, POWER_AUTOMATE_CALLBACK_TOKEN
+from .config import APP_OWNER_EMAILS, LANGUAGE_PORTS
 from .email_service import decode_approval_token, send_app_owner_approval_email
 from .kubernetes_ops import cluster_namespaces, namespace_ingresses
 from .logging_config import get_logger
-from .models import PipelineRequest, PipelineRequestCreate, PowerAutomateApprovalCallback, ReviewUpdate, UserContext
-from .power_automate_service import send_power_automate_approval
+from .models import PipelineRequest, PipelineRequestCreate, ReviewUpdate, UserContext
 from .provisioning import provision
 from .storage import find_request, now_iso, read_requests, timeline_event, write_requests
 
@@ -67,13 +65,6 @@ def create_pipeline_request(payload: PipelineRequestCreate, user: UserContext) -
     except Exception as exc:
         logger.exception("Unable to send app owner email request_id=%s app_owner=%s", request_id, app_owner)
         item = _record_notification_event(request_id, "Approval Email Failed", str(exc))
-
-    try:
-        if send_power_automate_approval(item.model_dump()):
-            item = _record_notification_event(request_id, "Teams Approval Sent", f"Power Automate approval sent to {app_owner}")
-    except Exception as exc:
-        logger.exception("Unable to send Power Automate approval request_id=%s app_owner=%s", request_id, app_owner)
-        item = _record_notification_event(request_id, "Teams Approval Failed", str(exc))
 
     logger.info("Pipeline request submitted request_id=%s username=%s repository=%s app_owner=%s", item.id, user.username, item.repository_name, app_owner)
     return item
@@ -139,24 +130,6 @@ def process_app_owner_action(token: str) -> tuple[str, str]:
         decision=payload.get("decision", ""),
         app_owner=payload.get("sub", ""),
         source="email approval link",
-    )
-
-
-def process_power_automate_callback(payload: PowerAutomateApprovalCallback) -> tuple[str, str]:
-    if not POWER_AUTOMATE_CALLBACK_TOKEN:
-        raise HTTPException(status_code=503, detail="Power Automate callback is not configured")
-
-    supplied_token = payload.callback_token.get_secret_value()
-    if not hmac.compare_digest(supplied_token, POWER_AUTOMATE_CALLBACK_TOKEN):
-        logger.warning("Rejected Power Automate callback with invalid token request_id=%s", payload.request_id)
-        raise HTTPException(status_code=401, detail="Invalid callback token")
-
-    return _apply_app_owner_decision(
-        request_id=payload.request_id,
-        decision=payload.decision,
-        app_owner=payload.approver,
-        comment=payload.comment,
-        source="Microsoft Teams approval",
     )
 
 
