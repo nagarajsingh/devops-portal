@@ -58,6 +58,11 @@ data:
   LOG_LEVEL: "INFO"
   PORTAL_PUBLIC_URL: "https://h2h-dev.mashreqdev.com/devops-portal"
   APPROVAL_TOKEN_HOURS: "72"
+  LOCAL_KUBERNETES_TARGET: "local-cluster"
+  KUBERNETES_TARGETS: "local-cluster,mashreq-nativemob-safenet-nonprod,mashreq-titan-non-prod,mashreqdigicollecteguat"
+  KUBERNETES_PROVISIONING_PIPELINE_ID: "1586"
+  KUBERNETES_PROVISIONING_TIMEOUT_SECONDS: "900"
+  KUBERNETES_PROVISIONING_POLL_SECONDS: "10"
   APP_OWNER_EMAILS: >-
     {"H2H":"Nagarajs@mashreq.com","Native-Mobile":"mujahidi@mashreq.com","Collections":"mohanreddy1@mashreq.com","Safenet":"krishnakants@mashreq.com"}
   SMTP_HOST: ""
