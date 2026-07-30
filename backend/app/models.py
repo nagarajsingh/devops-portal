@@ -24,7 +24,11 @@ class LoginResponse(BaseModel):
 class PipelineRequestCreate(BaseModel):
     application_type: ApplicationType = "H2H"
     app_owner: str = ""
-    repository_name: str = Field(min_length=2, max_length=100, pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
+    repository_name: str = Field(
+        min_length=2,
+        max_length=100,
+        pattern=r"^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$",
+    )
     reference_repository_name: str = ""
     reference_branch: str = ""
     setup_pipeline: bool = False
