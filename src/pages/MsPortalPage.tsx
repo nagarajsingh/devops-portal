@@ -27,6 +27,17 @@ const initial: PipelineRequestInput = {
   comments: "",
 };
 
+function sanitizeRepositoryName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9_-]/g, "");
+}
+
+function finalizeRepositoryName(value: string): string {
+  return sanitizeRepositoryName(value).replace(/^[-_]+|[-_]+$/g, "");
+}
+
 export default function MsPortalPage({ token, onCreated }: Props) {
   const [form, setForm] = useState(initial);
   const [appOwners, setAppOwners] = useState<Partial<Record<ApplicationType, string>>>({});
@@ -61,16 +72,23 @@ export default function MsPortalPage({ token, onCreated }: Props) {
   }
 
   function setRepositoryName(value: string) {
-    const normalized = value
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9_-]+/g, "-")
-      .replace(/^[-_]+|[-_]+$/g, "");
-    const serviceName = normalized.replace(/_/g, "-");
+    const repositoryName = sanitizeRepositoryName(value);
+    const serviceName = repositoryName.replace(/_/g, "-");
     setForm((current) => ({
       ...current,
-      repository_name: normalized,
-      ingress_path: `/api/${normalized}`,
+      repository_name: repositoryName,
+      ingress_path: `/api/${repositoryName}`,
+      service_name: serviceName,
+    }));
+  }
+
+  function finalizeRepositoryInput() {
+    const repositoryName = finalizeRepositoryName(form.repository_name);
+    const serviceName = repositoryName.replace(/_/g, "-");
+    setForm((current) => ({
+      ...current,
+      repository_name: repositoryName,
+      ingress_path: `/api/${repositoryName}`,
       service_name: serviceName,
     }));
   }
@@ -90,11 +108,24 @@ export default function MsPortalPage({ token, onCreated }: Props) {
       return;
     }
 
+    const repositoryName = finalizeRepositoryName(form.repository_name);
+    if (!repositoryName || !/^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/.test(repositoryName)) {
+      setError("Repository name must use lowercase letters, numbers, hyphens or underscores, and must start and end with a letter or number.");
+      return;
+    }
+
+    const submission = {
+      ...form,
+      repository_name: repositoryName,
+      ingress_path: form.ingress_path === `/api/${form.repository_name}` ? `/api/${repositoryName}` : form.ingress_path,
+      service_name: repositoryName.replace(/_/g, "-"),
+    };
+
     setLoading(true);
     setError("");
     setMessage("");
     try {
-      const created = await createPipelineRequest(form, token);
+      const created = await createPipelineRequest(submission, token);
       setMessage(`${created.id} submitted to ${created.app_owner} for application-owner approval.`);
       setForm({ ...initial, app_owner: appOwners.H2H ?? "" });
       onCreated();
@@ -110,7 +141,7 @@ export default function MsPortalPage({ token, onCreated }: Props) {
     <form className="form-card two-column" onSubmit={submit}>
       <label>Application<select value={form.application_type} onChange={(e) => setApplicationType(e.target.value as ApplicationType)}><option value="H2H">H2H</option><option value="Collections">Collections</option><option value="Native-Mobile">Native-Mobile</option><option value="Safenet">Safenet</option></select></label>
       <label>Application Owner<input disabled value={loadingOwners ? "Loading configured owner..." : form.app_owner || "Not configured"} /><small>Loaded from APP_OWNER_EMAILS in the backend ConfigMap.</small></label>
-      <label>Repository Name<input required value={form.repository_name} onChange={(e) => setRepositoryName(e.target.value)} placeholder="payment_api-service" /><small>Lowercase letters, numbers, underscores and hyphens are supported.</small></label>
+      <label>Repository Name<input required value={form.repository_name} onChange={(e) => setRepositoryName(e.target.value)} onBlur={finalizeRepositoryInput} placeholder="payment_api-service" autoCapitalize="none" autoCorrect="off" spellCheck={false} /><small>Lowercase letters, numbers, underscores (_) and hyphens (-) are supported.</small></label>
       <label>Reference Repository Name <small>(Optional)</small><input value={form.reference_repository_name} onChange={(e) => setForm({ ...form, reference_repository_name: e.target.value.trim() })} placeholder="h2h-reference-service" /></label>
       <label>Type of Language<select required value={form.pipeline_type} onChange={(e) => setLanguage(e.target.value)}><option value="">Select language</option><option value="java-maven">Java / Maven</option><option value="node">Node.js</option><option value="python">Python</option><option value="container">Container only</option></select></label>
       <label>Service Port<input type="number" min="1" max="65535" value={form.service_port} onChange={(e) => setForm({ ...form, service_port: Number(e.target.value) })} /><small>Automatically selected from the language and can be changed.</small></label>
