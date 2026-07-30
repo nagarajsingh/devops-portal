@@ -76,31 +76,98 @@ def send_app_owner_approval_email(item: dict) -> None:
         ("Comments", item.get("comments") or "None"),
     ]
     rows = "".join(
-        f"<tr><td style='padding:10px;border-bottom:1px solid #e6eaf0;font-weight:700;color:#294766'>{html.escape(label)}</td>"
-        f"<td style='padding:10px;border-bottom:1px solid #e6eaf0;color:#52657b'>{html.escape(str(value))}</td></tr>"
+        "<tr>"
+        f"<td style='padding:14px 16px;border-bottom:1px solid #edf0f4;width:38%;font-size:12px;line-height:18px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#7b8795;background:#fbfcfe'>{html.escape(label)}</td>"
+        f"<td style='padding:14px 16px;border-bottom:1px solid #edf0f4;font-size:14px;line-height:21px;font-weight:600;color:#2f4664'>{html.escape(str(value))}</td>"
+        "</tr>"
         for label, value in details
     )
+
     body = f"""
-    <html><body style="font-family:Arial,sans-serif;background:#f5f7fb;padding:24px;color:#24334a">
-      <div style="max-width:720px;margin:auto;background:white;border-radius:18px;padding:28px;border:1px solid #e5eaf0">
-        <div style="color:#ef641f;font-weight:800;letter-spacing:1px;font-size:12px">DEVOPS PORTAL</div>
-        <h2 style="color:#183b68">Application owner approval required</h2>
-        <p>A new microservice onboarding request requires your approval before it is sent to the DevOps provisioning queue.</p>
-        <table style="width:100%;border-collapse:collapse;margin:20px 0">{rows}</table>
-        <div style="display:flex;gap:12px;margin-top:24px">
-          <a href="{html.escape(approve_url)}" style="background:#23824d;color:white;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:700">Approve</a>
-          <a href="{html.escape(reject_url)}" style="background:#c73e37;color:white;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:700">Reject</a>
-        </div>
-        <p style="font-size:12px;color:#788392;margin-top:22px">These links expire in {APPROVAL_TOKEN_HOURS} hours and can be used only while the request is awaiting app-owner approval.</p>
-      </div>
-    </body></html>
+    <!doctype html>
+    <html>
+      <body style="margin:0;padding:0;background:#f4f6fa;font-family:Arial,Helvetica,sans-serif;color:#24334a">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f4f6fa">
+          <tr>
+            <td align="center" style="padding:32px 16px">
+              <table role="presentation" width="720" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:720px;background:#ffffff;border:1px solid #e7ebf0;border-radius:22px;overflow:hidden;box-shadow:0 20px 55px rgba(24,59,104,.10)">
+                <tr>
+                  <td style="padding:0;background:linear-gradient(135deg,#173d70 0%,#214f88 62%,#ef6b22 160%)">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                      <tr>
+                        <td style="padding:28px 32px 26px">
+                          <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                            <tr>
+                              <td style="width:46px;height:46px;border-radius:14px;background:#ef6b22;color:#ffffff;text-align:center;font-size:24px;font-weight:800;vertical-align:middle">D</td>
+                              <td style="padding-left:14px">
+                                <div style="font-size:20px;line-height:24px;font-weight:800;color:#ffffff">DevOps Portal</div>
+                                <div style="margin-top:3px;font-size:11px;line-height:16px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:#cdd9e8">Microservice Onboarding</div>
+                              </td>
+                            </tr>
+                          </table>
+                          <div style="margin-top:28px;display:inline-block;padding:7px 11px;border-radius:999px;background:#fff1e8;color:#d95713;font-size:11px;line-height:14px;font-weight:800;letter-spacing:.08em;text-transform:uppercase">Approval required</div>
+                          <h1 style="margin:14px 0 8px;font-size:28px;line-height:36px;color:#ffffff;letter-spacing:-.4px">Review a new onboarding request</h1>
+                          <p style="margin:0;max-width:600px;font-size:14px;line-height:23px;color:#dbe5f0">A developer submitted a microservice onboarding request that requires your approval before it can move to the DevOps provisioning queue.</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:28px 32px 10px">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border:1px solid #e7ebf0;border-radius:16px;overflow:hidden;border-collapse:separate">
+                      <tr>
+                        <td colspan="2" style="padding:16px 18px;background:linear-gradient(90deg,#fff7f1,#ffffff);border-bottom:1px solid #e7ebf0">
+                          <div style="font-size:12px;line-height:16px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#ef641f">Request summary</div>
+                          <div style="margin-top:5px;font-size:18px;line-height:24px;font-weight:800;color:#183b68">{html.escape(item['repository_name'])}</div>
+                        </td>
+                      </tr>
+                      {rows}
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:22px 32px 10px">
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center">
+                      <tr>
+                        <td style="padding:0 7px 0 0">
+                          <a href="{html.escape(approve_url)}" style="display:inline-block;min-width:150px;padding:14px 22px;border-radius:11px;background:linear-gradient(90deg,#ff6817,#ff8a21);color:#ffffff;text-align:center;text-decoration:none;font-size:14px;line-height:18px;font-weight:800;box-shadow:0 9px 20px rgba(244,103,28,.24)">Approve request</a>
+                        </td>
+                        <td style="padding:0 0 0 7px">
+                          <a href="{html.escape(reject_url)}" style="display:inline-block;min-width:150px;padding:13px 22px;border:1px solid #e3b8b4;border-radius:11px;background:#fff4f3;color:#bd3e37;text-align:center;text-decoration:none;font-size:14px;line-height:18px;font-weight:800">Reject request</a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:18px 32px 30px">
+                    <div style="padding:14px 16px;border-radius:12px;background:#f7f9fc;border:1px solid #e7ebf0;font-size:12px;line-height:19px;color:#6f7c8c">
+                      These secure action links expire in <strong style="color:#354d69">{APPROVAL_TOKEN_HOURS} hours</strong> and remain valid only while the request is waiting for application-owner approval.
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:18px 32px;background:#f8fafc;border-top:1px solid #e7ebf0;text-align:center;font-size:11px;line-height:17px;color:#8a95a3">
+                    This is an automated notification from the DevOps Portal. Please do not forward this email because it contains secure approval links.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
     """
 
     message = EmailMessage()
     message["From"] = MAIL_FROM
     message["To"] = app_owner
     message["Subject"] = f"[Approval Required] {item['repository_name']} onboarding request"
-    message.set_content(f"Approval required for request {item['id']}. Use the HTML version of this email.")
+    message.set_content(
+        f"Approval required for request {item['id']} ({item['repository_name']}). "
+        "Open the HTML version of this email to approve or reject the request."
+    )
     message.add_alternative(body, subtype="html")
 
     recipients = [app_owner] + parse_recipients(MAIL_BCC)
