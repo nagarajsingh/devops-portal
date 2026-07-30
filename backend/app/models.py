@@ -58,14 +58,6 @@ class CloseRequest(BaseModel):
     comment: str = Field(min_length=3, max_length=2000)
 
 
-class PowerAutomateApprovalCallback(BaseModel):
-    request_id: str = Field(min_length=3, max_length=100)
-    decision: str = Field(min_length=3, max_length=20)
-    approver: str = Field(min_length=3, max_length=320)
-    comment: str | None = Field(default=None, max_length=2000)
-    callback_token: SecretStr = Field(min_length=10)
-
-
 class PipelineRequest(PipelineRequestCreate):
     id: str
     requested_by: str
