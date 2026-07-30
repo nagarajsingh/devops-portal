@@ -3,19 +3,20 @@ from __future__ import annotations
 import html
 import time
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from .auth import authenticate, current_user, require_devops
-from .config import APP_OWNER_EMAILS, KUBERNETES_TARGETS, LOCAL_KUBERNETES_TARGET, NAMESPACE_ALLOWLIST
+from .cluster_inventory import inventory_ingresses, inventory_namespaces, inventory_services
+from .config import APP_OWNER_EMAILS, KUBERNETES_TARGETS, LOCAL_KUBERNETES_TARGET
 from .kubernetes_ops import cluster_namespaces, namespace_ingresses, namespace_services
 from .logging_config import get_logger
 from .models import ApproveRequest, CloseRequest, KubernetesTargetOption, LoginRequest, LoginResponse, PipelineRequest, PipelineRequestCreate, RejectRequest, ReviewUpdate, ServiceOption, UserContext
 from .request_service import approve_pipeline_request, close_pipeline_request, create_pipeline_request, get_pipeline_request, list_pipeline_requests, process_app_owner_action, reject_pipeline_request, update_pipeline_request
 
 logger = get_logger("api")
-app = FastAPI(title="DevOps Portal API", version="3.5.0")
+app = FastAPI(title="DevOps Portal API", version="3.6.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -81,6 +82,11 @@ def kubernetes_targets(_: UserContext = Depends(require_devops)) -> list[Kuberne
     ]
 
 
+def _validate_target(target_cluster: str) -> None:
+    if target_cluster not in KUBERNETES_TARGETS:
+        raise HTTPException(status_code=404, detail=f"Unknown Kubernetes target: {target_cluster}")
+
+
 @app.get("/namespaces", response_model=list[str])
 def list_namespaces(_: UserContext = Depends(current_user)) -> list[str]:
     return cluster_namespaces()
@@ -88,11 +94,13 @@ def list_namespaces(_: UserContext = Depends(current_user)) -> list[str]:
 
 @app.get("/namespaces/{target_cluster}", response_model=list[str])
 def list_target_namespaces(target_cluster: str, _: UserContext = Depends(require_devops)) -> list[str]:
-    if target_cluster not in KUBERNETES_TARGETS:
-        return []
+    _validate_target(target_cluster)
     if target_cluster == LOCAL_KUBERNETES_TARGET:
         return cluster_namespaces()
-    return sorted(NAMESPACE_ALLOWLIST)
+    try:
+        return inventory_namespaces(target_cluster)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.get("/ingresses/{namespace}", response_model=list[str])
@@ -102,9 +110,13 @@ def list_ingresses(namespace: str, _: UserContext = Depends(require_devops)) -> 
 
 @app.get("/ingresses/{target_cluster}/{namespace}", response_model=list[str])
 def list_target_ingresses(target_cluster: str, namespace: str, _: UserContext = Depends(require_devops)) -> list[str]:
+    _validate_target(target_cluster)
     if target_cluster == LOCAL_KUBERNETES_TARGET:
         return namespace_ingresses(namespace)
-    return []
+    try:
+        return inventory_ingresses(target_cluster, namespace)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.get("/services/{namespace}", response_model=list[ServiceOption])
@@ -114,9 +126,13 @@ def list_services(namespace: str, _: UserContext = Depends(require_devops)) -> l
 
 @app.get("/services/{target_cluster}/{namespace}", response_model=list[ServiceOption])
 def list_target_services(target_cluster: str, namespace: str, _: UserContext = Depends(require_devops)) -> list[ServiceOption]:
+    _validate_target(target_cluster)
     if target_cluster == LOCAL_KUBERNETES_TARGET:
         return namespace_services(namespace)
-    return []
+    try:
+        return inventory_services(target_cluster, namespace)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.post("/requests", response_model=PipelineRequest, status_code=201)
