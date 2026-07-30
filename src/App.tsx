@@ -40,7 +40,7 @@ export default function App() {
 
   const renderPage = () => ({
     home: <HomePage onNavigate={setPage} />,
-    dashboard: <DashboardPage />,
+    dashboard: <DashboardPage token={session.access_token} role={session.role} refreshKey={refreshKey} />,
     requests: <RequestsPage token={session.access_token} role={session.role} refreshKey={refreshKey} />,
     "file-placement": <FilePlacementPage />,
     monitoring: <MonitoringPage />,
