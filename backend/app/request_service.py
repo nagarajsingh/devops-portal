@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from .config import APP_OWNER_EMAILS, LANGUAGE_PORTS
+from .config import APP_OWNER_EMAILS, KUBERNETES_TARGETS, LANGUAGE_PORTS, LOCAL_KUBERNETES_TARGET
 from .email_service import decode_approval_token, send_app_owner_approval_email
 from .kubernetes_ops import cluster_namespaces, namespace_ingresses
 from .logging_config import get_logger
@@ -38,6 +38,7 @@ def create_pipeline_request(payload: PipelineRequestCreate, user: UserContext) -
     original.update({
         "app_owner": app_owner,
         "namespace": "",
+        "target_cluster": LOCAL_KUBERNETES_TARGET,
         "setup_pipeline": bool(reference_repository_name),
         "create_service": False,
         "service_name": payload.repository_name.replace("_", "-"),
@@ -154,10 +155,18 @@ def update_pipeline_request(request_id: str, payload: ReviewUpdate, user: UserCo
     index, current = find_request(items, request_id)
     if current.get("status") not in ("Pending Approval", "Pending Action", "Partially Completed"):
         raise HTTPException(status_code=409, detail="Only requests in the DevOps queue can be modified")
-    if payload.namespace not in cluster_namespaces():
-        raise HTTPException(status_code=400, detail="Namespace is not allowed")
-    if payload.ingress_name and payload.ingress_name not in namespace_ingresses(payload.namespace):
-        raise HTTPException(status_code=400, detail=f"Ingress {payload.ingress_name} does not exist in namespace {payload.namespace}")
+
+    target_cluster = (payload.target_cluster or LOCAL_KUBERNETES_TARGET).strip()
+    if target_cluster not in KUBERNETES_TARGETS:
+        raise HTTPException(status_code=400, detail=f"Kubernetes target {target_cluster} is not configured")
+    if not payload.namespace.strip():
+        raise HTTPException(status_code=400, detail="Namespace is required")
+    if target_cluster == LOCAL_KUBERNETES_TARGET:
+        if payload.namespace not in cluster_namespaces():
+            raise HTTPException(status_code=400, detail="Namespace is not allowed")
+        if payload.ingress_name and payload.ingress_name not in namespace_ingresses(payload.namespace):
+            raise HTTPException(status_code=400, detail=f"Ingress {payload.ingress_name} does not exist in namespace {payload.namespace}")
+
     if payload.setup_pipeline and not payload.reference_repository_name.strip():
         raise HTTPException(status_code=400, detail="Reference repository is required when pipeline setup is enabled")
 
@@ -170,6 +179,7 @@ def update_pipeline_request(request_id: str, payload: ReviewUpdate, user: UserCo
     original = current.get("original_request") or {key: current.get(key) for key in PipelineRequestCreate.model_fields}
     updated_values = payload.model_dump(exclude={"review_comments", "app_owner"})
     updated_values["reference_branch"] = reference_branch
+    updated_values["target_cluster"] = target_cluster
     updated = {
         **current,
         **updated_values,
@@ -222,6 +232,8 @@ def approve_pipeline_request(request_id: str, user: UserContext, azure_devops_pa
         raise HTTPException(status_code=400, detail="Select a namespace before approval")
     if not current.get("ingress_name"):
         raise HTTPException(status_code=400, detail="Select an ingress resource before approval")
+    if (current.get("target_cluster") or LOCAL_KUBERNETES_TARGET) not in KUBERNETES_TARGETS:
+        raise HTTPException(status_code=400, detail="Select a configured Kubernetes target before approval")
     if not azure_devops_pat.strip():
         raise HTTPException(status_code=400, detail="Azure DevOps PAT is required for provisioning")
 
