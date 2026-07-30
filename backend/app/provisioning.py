@@ -5,6 +5,7 @@ from typing import Any
 from .azure_devops import bootstrap_repository, create_build_pipeline, create_repository, get_repository
 from .kubernetes_ops import ensure_ingress_path, ensure_service
 from .logging_config import get_logger
+from .release_pipelines import create_release_pipeline
 
 logger = get_logger("provisioning")
 
@@ -45,6 +46,7 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
     else:
         steps["repository_bootstrap"] = {"status": "Pending", "message": "Waiting for repository creation"}
 
+    build_pipeline_result: dict[str, Any] | None = None
     if item.get("setup_pipeline"):
         try:
             if not target_repo:
@@ -55,12 +57,32 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
             if not yaml_path:
                 raise RuntimeError("Pipeline YAML file was not found in the bootstrapped repository")
             target_branch = bootstrap_result.get("branch") or "feature/devops"
-            steps["pipeline"] = create_build_pipeline(target_repo, yaml_path, target_branch, azure_devops_pat)
+            build_pipeline_result = create_build_pipeline(target_repo, yaml_path, target_branch, azure_devops_pat)
+            steps["pipeline"] = build_pipeline_result
         except Exception as exc:
             logger.exception("Pipeline creation failed request_id=%s repository=%s", request_id, item.get("repository_name"))
             steps["pipeline"] = {"status": "Failed", "message": str(exc)}
     else:
         steps["pipeline"] = {"status": "Skipped", "message": "Pipeline setup was disabled by DevOps"}
+
+    if item.get("setup_pipeline") and reference_repo:
+        try:
+            if not build_pipeline_result or not build_pipeline_result.get("id"):
+                raise RuntimeError("Build pipeline must be created or found before release pipeline cloning")
+            steps["release_pipeline"] = create_release_pipeline(
+                item.get("application_type", "H2H"),
+                reference_repo,
+                item["repository_name"],
+                build_pipeline_result,
+                azure_devops_pat,
+            )
+        except Exception as exc:
+            logger.exception("Release pipeline creation failed request_id=%s repository=%s", request_id, item.get("repository_name"))
+            steps["release_pipeline"] = {"status": "Failed", "message": str(exc)}
+    elif item.get("setup_pipeline"):
+        steps["release_pipeline"] = {"status": "Skipped", "message": "No reference repository was selected for release pipeline cloning"}
+    else:
+        steps["release_pipeline"] = {"status": "Skipped", "message": "Pipeline setup was disabled by DevOps"}
 
     try:
         steps["service"] = {"status": ensure_service(item)}
