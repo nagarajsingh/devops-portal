@@ -63,6 +63,10 @@ data:
   KUBERNETES_PROVISIONING_PIPELINE_ID: "1586"
   KUBERNETES_PROVISIONING_TIMEOUT_SECONDS: "900"
   KUBERNETES_PROVISIONING_POLL_SECONDS: "10"
+  KUBERNETES_INVENTORY_PIPELINE_ID: "0"
+  KUBERNETES_INVENTORY_ARTIFACT_NAME: "cluster-inventory"
+  KUBERNETES_INVENTORY_REFRESH_SECONDS: "300"
+  KUBERNETES_INVENTORY_FILE: "/data/cluster-inventory.json"
   APP_OWNER_EMAILS: >-
     {"H2H":"Nagarajs@mashreq.com","Native-Mobile":"mujahidi@mashreq.com","Collections":"mohanreddy1@mashreq.com","Safenet":"krishnakants@mashreq.com"}
   SMTP_HOST: ""
@@ -87,6 +91,7 @@ stringData:
   DEVELOPER_USERNAME: "developer"
   DEVELOPER_PASSWORD: "change-me"
   SMTP_PASSWORD: ""
+  KUBERNETES_INVENTORY_PAT: ""
 ---
 apiVersion: apps/v1
 kind: Deployment
