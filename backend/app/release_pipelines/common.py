@@ -144,7 +144,9 @@ def _prepare_cloned_definition(
         source_definition = reference.setdefault("definition", {})
         source_definition.update({"id": target_pipeline_id, "name": target_repository_name})
         artifact["alias"] = target_alias
-        artifact["sourceId"] = target_pipeline_id
+        original_source_id = str(artifact.get("sourceId") or "")
+        project_prefix = original_source_id.rsplit(":", 1)[0] if ":" in original_source_id else ""
+        artifact["sourceId"] = f"{project_prefix}:{target_pipeline_id}" if project_prefix else target_pipeline_id
         default_version = reference.setdefault("defaultVersionType", {})
         default_version["id"] = "latestType"
         default_version["name"] = "Latest"
