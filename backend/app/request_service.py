@@ -33,14 +33,16 @@ def create_pipeline_request(payload: PipelineRequestCreate, user: UserContext) -
 
     pipeline_type = (payload.pipeline_type or "").strip()
     default_port = LANGUAGE_PORTS.get(pipeline_type, 8080)
+    reference_repository_name = payload.reference_repository_name.strip()
     original = payload.model_dump()
     original.update({
         "app_owner": app_owner,
         "namespace": "",
-        "setup_pipeline": False,
+        "setup_pipeline": bool(reference_repository_name),
         "create_service": False,
         "service_name": payload.repository_name.replace("_", "-"),
         "service_port": default_port,
+        "reference_repository_name": reference_repository_name,
         "reference_branch": "develop" if payload.application_type == "Native-Mobile" else (payload.reference_branch or ""),
     })
 
