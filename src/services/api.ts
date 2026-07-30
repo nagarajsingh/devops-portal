@@ -1,4 +1,4 @@
-import type { ApplicationType, AuthSession, KubernetesService, PipelineRequest, PipelineRequestInput, ReviewUpdate, Role } from "../types";
+import type { ApplicationType, AuthSession, KubernetesService, KubernetesTarget, PipelineRequest, PipelineRequestInput, ReviewUpdate, Role } from "../types";
 
 const API_BASE = "/devops-portal/api";
 
@@ -29,16 +29,20 @@ export function getApplicationOwners(token: string): Promise<Record<ApplicationT
   return request<Record<ApplicationType, string>>("/configuration/app-owners", {}, token);
 }
 
-export function getNamespaces(token: string): Promise<string[]> {
-  return request<string[]>("/namespaces", {}, token);
+export function getKubernetesTargets(token: string): Promise<KubernetesTarget[]> {
+  return request<KubernetesTarget[]>("/configuration/kubernetes-targets", {}, token);
 }
 
-export function getIngresses(namespace: string, token: string): Promise<string[]> {
-  return request<string[]>(`/ingresses/${encodeURIComponent(namespace)}`, {}, token);
+export function getNamespaces(token: string, targetCluster = "local-cluster"): Promise<string[]> {
+  return request<string[]>(`/namespaces/${encodeURIComponent(targetCluster)}`, {}, token);
 }
 
-export function getServices(namespace: string, token: string): Promise<KubernetesService[]> {
-  return request<KubernetesService[]>(`/services/${encodeURIComponent(namespace)}`, {}, token);
+export function getIngresses(namespace: string, token: string, targetCluster = "local-cluster"): Promise<string[]> {
+  return request<string[]>(`/ingresses/${encodeURIComponent(targetCluster)}/${encodeURIComponent(namespace)}`, {}, token);
+}
+
+export function getServices(namespace: string, token: string, targetCluster = "local-cluster"): Promise<KubernetesService[]> {
+  return request<KubernetesService[]>(`/services/${encodeURIComponent(targetCluster)}/${encodeURIComponent(namespace)}`, {}, token);
 }
 
 export function createPipelineRequest(payload: PipelineRequestInput, token: string): Promise<PipelineRequest> {
