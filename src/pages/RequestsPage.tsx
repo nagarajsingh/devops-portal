@@ -21,6 +21,8 @@ const statusClass = (status: string) => {
   return "pending";
 };
 
+const wait = (milliseconds: number) => new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
+
 export default function RequestsPage({ token, role, refreshKey }: Props) {
   const [requests, setRequests] = useState<PipelineRequest[]>([]);
   const [selected, setSelected] = useState<PipelineRequest | null>(null);
@@ -39,6 +41,8 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
   const [loadingServices, setLoadingServices] = useState(false);
   const [busy, setBusy] = useState(false);
   const [operationStatus, setOperationStatus] = useState("");
+  const [operationStep, setOperationStep] = useState(0);
+  const [operationTotal, setOperationTotal] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -128,10 +132,11 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
 
   const saveChanges = async () => {
     if (!selected || !draft) return;
-    setOperationStatus("Saving DevOps changes..."); setBusy(true); setError("");
-    try { const updated = await updatePipelineRequest(selected.id, draft, token); setSelected(updated); setNotice("Request changes saved."); await load(); }
+    setOperationStatus("Saving DevOps changes..."); setOperationStep(1); setOperationTotal(1); setBusy(true); setError("");
+    const started = Date.now();
+    try { const updated = await updatePipelineRequest(selected.id, draft, token); await wait(Math.max(0, 1000 - (Date.now() - started))); setSelected(updated); setNotice("Request changes saved."); await load(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to save changes"); }
-    finally { setBusy(false); setOperationStatus(""); }
+    finally { setBusy(false); setOperationStatus(""); setOperationStep(0); setOperationTotal(0); }
   };
 
   const approve = async () => {
@@ -143,41 +148,62 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
     if (!draft.service_name.trim()) return setError(draft.create_service ? "Provide the Kubernetes service name." : "Select an existing Kubernetes service.");
     if (!azureDevOpsPat.trim()) return setError("Provide your Azure DevOps PAT before approval.");
 
-    const stages = ["Saving approved request values...", "Checking and creating Azure DevOps repository...", draft.reference_repository_name ? "Copying reference repository files..." : "Skipping reference repository copy...", draft.setup_pipeline ? "Creating Azure DevOps build pipeline..." : "Skipping pipeline creation...", draft.create_service ? "Creating Kubernetes service..." : "Validating existing Kubernetes service...", "Updating ingress path...", "Finalizing provisioning results..."];
-    let index = 0; setOperationStatus(stages[0]);
-    const timer = window.setInterval(() => { index = Math.min(index + 1, stages.length - 1); setOperationStatus(stages[index]); }, 1800);
-    setBusy(true); setError(""); setNotice("");
-    try {
+    const stages = [
+      "Saving approved request values...",
+      "Checking and creating Azure DevOps repository...",
+      draft.reference_repository_name ? "Copying reference repository files..." : "Reference repository not selected; skipping template copy...",
+      draft.setup_pipeline ? "Creating Azure DevOps build pipeline..." : "Pipeline setup disabled; skipping pipeline creation...",
+      draft.create_service ? "Creating Kubernetes service..." : "Validating existing Kubernetes service...",
+      "Updating ingress path...",
+      "Finalizing provisioning results...",
+    ];
+
+    setBusy(true); setError(""); setNotice(""); setOperationTotal(stages.length);
+    const operation = (async () => {
       await updatePipelineRequest(selected.id, draft, token);
-      const updated = await approvePipelineRequest(selected.id, azureDevOpsPat, token);
+      return approvePipelineRequest(selected.id, azureDevOpsPat, token);
+    })().then((value) => ({ value, error: null as unknown })).catch((operationError: unknown) => ({ value: null, error: operationError }));
+
+    try {
+      for (let index = 0; index < stages.length; index += 1) {
+        setOperationStep(index + 1);
+        setOperationStatus(stages[index]);
+        await wait(1000);
+      }
+      const result = await operation;
+      if (result.error) throw result.error;
+      const updated = result.value as PipelineRequest;
       setAzureDevOpsPat(""); setSelected(updated); setNotice(`Provisioning finished with status: ${updated.status}. Review and close the ticket.`); await load();
     } catch (reason) {
       setAzureDevOpsPat(""); setError(reason instanceof Error ? reason.message : "Approval failed"); await load();
-    } finally { window.clearInterval(timer); setBusy(false); setOperationStatus(""); }
+    } finally { setBusy(false); setOperationStatus(""); setOperationStep(0); setOperationTotal(0); }
   };
 
   const reject = async () => {
     if (!selected) return;
     const reason = rejectionComment.trim();
     if (!reason) return setError("Rejection comment is mandatory.");
-    setBusy(true); setOperationStatus("Rejecting request..."); setError("");
+    setBusy(true); setOperationStatus("Rejecting request..."); setOperationStep(1); setOperationTotal(1); setError("");
+    const started = Date.now();
     try {
       const updated = await rejectPipelineRequest(selected.id, reason, token);
+      await wait(Math.max(0, 1000 - (Date.now() - started)));
       setSelected(updated); setShowRejectionForm(false); setRejectionComment(""); setNotice("Request rejected with the provided comment."); await load();
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Unable to reject request"); }
-    finally { setBusy(false); setOperationStatus(""); }
+    finally { setBusy(false); setOperationStatus(""); setOperationStep(0); setOperationTotal(0); }
   };
 
   const closeTicket = async () => {
     if (!selected || !closureComment.trim()) return setError("Closure comment is mandatory.");
-    setBusy(true); setOperationStatus("Closing ticket and publishing provisioning details..."); setError("");
-    try { const updated = await closePipelineRequest(selected.id, closureComment.trim(), token); setSelected(updated); setShowClosureForm(false); setClosureComment(""); setNotice("Ticket closed and visible to the developer."); await load(); }
+    setBusy(true); setOperationStatus("Closing ticket and publishing provisioning details..."); setOperationStep(1); setOperationTotal(1); setError("");
+    const started = Date.now();
+    try { const updated = await closePipelineRequest(selected.id, closureComment.trim(), token); await wait(Math.max(0, 1000 - (Date.now() - started))); setSelected(updated); setShowClosureForm(false); setClosureComment(""); setNotice("Ticket closed and visible to the developer."); await load(); }
     catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Unable to close ticket"); }
-    finally { setBusy(false); setOperationStatus(""); }
+    finally { setBusy(false); setOperationStatus(""); setOperationStep(0); setOperationTotal(0); }
   };
 
   return <section>
-    {(busy || previewLoading) && <div className="operation-overlay"><div className="loading-spinner"/><strong>{operationStatus || "Processing request..."}</strong><span>Please wait. Do not refresh or close this page.</span></div>}
+    {(busy || previewLoading) && <div className="operation-overlay"><div className="loading-spinner"/><strong>{operationStatus || "Processing request..."}</strong>{operationTotal > 0 && <><div className="operation-progress-meta"><span>Step {operationStep} of {operationTotal}</span><span>{Math.round((operationStep / operationTotal) * 100)}%</span></div><div className="operation-progress-track"><span style={{ width: `${(operationStep / operationTotal) * 100}%` }} /></div></>}<span>Please wait. Do not refresh or close this page.</span></div>}
     <div className="section-heading"><div><span className="eyebrow">PIPELINE ONBOARDING</span><h2>{role === "devops" ? "DevOps Provisioning Queue" : "My Pipeline Requests"}</h2><p>{role === "devops" ? "Only app-owner-approved requests are displayed here." : "Track app-owner approval, DevOps provisioning and closure details."}</p></div></div>
     <div className="table-card">{loading ? <p>Loading requests...</p> : error && !selected ? <div className="form-error">{error}</div> : requests.length === 0 ? <p>No requests are available.</p> : <table><thead><tr><th>Request ID</th><th>Application</th><th>App Owner</th><th>Repository</th><th>Namespace</th><th>Status</th><th>Action</th></tr></thead><tbody>{requests.map((request) => <tr key={request.id}><td><strong>{request.id}</strong></td><td>{request.application_type}</td><td>{request.app_owner}</td><td>{request.repository_name}</td><td>{request.namespace || "Assigned by DevOps"}</td><td><span className={`status ${statusClass(request.status)}`}>{request.status}</span></td><td><button className="secondary-button compact-button" onClick={() => openPreview(request)}>Preview</button></td></tr>)}</tbody></table>}</div>
 
