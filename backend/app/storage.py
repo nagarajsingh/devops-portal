@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from .config import DATA_FILE
+from .config import DATA_FILE, LOCAL_KUBERNETES_TARGET
 from .logging_config import get_logger
 
 logger = get_logger("storage")
@@ -28,6 +28,7 @@ def normalize_stored_request(item: dict[str, Any]) -> dict[str, Any]:
     item.setdefault("reference_repository_name", "")
     item.setdefault("reference_branch", "")
     item.setdefault("ingress_name", None)
+    item.setdefault("target_cluster", LOCAL_KUBERNETES_TARGET)
     item.setdefault("provisioning", {})
     item.setdefault("timeline", [])
     item.pop("application_name", None)
