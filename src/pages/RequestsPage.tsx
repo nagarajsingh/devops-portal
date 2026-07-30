@@ -3,13 +3,14 @@ import {
   approvePipelineRequest,
   closePipelineRequest,
   getIngresses,
+  getKubernetesTargets,
   getNamespaces,
   getPipelineRequests,
   getServices,
   rejectPipelineRequest,
   updatePipelineRequest,
 } from "../services/api";
-import type { KubernetesService, PipelineRequest, ReviewUpdate, Role } from "../types";
+import type { KubernetesService, KubernetesTarget, PipelineRequest, ReviewUpdate, Role } from "../types";
 
 interface Props { token: string; role: Role; refreshKey: number; }
 
@@ -27,6 +28,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
   const [requests, setRequests] = useState<PipelineRequest[]>([]);
   const [selected, setSelected] = useState<PipelineRequest | null>(null);
   const [draft, setDraft] = useState<ReviewUpdate | null>(null);
+  const [targets, setTargets] = useState<KubernetesTarget[]>([]);
   const [namespaces, setNamespaces] = useState<string[]>([]);
   const [ingresses, setIngresses] = useState<string[]>([]);
   const [services, setServices] = useState<KubernetesService[]>([]);
@@ -60,25 +62,34 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
   useEffect(() => { void load(); }, [token, refreshKey]);
   useEffect(() => {
     if (role !== "devops") return;
-    getNamespaces(token).then(setNamespaces).catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load namespaces"));
+    getKubernetesTargets(token).then(setTargets).catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load Kubernetes targets"));
   }, [role, token]);
 
+  const targetMode = targets.find((item) => item.name === draft?.target_cluster)?.mode ?? (draft?.target_cluster === "local-cluster" ? "direct" : "azure_pipeline");
+  const directTarget = targetMode === "direct";
+
   useEffect(() => {
-    if (role !== "devops" || !draft?.namespace) { setIngresses([]); return; }
+    if (role !== "devops" || !draft?.target_cluster) return;
+    if (!directTarget) { setNamespaces([]); return; }
+    getNamespaces(token, draft.target_cluster).then(setNamespaces).catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load namespaces"));
+  }, [role, token, draft?.target_cluster, directTarget]);
+
+  useEffect(() => {
+    if (role !== "devops" || !draft?.namespace || !directTarget) { setIngresses([]); return; }
     setLoadingIngresses(true); setOperationStatus("Loading available ingress resources...");
-    getIngresses(draft.namespace, token)
+    getIngresses(draft.namespace, token, draft.target_cluster)
       .then((items) => {
         setIngresses(items);
         setDraft((current) => current ? { ...current, ingress_name: current.ingress_name && items.includes(current.ingress_name) ? current.ingress_name : "" } : current);
       })
       .catch((reason) => { setIngresses([]); setError(reason instanceof Error ? reason.message : "Unable to load ingresses"); })
       .finally(() => setLoadingIngresses(false));
-  }, [draft?.namespace, role, token]);
+  }, [draft?.namespace, draft?.target_cluster, directTarget, role, token]);
 
   useEffect(() => {
-    if (role !== "devops" || !draft?.namespace || draft.create_service) { setServices([]); return; }
+    if (role !== "devops" || !draft?.namespace || draft.create_service || !directTarget) { setServices([]); return; }
     setLoadingServices(true); setOperationStatus("Loading existing Kubernetes services...");
-    getServices(draft.namespace, token)
+    getServices(draft.namespace, token, draft.target_cluster)
       .then((items) => {
         setServices(items);
         setDraft((current) => {
@@ -89,7 +100,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
       })
       .catch((reason) => { setServices([]); setError(reason instanceof Error ? reason.message : "Unable to load services"); })
       .finally(() => setLoadingServices(false));
-  }, [draft?.namespace, draft?.create_service, role, token]);
+  }, [draft?.namespace, draft?.create_service, draft?.target_cluster, directTarget, role, token]);
 
   useEffect(() => {
     if (previewLoading && !loadingIngresses && !loadingServices) { setPreviewLoading(false); setOperationStatus(""); }
@@ -126,6 +137,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
       service_name: request.service_name || request.repository_name.replace(/_/g, "-"),
       service_port: request.service_port,
       namespace: request.namespace,
+      target_cluster: request.target_cluster || "local-cluster",
       comments: request.comments,
       review_comments: request.review_comments,
     });
@@ -142,11 +154,12 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
 
   const approve = async () => {
     if (!selected || !draft) return;
-    if (!draft.namespace) return setError("Select a namespace before approval.");
+    if (!draft.target_cluster) return setError("Select a Kubernetes target before approval.");
+    if (!draft.namespace) return setError("Provide a namespace before approval.");
     if (draft.reference_repository_name.trim() && !draft.reference_branch?.trim()) return setError("Provide the reference repository branch before approval.");
     if (draft.setup_pipeline && !draft.reference_repository_name.trim()) return setError("Build and release pipeline setup requires a reference repository.");
-    if (!draft.ingress_name) return setError("Select an ingress before approval.");
-    if (!draft.service_name.trim()) return setError(draft.create_service ? "Provide the Kubernetes service name." : "Select an existing Kubernetes service.");
+    if (!draft.ingress_name) return setError("Provide an ingress resource before approval.");
+    if (!draft.service_name.trim()) return setError(draft.create_service ? "Provide the Kubernetes service name." : "Provide the existing Kubernetes service name.");
     if (!azureDevOpsPat.trim()) return setError("Provide your Azure DevOps PAT before approval.");
 
     const stages = [
@@ -168,9 +181,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
 
     try {
       for (let index = 0; index < stages.length; index += 1) {
-        setOperationStep(index + 1);
-        setOperationStatus(stages[index]);
-        await wait(1000);
+        setOperationStep(index + 1); setOperationStatus(stages[index]); await wait(1000);
       }
       const result = await operation;
       if (result.error) throw result.error;
@@ -187,11 +198,8 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
     if (!reason) return setError("Rejection comment is mandatory.");
     setBusy(true); setOperationStatus("Rejecting request..."); setOperationStep(1); setOperationTotal(1); setError("");
     const started = Date.now();
-    try {
-      const updated = await rejectPipelineRequest(selected.id, reason, token);
-      await wait(Math.max(0, 1000 - (Date.now() - started)));
-      setSelected(updated); setShowRejectionForm(false); setRejectionComment(""); setNotice("Request rejected with the provided comment."); await load();
-    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Unable to reject request"); }
+    try { const updated = await rejectPipelineRequest(selected.id, reason, token); await wait(Math.max(0, 1000 - (Date.now() - started))); setSelected(updated); setShowRejectionForm(false); setRejectionComment(""); setNotice("Request rejected with the provided comment."); await load(); }
+    catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Unable to reject request"); }
     finally { setBusy(false); setOperationStatus(""); setOperationStep(0); setOperationTotal(0); }
   };
 
@@ -222,13 +230,14 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
         <label>Ingress Path<input disabled={role !== "devops"} value={draft.ingress_path} onChange={(e) => setDraft({...draft, ingress_path:e.target.value})}/></label>
         <label>Service Port<input disabled={role !== "devops"} type="number" value={draft.service_port} onChange={(e) => setDraft({...draft, service_port:Number(e.target.value)})}/></label>
         {role === "devops" && <>
-          <label>Namespace<select value={draft.namespace} onChange={(e) => setDraft({...draft, namespace:e.target.value, ingress_name:"", service_name:draft.create_service?draft.repository_name.replace(/_/g,"-"):""})}><option value="">Select namespace</option>{namespaces.map((name)=><option key={name} value={name}>{name}</option>)}</select></label>
+          <label>Target Kubernetes Cluster<select value={draft.target_cluster} onChange={(e) => setDraft({...draft, target_cluster:e.target.value, namespace:"", ingress_name:"", service_name:draft.create_service?draft.repository_name.replace(/_/g,"-"):""})}><option value="">Select target cluster</option>{targets.map((target)=><option key={target.name} value={target.name}>{target.name}</option>)}</select><small>The portal automatically uses direct access or the provisioning pipeline.</small></label>
+          {directTarget ? <label>Namespace<select value={draft.namespace} onChange={(e) => setDraft({...draft, namespace:e.target.value, ingress_name:"", service_name:draft.create_service?draft.repository_name.replace(/_/g,"-"):""})}><option value="">Select namespace</option>{namespaces.map((name)=><option key={name} value={name}>{name}</option>)}</select></label> : <label>Namespace<input value={draft.namespace} placeholder="mobile-orchestration-sit" onChange={(e)=>setDraft({...draft,namespace:e.target.value.toLowerCase(),ingress_name:""})}/></label>}
           <label>Build & Release Pipeline Setup<select value={String(draft.setup_pipeline)} onChange={(e) => setDraft({...draft, setup_pipeline:e.target.value==="true"})}><option value="true">Yes</option><option value="false">No</option></select></label>
           <label>Reference Branch<input disabled={!draft.reference_repository_name.trim()} value={draft.reference_branch ?? ""} placeholder={draft.application_type === "Native-Mobile" ? "develop" : "release/uat"} onChange={(e) => setDraft({...draft, reference_branch:e.target.value.trim()})}/></label>
-          <label>Ingress Resource<select value={draft.ingress_name ?? ""} disabled={!draft.namespace || loadingIngresses} onChange={(e) => setDraft({...draft, ingress_name:e.target.value})}><option value="">{loadingIngresses?"Loading ingresses...":"Select ingress"}</option>{ingresses.map((name)=><option key={name} value={name}>{name}</option>)}</select></label>
+          {directTarget ? <label>Ingress Resource<select value={draft.ingress_name ?? ""} disabled={!draft.namespace || loadingIngresses} onChange={(e) => setDraft({...draft, ingress_name:e.target.value})}><option value="">{loadingIngresses?"Loading ingresses...":"Select ingress"}</option>{ingresses.map((name)=><option key={name} value={name}>{name}</option>)}</select></label> : <label>Ingress Resource<input value={draft.ingress_name ?? ""} placeholder="existing-ingress-name" onChange={(e)=>setDraft({...draft,ingress_name:e.target.value.toLowerCase()})}/></label>}
           <label className="checkbox-line"><input type="checkbox" checked={draft.create_service} onChange={(e) => setDraft({...draft, create_service:e.target.checked, service_name:e.target.checked?draft.repository_name.replace(/_/g,"-"):""})}/>Create Kubernetes Service</label>
-          {draft.create_service ? <label>Service Name<input value={draft.service_name} onChange={(e) => setDraft({...draft, service_name:e.target.value.replace(/_/g,"-")})}/></label> : <label>Existing Service<select value={draft.service_name} disabled={!draft.namespace || loadingServices} onChange={(e)=>{const service=services.find((item)=>item.name===e.target.value);setDraft({...draft,service_name:e.target.value,service_port:service?.ports[0]??draft.service_port});}}><option value="">{loadingServices?"Loading services...":"Select existing service"}</option>{services.map((service)=><option key={service.name} value={service.name}>{service.name}</option>)}</select></label>}
-          {!draft.create_service && selectedService?.ports.length ? <label>Existing Service Port<select value={draft.service_port} onChange={(e)=>setDraft({...draft,service_port:Number(e.target.value)})}>{selectedService.ports.map((port)=><option key={port}>{port}</option>)}</select></label> : null}
+          {draft.create_service ? <label>Service Name<input value={draft.service_name} onChange={(e) => setDraft({...draft, service_name:e.target.value.replace(/_/g,"-")})}/></label> : directTarget ? <label>Existing Service<select value={draft.service_name} disabled={!draft.namespace || loadingServices} onChange={(e)=>{const service=services.find((item)=>item.name===e.target.value);setDraft({...draft,service_name:e.target.value,service_port:service?.ports[0]??draft.service_port});}}><option value="">{loadingServices?"Loading services...":"Select existing service"}</option>{services.map((service)=><option key={service.name} value={service.name}>{service.name}</option>)}</select></label> : <label>Existing Service<input value={draft.service_name} placeholder="existing-service-name" onChange={(e)=>setDraft({...draft,service_name:e.target.value.replace(/_/g,"-")})}/></label>}
+          {!draft.create_service && directTarget && selectedService?.ports.length ? <label>Existing Service Port<select value={draft.service_port} onChange={(e)=>setDraft({...draft,service_port:Number(e.target.value)})}>{selectedService.ports.map((port)=><option key={port}>{port}</option>)}</select></label> : null}
           {editableStatuses.includes(selected.status) && <label className="full-width">Azure DevOps PAT<input type="password" autoComplete="new-password" value={azureDevOpsPat} placeholder="PAT is used once and never stored" onChange={(e)=>setAzureDevOpsPat(e.target.value)}/></label>}
         </>}
         <label className="full-width">Developer Comments<textarea disabled rows={3} value={draft.comments ?? ""}/></label>
