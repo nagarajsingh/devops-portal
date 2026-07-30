@@ -41,6 +41,7 @@ def create_pipeline_request(payload: PipelineRequestCreate, user: UserContext) -
         "create_service": False,
         "service_name": payload.repository_name.replace("_", "-"),
         "service_port": default_port,
+        "reference_branch": "develop" if payload.application_type == "Native-Mobile" else (payload.reference_branch or ""),
     })
 
     created = now_iso()
@@ -157,13 +158,19 @@ def update_pipeline_request(request_id: str, payload: ReviewUpdate, user: UserCo
         raise HTTPException(status_code=400, detail=f"Ingress {payload.ingress_name} does not exist in namespace {payload.namespace}")
     if payload.setup_pipeline and not payload.reference_repository_name.strip():
         raise HTTPException(status_code=400, detail="Reference repository is required when pipeline setup is enabled")
-    if payload.reference_repository_name.strip() and not payload.reference_branch.strip():
+
+    reference_branch = payload.reference_branch.strip()
+    if payload.application_type == "Native-Mobile" and payload.reference_repository_name.strip() and not reference_branch:
+        reference_branch = "develop"
+    if payload.reference_repository_name.strip() and not reference_branch:
         raise HTTPException(status_code=400, detail="Reference repository branch must be provided when a reference repository is selected")
 
     original = current.get("original_request") or {key: current.get(key) for key in PipelineRequestCreate.model_fields}
+    updated_values = payload.model_dump(exclude={"review_comments", "app_owner"})
+    updated_values["reference_branch"] = reference_branch
     updated = {
         **current,
-        **payload.model_dump(exclude={"review_comments", "app_owner"}),
+        **updated_values,
         "app_owner": current.get("app_owner") or APP_OWNER_EMAILS.get(payload.application_type, ""),
         "review_comments": payload.review_comments,
         "reviewed_by": user.username,
