@@ -5,6 +5,7 @@ import "./styles.css";
 import "./feature.css";
 import "./notifications.css";
 import "./features/monitoring/monitoring.css";
+import "./features/monitoring/categories.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
