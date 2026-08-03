@@ -28,18 +28,19 @@ AZDO_ORG = env("AZURE_DEVOPS_ORGANIZATION")
 AZDO_PROJECT = env("AZURE_DEVOPS_PROJECT")
 BOOTSTRAP_BRANCH = env("BOOTSTRAP_BRANCH", "feature/devops") or "feature/devops"
 
-LOCAL_KUBERNETES_TARGET = env("LOCAL_KUBERNETES_TARGET", "local-cluster") or "local-cluster"
+LOCAL_KUBERNETES_TARGET = env("LOCAL_KUBERNETES_TARGET", "mashreq-titan-non-prod") or "mashreq-titan-non-prod"
 DEFAULT_KUBERNETES_TARGETS = [
     LOCAL_KUBERNETES_TARGET,
     "mashreq-nativemob-safenet-nonprod",
     "mashreq-titan-non-prod",
     "mashreqdigicollecteguat",
 ]
-KUBERNETES_TARGETS = [
+_configured_targets = [
     item.strip()
     for item in env("KUBERNETES_TARGETS", ",".join(DEFAULT_KUBERNETES_TARGETS)).split(",")
     if item.strip()
 ]
+KUBERNETES_TARGETS = list(dict.fromkeys(_configured_targets))
 KUBERNETES_PROVISIONING_PIPELINE_ID = int(env("KUBERNETES_PROVISIONING_PIPELINE_ID", "1586"))
 KUBERNETES_PROVISIONING_TIMEOUT_SECONDS = int(env("KUBERNETES_PROVISIONING_TIMEOUT_SECONDS", "900"))
 KUBERNETES_PROVISIONING_POLL_SECONDS = max(2, int(env("KUBERNETES_PROVISIONING_POLL_SECONDS", "10")))
