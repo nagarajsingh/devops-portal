@@ -3,7 +3,7 @@ from __future__ import annotations
 import html
 import time
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
@@ -17,7 +17,7 @@ from .monitoring import build_monitoring_summary
 from .request_service import approve_pipeline_request, close_pipeline_request, create_pipeline_request, get_pipeline_request, list_pipeline_requests, process_app_owner_action, reject_pipeline_request, update_pipeline_request
 
 logger = get_logger("api")
-app = FastAPI(title="DevOps Portal API", version="3.7.0")
+app = FastAPI(title="DevOps Portal API", version="3.8.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -74,18 +74,12 @@ def application_owners(_: UserContext = Depends(current_user)) -> dict[str, str]
 
 @app.get("/configuration/kubernetes-targets", response_model=list[KubernetesTargetOption])
 def kubernetes_targets(_: UserContext = Depends(require_devops)) -> list[KubernetesTargetOption]:
-    return [
-        KubernetesTargetOption(
-            name=name,
-            mode="direct" if name == LOCAL_KUBERNETES_TARGET else "azure_pipeline",
-        )
-        for name in KUBERNETES_TARGETS
-    ]
+    return [KubernetesTargetOption(name=name, mode="direct" if name == LOCAL_KUBERNETES_TARGET else "azure_pipeline") for name in KUBERNETES_TARGETS]
 
 
 @app.get("/monitoring/summary")
-def monitoring_summary(_: UserContext = Depends(require_devops)) -> dict:
-    return build_monitoring_summary()
+def monitoring_summary(days: int = Query(1, ge=1, le=90), _: UserContext = Depends(require_devops)) -> dict:
+    return build_monitoring_summary(days=days)
 
 
 def _validate_target(target_cluster: str) -> None:
