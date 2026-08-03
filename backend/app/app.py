@@ -13,10 +13,11 @@ from .config import APP_OWNER_EMAILS, KUBERNETES_TARGETS, LOCAL_KUBERNETES_TARGE
 from .kubernetes_ops import cluster_namespaces, namespace_ingresses, namespace_services
 from .logging_config import get_logger
 from .models import ApproveRequest, CloseRequest, KubernetesTargetOption, LoginRequest, LoginResponse, PipelineRequest, PipelineRequestCreate, RejectRequest, ReviewUpdate, ServiceOption, UserContext
+from .monitoring import build_monitoring_summary
 from .request_service import approve_pipeline_request, close_pipeline_request, create_pipeline_request, get_pipeline_request, list_pipeline_requests, process_app_owner_action, reject_pipeline_request, update_pipeline_request
 
 logger = get_logger("api")
-app = FastAPI(title="DevOps Portal API", version="3.6.0")
+app = FastAPI(title="DevOps Portal API", version="3.7.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -80,6 +81,11 @@ def kubernetes_targets(_: UserContext = Depends(require_devops)) -> list[Kuberne
         )
         for name in KUBERNETES_TARGETS
     ]
+
+
+@app.get("/monitoring/summary")
+def monitoring_summary(_: UserContext = Depends(require_devops)) -> dict:
+    return build_monitoring_summary()
 
 
 def _validate_target(target_cluster: str) -> None:
