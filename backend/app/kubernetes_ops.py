@@ -20,16 +20,20 @@ def load_k8s() -> None:
         logger.debug("Loaded local Kubernetes configuration")
 
 
+def _all_namespaces_enabled() -> bool:
+    return any(value.lower() == "all" for value in NAMESPACE_ALLOWLIST)
+
+
 def cluster_namespaces() -> list[str]:
     try:
         load_k8s()
         names = [item.metadata.name for item in client.CoreV1Api().list_namespace().items]
-        allowed = sorted(name for name in names if not NAMESPACE_ALLOWLIST or name in NAMESPACE_ALLOWLIST)
+        allowed = sorted(names if _all_namespaces_enabled() or not NAMESPACE_ALLOWLIST else [name for name in names if name in NAMESPACE_ALLOWLIST])
         logger.debug("Namespaces loaded count=%s allowed=%s", len(names), len(allowed))
         return allowed
     except Exception:
         logger.exception("Unable to list namespaces; using configured allowlist")
-        return sorted(NAMESPACE_ALLOWLIST)
+        return [] if _all_namespaces_enabled() else sorted(NAMESPACE_ALLOWLIST)
 
 
 def namespace_ingresses(namespace: str) -> list[str]:
