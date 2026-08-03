@@ -9,6 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from .config import (
     KUBERNETES_INVENTORY_PAT,
     KUBERNETES_INVENTORY_PIPELINE_ID,
     KUBERNETES_INVENTORY_REFRESH_SECONDS,
+    LOCAL_KUBERNETES_TARGET,
 )
 from .logging_config import get_logger
 from .models import ServiceOption
@@ -28,6 +30,8 @@ logger = get_logger("cluster-inventory")
 _refresh_lock = threading.RLock()
 _last_refresh_monotonic = 0.0
 _last_downloaded_run_id: int | None = None
+EMPTY_INVENTORY: dict[str, Any] = {"generated_at": None, "clusters": {}}
+LOCAL_CLUSTER_FALLBACK = "mashreq-titan-non-prod"
 
 
 def _azdo_json(path: str) -> tuple[int, dict[str, Any]]:
@@ -109,11 +113,7 @@ def _download_inventory(run_id: int) -> dict[str, Any]:
 
     archive_bytes = _download_bytes(download_url)
     with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
-        candidates = [
-            name
-            for name in archive.namelist()
-            if name.endswith("cluster-inventory.json")
-        ]
+        candidates = [name for name in archive.namelist() if name.endswith("cluster-inventory.json")]
         if not candidates:
             raise RuntimeError("cluster-inventory.json was not found in the pipeline artifact")
         payload = json.loads(archive.read(candidates[0]).decode("utf-8"))
@@ -121,6 +121,53 @@ def _download_inventory(run_id: int) -> dict[str, Any]:
     if not isinstance(payload.get("clusters"), dict):
         raise RuntimeError("Inventory artifact does not contain a valid clusters object")
     return payload
+
+
+def _read_json_file(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else None
+    except (OSError, json.JSONDecodeError):
+        logger.exception("Unable to read Kubernetes inventory JSON file=%s", path)
+        return None
+
+
+def _file_timestamp(path: Path) -> str | None:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+    except OSError:
+        return None
+
+
+def _read_inventory_directory(directory: Path) -> dict[str, Any]:
+    clusters: dict[str, Any] = {}
+    generated_at: str | None = None
+
+    for path in sorted(directory.glob("*.json")):
+        payload = _read_json_file(path)
+        if not payload:
+            continue
+
+        payload_generated_at = payload.get("generated_at") or payload.get("collected_at") or _file_timestamp(path)
+        if payload_generated_at and (generated_at is None or str(payload_generated_at) > generated_at):
+            generated_at = str(payload_generated_at)
+
+        combined_clusters = payload.get("clusters")
+        if isinstance(combined_clusters, dict):
+            for name, cluster in combined_clusters.items():
+                if isinstance(cluster, dict):
+                    clusters[str(name)] = cluster
+            continue
+
+        cluster_name = str(payload.get("cluster") or path.stem).strip()
+        namespaces = payload.get("namespaces")
+        if cluster_name and isinstance(namespaces, dict):
+            clusters[cluster_name] = {
+                "collected_at": payload.get("collected_at") or payload_generated_at,
+                "namespaces": namespaces,
+            }
+
+    return {"generated_at": generated_at, "clusters": clusters}
 
 
 def refresh_inventory(force: bool = False) -> dict[str, Any]:
@@ -132,8 +179,11 @@ def refresh_inventory(force: bool = False) -> dict[str, Any]:
             return read_inventory()
         _last_refresh_monotonic = now
 
+        if KUBERNETES_INVENTORY_FILE.is_dir():
+            return read_inventory()
+
         if KUBERNETES_INVENTORY_PIPELINE_ID <= 0 or not KUBERNETES_INVENTORY_PAT:
-            logger.warning("Inventory synchronization is not configured; using cached inventory file")
+            logger.info("Using Kubernetes inventory from configured NFS file or directory")
             return read_inventory()
 
         latest = _latest_successful_run()
@@ -162,22 +212,47 @@ def refresh_inventory(force: bool = False) -> dict[str, Any]:
 
 def read_inventory() -> dict[str, Any]:
     if not KUBERNETES_INVENTORY_FILE.exists():
-        return {"generated_at": None, "clusters": {}}
-    try:
-        payload = json.loads(KUBERNETES_INVENTORY_FILE.read_text(encoding="utf-8"))
-        return payload if isinstance(payload, dict) else {"generated_at": None, "clusters": {}}
-    except (OSError, json.JSONDecodeError):
-        logger.exception("Unable to read Kubernetes inventory file=%s", KUBERNETES_INVENTORY_FILE)
-        return {"generated_at": None, "clusters": {}}
+        return dict(EMPTY_INVENTORY)
+
+    if KUBERNETES_INVENTORY_FILE.is_dir():
+        return _read_inventory_directory(KUBERNETES_INVENTORY_FILE)
+
+    payload = _read_json_file(KUBERNETES_INVENTORY_FILE)
+    if not payload:
+        return dict(EMPTY_INVENTORY)
+
+    if isinstance(payload.get("clusters"), dict):
+        return payload
+
+    cluster_name = str(payload.get("cluster") or KUBERNETES_INVENTORY_FILE.stem).strip()
+    namespaces = payload.get("namespaces")
+    if cluster_name and isinstance(namespaces, dict):
+        return {
+            "generated_at": payload.get("collected_at") or _file_timestamp(KUBERNETES_INVENTORY_FILE),
+            "clusters": {
+                cluster_name: {
+                    "collected_at": payload.get("collected_at"),
+                    "namespaces": namespaces,
+                }
+            },
+        }
+
+    logger.error("Kubernetes inventory does not contain clusters or a single-cluster payload file=%s", KUBERNETES_INVENTORY_FILE)
+    return dict(EMPTY_INVENTORY)
 
 
 def _cluster(target_cluster: str) -> dict[str, Any]:
     inventory = refresh_inventory()
-    cluster = (inventory.get("clusters") or {}).get(target_cluster)
+    clusters = inventory.get("clusters") or {}
+    cluster = clusters.get(target_cluster)
+
+    if not isinstance(cluster, dict) and target_cluster == LOCAL_KUBERNETES_TARGET:
+        cluster = clusters.get(LOCAL_CLUSTER_FALLBACK)
+
     if not isinstance(cluster, dict):
         raise RuntimeError(
             f"No inventory is available for Kubernetes target {target_cluster}. "
-            "Run the scheduled inventory pipeline and verify its artifact."
+            f"Verify JSON files under {KUBERNETES_INVENTORY_FILE}."
         )
     return cluster
 
