@@ -5,18 +5,12 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from kubernetes import client
 
-from ..config import (
-    AZDO_ORG,
-    AZDO_PROJECT,
-    KUBERNETES_INVENTORY_PAT,
-    LOCAL_KUBERNETES_TARGET,
-    NAMESPACE_ALLOWLIST,
-)
+from ..config import AZDO_ORG, AZDO_PROJECT, KUBERNETES_INVENTORY_PAT, LOCAL_KUBERNETES_TARGET, NAMESPACE_ALLOWLIST
 from ..kubernetes_ops import load_k8s
 from ..logging_config import get_logger
 from .service import build_monitoring_summary as build_stored_summary
@@ -28,13 +22,9 @@ def _request_json(url: str) -> dict[str, Any]:
     if not KUBERNETES_INVENTORY_PAT:
         raise RuntimeError("KUBERNETES_INVENTORY_PAT is not configured")
     token = base64.b64encode(f":{KUBERNETES_INVENTORY_PAT}".encode()).decode()
-    request = urllib.request.Request(
-        url,
-        headers={"Authorization": f"Basic {token}", "Accept": "application/json"},
-        method="GET",
-    )
+    request = urllib.request.Request(url, headers={"Authorization": f"Basic {token}", "Accept": "application/json"}, method="GET")
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=45) as response:
             return json.loads(response.read().decode("utf-8", errors="replace") or "{}")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -43,77 +33,151 @@ def _request_json(url: str) -> dict[str, Any]:
 
 def _azdo_url(path: str, release: bool = False) -> str:
     host = "vsrm.dev.azure.com" if release else "dev.azure.com"
-    return (
-        f"https://{host}/{urllib.parse.quote(AZDO_ORG)}/"
-        f"{urllib.parse.quote(AZDO_PROJECT)}/{path}"
-    )
+    return f"https://{host}/{urllib.parse.quote(AZDO_ORG)}/{urllib.parse.quote(AZDO_PROJECT)}/{path}"
 
 
-def _live_pipeline_metrics() -> dict[str, Any]:
+def _iso(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _build_row(row: dict[str, Any], yaml_definition_ids: set[int]) -> dict[str, Any]:
+    definition = row.get("definition") or {}
+    definition_id = int(definition.get("id") or 0)
+    return {
+        "id": row.get("id"),
+        "name": definition.get("name") or row.get("buildNumber"),
+        "build_number": row.get("buildNumber"),
+        "status": row.get("status") or "unknown",
+        "result": row.get("result") or "",
+        "reason": row.get("reason") or "",
+        "pipeline_type": "YAML" if definition_id in yaml_definition_ids else "Classic build",
+        "queue_time": row.get("queueTime"),
+        "start_time": row.get("startTime"),
+        "finish_time": row.get("finishTime"),
+        "requested_by": (row.get("requestedFor") or {}).get("displayName"),
+        "url": ((row.get("_links") or {}).get("web") or {}).get("href"),
+    }
+
+
+def _release_row(row: dict[str, Any]) -> dict[str, Any]:
+    release = row.get("release") or {}
+    definition = release.get("releaseDefinition") or row.get("releaseDefinition") or {}
+    environment = row.get("releaseEnvironment") or {}
+    return {
+        "id": row.get("id"),
+        "name": definition.get("name") or release.get("name") or "Classic release",
+        "release_name": release.get("name"),
+        "environment": environment.get("name"),
+        "status": row.get("deploymentStatus") or row.get("status") or "unknown",
+        "started_on": row.get("startedOn") or row.get("queuedOn"),
+        "completed_on": row.get("completedOn"),
+        "requested_by": (row.get("requestedBy") or {}).get("displayName"),
+        "url": ((release.get("_links") or {}).get("web") or {}).get("href"),
+    }
+
+
+def _live_pipeline_metrics(days: int) -> dict[str, Any]:
     if not AZDO_ORG or not AZDO_PROJECT:
         raise RuntimeError("AZURE_DEVOPS_ORGANIZATION and AZURE_DEVOPS_PROJECT are required")
 
+    days = max(1, min(days, 90))
+    now = datetime.now(timezone.utc)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0) if days == 1 else now - timedelta(days=days)
+
     definitions = _request_json(_azdo_url("_apis/build/definitions?$top=10000&api-version=7.1"))
-    builds = _request_json(
-        _azdo_url(
-            "_apis/build/builds?queryOrder=queueTimeDescending&$top=200&api-version=7.1"
-        )
-    )
-    build_rows = builds.get("value") or []
-    running = sum(str(row.get("status") or "").lower() in {"inprogress", "notstarted", "postponed"} for row in build_rows)
-    completed = sum(str(row.get("status") or "").lower() == "completed" for row in build_rows)
-    succeeded = sum(str(row.get("result") or "").lower() in {"succeeded", "partiallysucceeded"} for row in build_rows)
-    failed = sum(str(row.get("result") or "").lower() in {"failed", "canceled"} for row in build_rows)
-    manual_builds = sum(str(row.get("reason") or "").lower() == "manual" for row in build_rows)
-    yaml_builds = sum(str(row.get("reason") or "").lower() != "manual" for row in build_rows)
+    definition_rows = definitions.get("value") or []
+    yaml_definition_ids = {
+        int(row.get("id"))
+        for row in definition_rows
+        if row.get("id") and str((row.get("process") or {}).get("type") or "") == "2"
+    }
+
+    build_query = urllib.parse.urlencode({
+        "queryOrder": "queueTimeDescending",
+        "minTime": _iso(start),
+        "$top": "1000",
+        "api-version": "7.1",
+    })
+    build_rows = (_request_json(_azdo_url(f"_apis/build/builds?{build_query}")).get("value") or [])
+    builds = [_build_row(row, yaml_definition_ids) for row in build_rows]
+
+    running_rows = [row for row in builds if str(row["status"]).lower() == "inprogress"]
+    queued_rows = [row for row in builds if str(row["status"]).lower() in {"notstarted", "postponed"}]
+    completed_rows = [row for row in builds if str(row["status"]).lower() == "completed"]
+    succeeded_rows = [row for row in completed_rows if str(row["result"]).lower() in {"succeeded", "partiallysucceeded"}]
+    failed_rows = [row for row in completed_rows if str(row["result"]).lower() in {"failed", "canceled"}]
+
+    yaml_rows = [row for row in builds if row["pipeline_type"] == "YAML"]
+    yaml_running = [row for row in yaml_rows if str(row["status"]).lower() == "inprogress"]
+    yaml_queued = [row for row in yaml_rows if str(row["status"]).lower() in {"notstarted", "postponed"}]
+    yaml_completed = [row for row in yaml_rows if str(row["status"]).lower() == "completed"]
 
     release_definitions = 0
-    deployments_completed = 0
-    deployments_running = 0
-    deployments_failed = 0
+    classic_rows: list[dict[str, Any]] = []
+    release_error = ""
     try:
         release_defs = _request_json(_azdo_url("_apis/release/definitions?$top=10000&api-version=7.1", release=True))
         release_definitions = int(release_defs.get("count") or len(release_defs.get("value") or []))
-        deployments = _request_json(_azdo_url("_apis/release/deployments?$top=200&queryOrder=descending&api-version=7.1", release=True))
-        deployment_rows = deployments.get("value") or []
-        deployments_completed = sum(str(row.get("deploymentStatus") or "").lower() == "succeeded" for row in deployment_rows)
-        deployments_running = sum(str(row.get("deploymentStatus") or "").lower() in {"inprogress", "queued", "scheduled"} for row in deployment_rows)
-        deployments_failed = sum(str(row.get("deploymentStatus") or "").lower() in {"failed", "canceled", "rejected"} for row in deployment_rows)
-    except Exception:
-        logger.exception("Unable to load live classic release data; build data remains available")
+        release_query = urllib.parse.urlencode({"minModifiedTime": _iso(start), "$top": "1000", "queryOrder": "descending", "api-version": "7.1"})
+        raw_deployments = _request_json(_azdo_url(f"_apis/release/deployments?{release_query}", release=True)).get("value") or []
+        classic_rows = [_release_row(row) for row in raw_deployments]
+    except Exception as exc:
+        release_error = str(exc)
+        logger.exception("Unable to load live classic release data")
 
-    recent = [
-        {
-            "id": row.get("id"),
-            "name": (row.get("definition") or {}).get("name") or row.get("buildNumber"),
-            "build_number": row.get("buildNumber"),
-            "status": row.get("status"),
-            "result": row.get("result"),
-            "reason": row.get("reason"),
-            "queue_time": row.get("queueTime"),
-            "finish_time": row.get("finishTime"),
-            "requested_by": (row.get("requestedFor") or {}).get("displayName"),
-            "url": ((row.get("_links") or {}).get("web") or {}).get("href"),
-        }
-        for row in build_rows[:20]
-    ]
+    classic_running = [row for row in classic_rows if str(row["status"]).lower() == "inprogress"]
+    classic_pending = [row for row in classic_rows if str(row["status"]).lower() in {"queued", "scheduled", "notdeployed", "pending"}]
+    classic_completed = [row for row in classic_rows if str(row["status"]).lower() == "succeeded"]
+    classic_failed = [row for row in classic_rows if str(row["status"]).lower() in {"failed", "canceled", "rejected"}]
 
     return {
-        "running": running,
-        "definitions": int(definitions.get("count") or len(definitions.get("value") or [])),
-        "builds_completed": completed,
-        "builds_succeeded": succeeded,
-        "builds_failed": failed,
-        "manual_builds": manual_builds,
-        "yaml_builds": yaml_builds,
-        "release_definitions": release_definitions,
-        "deployments_completed": deployments_completed,
-        "deployments_running": deployments_running,
-        "deployments_failed": deployments_failed,
-        "recent_runs": recent,
+        "days": days,
+        "from": _iso(start),
+        "to": _iso(now),
+        "definitions": len(definition_rows),
+        "running": len(running_rows),
+        "queued": len(queued_rows),
+        "builds_completed": len(completed_rows),
+        "builds_succeeded": len(succeeded_rows),
+        "builds_failed": len(failed_rows),
+        "running_runs": running_rows[:50],
+        "queued_runs": queued_rows[:50],
+        "completed_runs": completed_rows[:100],
+        "yaml": {
+            "definitions": len(yaml_definition_ids),
+            "running": len(yaml_running),
+            "queued": len(yaml_queued),
+            "completed": len(yaml_completed),
+            "failed": sum(str(row["result"]).lower() in {"failed", "canceled"} for row in yaml_completed),
+            "runs": yaml_rows[:100],
+        },
+        "classic": {
+            "definitions": release_definitions,
+            "running": len(classic_running),
+            "pending": len(classic_pending),
+            "completed": len(classic_completed),
+            "failed": len(classic_failed),
+            "deployments": classic_rows[:100],
+            "error": release_error,
+        },
         "source": "Titan live Azure DevOps API",
-        "collected_at": datetime.now(timezone.utc).isoformat(),
+        "collected_at": _iso(now),
     }
+
+
+def _quantity_to_gib(value: Any) -> float:
+    text = str(value or "0")
+    units = {"Ki": 1 / 1024 / 1024, "Mi": 1 / 1024, "Gi": 1, "Ti": 1024, "K": 1 / 1000 / 1000, "M": 1 / 1000, "G": 1, "T": 1000}
+    for suffix, multiplier in units.items():
+        if text.endswith(suffix):
+            try:
+                return round(float(text[:-len(suffix)]) * multiplier, 2)
+            except ValueError:
+                return 0.0
+    try:
+        return round(float(text) / 1024 / 1024 / 1024, 2)
+    except ValueError:
+        return 0.0
 
 
 def _live_local_cluster() -> dict[str, Any]:
@@ -122,14 +186,31 @@ def _live_local_cluster() -> dict[str, Any]:
     apps = client.AppsV1Api()
     networking = client.NetworkingV1Api()
     all_namespaces = [item.metadata.name for item in core.list_namespace().items if item.metadata and item.metadata.name]
-    names = sorted(name for name in all_namespaces if not NAMESPACE_ALLOWLIST or name in NAMESPACE_ALLOWLIST)
-    rows: list[dict[str, Any]] = []
-    services_total = 0
-    ingresses_total = 0
-    deployments_total = 0
-    deployments_available = 0
-    deployments_unavailable = 0
+    show_all = any(value.lower() == "all" for value in NAMESPACE_ALLOWLIST)
+    names = sorted(all_namespaces if show_all or not NAMESPACE_ALLOWLIST else [name for name in all_namespaces if name in NAMESPACE_ALLOWLIST])
 
+    pv_rows = []
+    total_capacity = 0.0
+    total_allocated = 0.0
+    for pv in core.list_persistent_volume().items:
+        capacity = _quantity_to_gib((pv.spec.capacity or {}).get("storage"))
+        claim_ref = pv.spec.claim_ref
+        requested = capacity if claim_ref else 0.0
+        total_capacity += capacity
+        total_allocated += requested
+        pv_rows.append({
+            "name": pv.metadata.name,
+            "capacity_gib": capacity,
+            "allocated_gib": requested,
+            "available_gib": round(max(0.0, capacity - requested), 2),
+            "status": (pv.status.phase if pv.status else "Unknown"),
+            "storage_class": pv.spec.storage_class_name or "",
+            "access_modes": pv.spec.access_modes or [],
+            "claim": f"{claim_ref.namespace}/{claim_ref.name}" if claim_ref else "",
+        })
+
+    rows: list[dict[str, Any]] = []
+    services_total = ingresses_total = deployments_total = healthy = unhealthy = 0
     for namespace in names:
         services = core.list_namespaced_service(namespace).items
         ingresses = networking.list_namespaced_ingress(namespace).items
@@ -141,27 +222,14 @@ def _live_local_cluster() -> dict[str, Any]:
             desired = int(deployment.spec.replicas or 0)
             available = int(deployment.status.available_replicas or 0)
             unavailable = int(deployment.status.unavailable_replicas or 0)
+            is_healthy = desired == available and unavailable == 0
             deployments_total += 1
-            deployments_available += 1 if desired == available and unavailable == 0 else 0
-            deployments_unavailable += 1 if desired != available or unavailable > 0 else 0
-            deployment_rows.append({
-                "name": deployment.metadata.name,
-                "desired": desired,
-                "available": available,
-                "unavailable": unavailable,
-                "status": "Healthy" if desired == available and unavailable == 0 else "Warning",
-            })
+            healthy += int(is_healthy)
+            unhealthy += int(not is_healthy)
+            deployment_rows.append({"name": deployment.metadata.name, "desired": desired, "available": available, "unavailable": unavailable, "status": "Healthy" if is_healthy else "Warning"})
         services_total += len(service_names)
         ingresses_total += len(ingress_names)
-        rows.append({
-            "name": namespace,
-            "services": len(service_names),
-            "ingresses": len(ingress_names),
-            "deployments": len(deployment_rows),
-            "service_names": service_names,
-            "ingress_names": ingress_names,
-            "deployment_details": deployment_rows,
-        })
+        rows.append({"name": namespace, "services": len(service_names), "ingresses": len(ingress_names), "deployments": len(deployment_rows), "service_names": service_names, "ingress_names": ingress_names, "deployment_details": deployment_rows})
 
     return {
         "name": LOCAL_KUBERNETES_TARGET,
@@ -173,16 +241,17 @@ def _live_local_cluster() -> dict[str, Any]:
         "services": services_total,
         "ingresses": ingresses_total,
         "deployments": deployments_total,
-        "deployments_healthy": deployments_available,
-        "deployments_unhealthy": deployments_unavailable,
+        "deployments_healthy": healthy,
+        "deployments_unhealthy": unhealthy,
         "namespace_details": rows,
+        "persistent_volumes": pv_rows,
+        "storage": {"capacity_gib": round(total_capacity, 2), "allocated_gib": round(total_allocated, 2), "available_gib": round(max(0.0, total_capacity - total_allocated), 2)},
         "source": "Live in-cluster Kubernetes API",
     }
 
 
-def build_monitoring_summary() -> dict[str, Any]:
+def build_monitoring_summary(days: int = 1) -> dict[str, Any]:
     summary = build_stored_summary()
-
     try:
         local = _live_local_cluster()
         clusters = [row for row in summary.get("clusters", []) if row.get("name") != LOCAL_KUBERNETES_TARGET]
@@ -192,28 +261,22 @@ def build_monitoring_summary() -> dict[str, Any]:
         summary["kubernetes_live_error"] = str(exc)
 
     try:
-        live = _live_pipeline_metrics()
+        live = _live_pipeline_metrics(days)
         summary["live_pipeline_metrics"] = live
         summary["pipeline_metrics"] = {
-            "running": live["running"],
-            "build_created": live["definitions"],
-            "release_created": live["release_definitions"],
-            "build_failed": live["builds_failed"],
-            "release_failed": live["deployments_failed"],
-            "builds_completed": live["builds_completed"],
-            "builds_succeeded": live["builds_succeeded"],
-            "manual_builds": live["manual_builds"],
-            "yaml_builds": live["yaml_builds"],
-            "deployments_completed": live["deployments_completed"],
-            "deployments_running": live["deployments_running"],
+            "running": live["running"], "queued": live["queued"], "build_created": live["builds_completed"],
+            "release_created": live["classic"]["completed"], "build_failed": live["builds_failed"],
+            "release_failed": live["classic"]["failed"], "builds_completed": live["builds_completed"],
+            "builds_succeeded": live["builds_succeeded"], "manual_builds": 0, "yaml_builds": live["yaml"]["completed"],
+            "deployments_completed": live["classic"]["completed"], "deployments_running": live["classic"]["running"],
         }
         for card in summary.get("cards", []):
             if card.get("key") == "pipelines":
-                card.update(value=live["running"], detail=f"{live['builds_completed']} completed · {live['definitions']} definitions")
+                card.update(value=live["running"], detail=f"{live['queued']} queued · {live['builds_completed']} completed")
             elif card.get("key") == "builds":
-                card.update(value=live["builds_completed"], detail=f"{live['builds_succeeded']} succeeded · {live['builds_failed']} failed")
+                card.update(value=live["builds_completed"], label="Build Runs Completed", detail=f"{live['builds_succeeded']} succeeded · {live['builds_failed']} failed")
             elif card.get("key") == "releases":
-                card.update(value=live["deployments_completed"], detail=f"{live['deployments_running']} running · {live['release_definitions']} definitions")
+                card.update(value=live["classic"]["completed"], label="Classic Deployments Completed", detail=f"{live['classic']['pending']} pending · {live['classic']['running']} running")
     except Exception as exc:
         logger.exception("Unable to collect live Titan Azure DevOps monitoring data")
         summary["pipeline_live_error"] = str(exc)
