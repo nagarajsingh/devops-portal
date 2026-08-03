@@ -146,7 +146,7 @@ export default function App() {
     dashboard: <DashboardPage token={session.access_token} role={session.role} refreshKey={refreshKey} />,
     requests: <RequestsPage token={session.access_token} role={session.role} refreshKey={refreshKey} />,
     "file-placement": <FilePlacementPage />,
-    monitoring: <MonitoringPage />,
+    monitoring: <MonitoringPage token={session.access_token} />,
     "ms-portal": <MsPortalPage token={session.access_token} onCreated={() => setRefreshKey((value) => value + 1)} />,
     admin: <AdminPage />,
   })[page];
