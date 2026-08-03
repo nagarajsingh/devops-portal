@@ -1,4 +1,4 @@
-export type MonitoringSection = "overview" | "kubernetes" | "pipelines" | "deployments" | "provisioning" | "exceptions";
+export type MonitoringSection = "overview" | "kubernetes" | "project" | "pipelines" | "deployments" | "provisioning" | "exceptions";
 
 export interface MonitoringCard {
   key: string;
