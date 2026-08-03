@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from kubernetes import client
+from kubernetes.client.rest import ApiException
 
 from ..config import AZDO_ORG, AZDO_PROJECT, KUBERNETES_INVENTORY_PAT, LOCAL_KUBERNETES_TARGET, NAMESPACE_ALLOWLIST
 from ..kubernetes_ops import load_k8s
@@ -92,13 +93,8 @@ def _live_pipeline_metrics(days: int) -> dict[str, Any]:
         if row.get("id") and str((row.get("process") or {}).get("type") or "") == "2"
     }
 
-    build_query = urllib.parse.urlencode({
-        "queryOrder": "queueTimeDescending",
-        "minTime": _iso(start),
-        "$top": "1000",
-        "api-version": "7.1",
-    })
-    build_rows = (_request_json(_azdo_url(f"_apis/build/builds?{build_query}")).get("value") or [])
+    build_query = urllib.parse.urlencode({"queryOrder": "queueTimeDescending", "minTime": _iso(start), "$top": "1000", "api-version": "7.1"})
+    build_rows = _request_json(_azdo_url(f"_apis/build/builds?{build_query}")).get("value") or []
     builds = [_build_row(row, yaml_definition_ids) for row in build_rows]
 
     running_rows = [row for row in builds if str(row["status"]).lower() == "inprogress"]
@@ -180,6 +176,50 @@ def _quantity_to_gib(value: Any) -> float:
         return 0.0
 
 
+def _persistent_volume_data(core: client.CoreV1Api) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    total_capacity = 0.0
+    total_allocated = 0.0
+    try:
+        volumes = core.list_persistent_volume().items
+    except ApiException as exc:
+        if exc.status == 403:
+            logger.warning("Persistent volume monitoring unavailable: ServiceAccount lacks list persistentvolumes permission")
+            return [], {
+                "capacity_gib": 0.0,
+                "allocated_gib": 0.0,
+                "available_gib": 0.0,
+                "available": False,
+                "error": "The backend ServiceAccount is not permitted to list PersistentVolumes.",
+            }
+        raise
+
+    for pv in volumes:
+        capacity = _quantity_to_gib((pv.spec.capacity or {}).get("storage"))
+        claim_ref = pv.spec.claim_ref
+        requested = capacity if claim_ref else 0.0
+        total_capacity += capacity
+        total_allocated += requested
+        rows.append({
+            "name": pv.metadata.name,
+            "capacity_gib": capacity,
+            "allocated_gib": requested,
+            "available_gib": round(max(0.0, capacity - requested), 2),
+            "status": pv.status.phase if pv.status else "Unknown",
+            "storage_class": pv.spec.storage_class_name or "",
+            "access_modes": pv.spec.access_modes or [],
+            "claim": f"{claim_ref.namespace}/{claim_ref.name}" if claim_ref else "",
+        })
+
+    return rows, {
+        "capacity_gib": round(total_capacity, 2),
+        "allocated_gib": round(total_allocated, 2),
+        "available_gib": round(max(0.0, total_capacity - total_allocated), 2),
+        "available": True,
+        "error": "",
+    }
+
+
 def _live_local_cluster() -> dict[str, Any]:
     load_k8s()
     core = client.CoreV1Api()
@@ -189,25 +229,7 @@ def _live_local_cluster() -> dict[str, Any]:
     show_all = any(value.lower() == "all" for value in NAMESPACE_ALLOWLIST)
     names = sorted(all_namespaces if show_all or not NAMESPACE_ALLOWLIST else [name for name in all_namespaces if name in NAMESPACE_ALLOWLIST])
 
-    pv_rows = []
-    total_capacity = 0.0
-    total_allocated = 0.0
-    for pv in core.list_persistent_volume().items:
-        capacity = _quantity_to_gib((pv.spec.capacity or {}).get("storage"))
-        claim_ref = pv.spec.claim_ref
-        requested = capacity if claim_ref else 0.0
-        total_capacity += capacity
-        total_allocated += requested
-        pv_rows.append({
-            "name": pv.metadata.name,
-            "capacity_gib": capacity,
-            "allocated_gib": requested,
-            "available_gib": round(max(0.0, capacity - requested), 2),
-            "status": (pv.status.phase if pv.status else "Unknown"),
-            "storage_class": pv.spec.storage_class_name or "",
-            "access_modes": pv.spec.access_modes or [],
-            "claim": f"{claim_ref.namespace}/{claim_ref.name}" if claim_ref else "",
-        })
+    pv_rows, storage = _persistent_volume_data(core)
 
     rows: list[dict[str, Any]] = []
     services_total = ingresses_total = deployments_total = healthy = unhealthy = 0
@@ -245,7 +267,7 @@ def _live_local_cluster() -> dict[str, Any]:
         "deployments_unhealthy": unhealthy,
         "namespace_details": rows,
         "persistent_volumes": pv_rows,
-        "storage": {"capacity_gib": round(total_capacity, 2), "allocated_gib": round(total_allocated, 2), "available_gib": round(max(0.0, total_capacity - total_allocated), 2)},
+        "storage": storage,
         "source": "Live in-cluster Kubernetes API",
     }
 
@@ -264,11 +286,18 @@ def build_monitoring_summary(days: int = 1) -> dict[str, Any]:
         live = _live_pipeline_metrics(days)
         summary["live_pipeline_metrics"] = live
         summary["pipeline_metrics"] = {
-            "running": live["running"], "queued": live["queued"], "build_created": live["builds_completed"],
-            "release_created": live["classic"]["completed"], "build_failed": live["builds_failed"],
-            "release_failed": live["classic"]["failed"], "builds_completed": live["builds_completed"],
-            "builds_succeeded": live["builds_succeeded"], "manual_builds": 0, "yaml_builds": live["yaml"]["completed"],
-            "deployments_completed": live["classic"]["completed"], "deployments_running": live["classic"]["running"],
+            "running": live["running"],
+            "queued": live["queued"],
+            "build_created": live["builds_completed"],
+            "release_created": live["classic"]["completed"],
+            "build_failed": live["builds_failed"],
+            "release_failed": live["classic"]["failed"],
+            "builds_completed": live["builds_completed"],
+            "builds_succeeded": live["builds_succeeded"],
+            "manual_builds": 0,
+            "yaml_builds": live["yaml"]["completed"],
+            "deployments_completed": live["classic"]["completed"],
+            "deployments_running": live["classic"]["running"],
         }
         for card in summary.get("cards", []):
             if card.get("key") == "pipelines":
