@@ -51,7 +51,7 @@ export interface ClusterMonitoringSummary {
   deployments_unhealthy?: number;
   namespace_details: NamespaceMonitoringSummary[];
   persistent_volumes?: PersistentVolumeSummary[];
-  storage?: { capacity_gib: number; allocated_gib: number; available_gib: number };
+  storage?: { capacity_gib: number; allocated_gib: number; available_gib: number; available?: boolean; error?: string };
   source?: string;
 }
 
@@ -74,6 +74,15 @@ export interface PipelineRun {
   url?: string;
 }
 
+export interface PipelineCategoryMetrics {
+  definitions: number;
+  running: number;
+  queued: number;
+  completed: number;
+  failed: number;
+  runs: PipelineRun[];
+}
+
 export interface LivePipelineMetrics {
   days: number;
   from: string;
@@ -87,14 +96,8 @@ export interface LivePipelineMetrics {
   running_runs: PipelineRun[];
   queued_runs: PipelineRun[];
   completed_runs: PipelineRun[];
-  yaml: {
-    definitions: number;
-    running: number;
-    queued: number;
-    completed: number;
-    failed: number;
-    runs: PipelineRun[];
-  };
+  yaml: PipelineCategoryMetrics;
+  yaml_deployments: PipelineCategoryMetrics;
   classic: {
     definitions: number;
     running: number;
