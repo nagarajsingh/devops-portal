@@ -160,8 +160,8 @@ def _collections_items(text: str, country: str) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     pattern = r"[A-Za-z0-9.-]+\.azurecr\.io/([A-Za-z0-9._/-]+):([A-Za-z0-9_.-]+)"
     for image_name, tag in re.findall(pattern, text):
-        service = image_name.rsplit("/", 1)[-1].strip().lower()
-        service = COLLECTIONS_ALIASES.get(service, service)
+        extracted_service = image_name.rsplit("/", 1)[-1].strip().lower()
+        service = COLLECTIONS_ALIASES.get(extracted_service, extracted_service)
         if service in seen:
             continue
         seen.add(service)
@@ -169,7 +169,8 @@ def _collections_items(text: str, country: str) -> list[dict[str, Any]]:
             "selected": True,
             "service": service,
             "image_tag": tag,
-            "vendor_image": f"{image_name}:{tag}",
+            "vendor_image": f"{extracted_service}:{tag}",
+            "extraction_method": "Rule-Based",
             "pipeline_name": mapping.get(service, ""),
             "country": country,
         })
@@ -269,11 +270,16 @@ def list_deployment_requests() -> list[dict[str, Any]]:
     return _load()
 
 
-def _pipeline_run(pipeline_name: str, parameters: dict[str, Any], pat: str, ref: str = "refs/heads/develop") -> dict[str, Any]:
+def _pipeline_run(pipeline_name: str, parameters: dict[str, Any], pat: str, ref: str = "") -> dict[str, Any]:
     pipeline = find_pipeline_by_name(pipeline_name, pat)
     if not pipeline:
         raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_name} was not found")
-    body = {"resources": {"repositories": {"self": {"refName": ref}}}, "templateParameters": parameters}
+    body: dict[str, Any] = {"templateParameters": parameters}
+    normalized_ref = ref.strip()
+    if normalized_ref:
+        if not normalized_ref.startswith("refs/heads/"):
+            normalized_ref = f"refs/heads/{normalized_ref}"
+        body["resources"] = {"repositories": {"self": {"refName": normalized_ref}}}
     code, run = azdo_request("POST", f"_apis/pipelines/{pipeline['id']}/runs?api-version=7.1", pat, body)
     if code not in (200, 201):
         raise HTTPException(status_code=502, detail=run.get("message", f"Unable to trigger {pipeline_name}"))
@@ -465,8 +471,12 @@ def _trigger_collections_builds(row: dict[str, Any], updates: dict[str, Any], pa
         if not pipeline_name:
             runs.append({**item, "status": "Failed", "result": "mapping_missing", "error": "Pipeline mapping not found"})
             continue
-        run = _pipeline_run(pipeline_name, {"vendorImage": item.get("vendor_image", ""), "useVendorImage": True}, pat)
-        runs.append({**item, **run})
+        parameters = {
+            "vendorImage": item.get("vendor_image", ""),
+            "useVendorImage": True,
+        }
+        run = _pipeline_run(pipeline_name, parameters, pat)
+        runs.append({**item, **run, "parameters": parameters})
     row["collections_items"] = selected
     overall = "Queued" if runs and all(run.get("status") == "Queued" for run in runs) else "Running"
     return {"status": overall, "runs": runs}
