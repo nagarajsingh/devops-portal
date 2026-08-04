@@ -28,6 +28,7 @@ type CollectionsItem = {
   service: string;
   image_tag: string;
   vendor_image: string;
+  extraction_method?: string;
   pipeline_name: string;
   country: string;
 };
@@ -157,7 +158,7 @@ export default function DeploymentManagementPage({ token, role }: { token: strin
                 {selected.application_type==="Collections"?
                   <div className="collections-image-review">
                     <div className="deployment-result-header"><div><span className="eyebrow">COLLECTIONS IMAGE REVIEW</span><h3>{selected.country} build pipelines</h3></div><strong>{(selected.collections_items||[]).filter(x=>x.selected).length} selected</strong></div>
-                    {(selected.collections_items||[]).length===0?<div className="monitoring-empty">No mapped Collections images were found in the document.</div>:<div className="table-card collections-image-table"><table><thead><tr><th>Select</th><th>Service</th><th>Image tag</th><th>Pipeline</th></tr></thead><tbody>{(selected.collections_items||[]).map((item,index)=><tr key={`${item.service}-${item.image_tag}`}><td><input type="checkbox" checked={item.selected} onChange={e=>updateCollectionItem(index,"selected",e.target.checked)}/></td><td><strong>{item.service}</strong></td><td>{item.image_tag}</td><td>{item.pipeline_name||<span className="status warning">Mapping missing</span>}</td></tr>)}</tbody></table></div>}
+                    {(selected.collections_items||[]).length===0?<div className="monitoring-empty">No mapped Collections images were found in the document.</div>:<div className="table-card collections-image-table"><table><thead><tr><th>Select</th><th>Service</th><th>Image tag</th><th>Vendor image</th><th>Extraction</th><th>Pipeline</th></tr></thead><tbody>{(selected.collections_items||[]).map((item,index)=><tr key={`${item.service}-${item.image_tag}`}><td><input type="checkbox" checked={item.selected} onChange={e=>updateCollectionItem(index,"selected",e.target.checked)}/></td><td><strong>{item.service}</strong></td><td>{item.image_tag}</td><td><code>{item.vendor_image}</code></td><td>{item.extraction_method||"Rule-Based"}</td><td>{item.pipeline_name||<span className="status warning">Mapping missing</span>}</td></tr>)}</tbody></table></div>}
                   </div>:
                   <div className="deployment-form">
                     <label>Application<input value={selected.application||""} onChange={e=>updateSelected("application",e.target.value)}/></label>
