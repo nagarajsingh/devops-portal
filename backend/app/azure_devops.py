@@ -86,38 +86,27 @@ def get_branch_head(repository_id: str, branch: str, pat: str) -> str | None:
     return refs[0].get("objectId") if refs else None
 
 
+def _normalize_name(value: str) -> str:
+    return value.strip().casefold()
+
+
 def _find_exact_case_insensitive(paths: set[str], expected: str) -> str | None:
-    expected_lower = expected.lower()
-    return next((path for path in paths if path.lower() == expected_lower), None)
+    expected_normalized = _normalize_name(expected)
+    return next((path for path in paths if _normalize_name(path) == expected_normalized), None)
 
 
 def _paths_under_case_insensitive(paths: set[str], folder: str) -> list[str]:
-    prefix = f"/{folder.strip('/').lower()}/"
-    return sorted(path for path in paths if path.lower().startswith(prefix))
+    prefix = f"/{folder.strip('/').casefold()}/"
+    return sorted(path for path in paths if path.casefold().startswith(prefix))
 
 
 def _application_bootstrap_profile(application_type: str) -> dict[str, Any]:
     if application_type == "Native-Mobile":
-        return {
-            "target_branch": "develop",
-            "required_files": ["/Dockerfile"],
-            "required_folders": ["BuildAndPublish"],
-            "optional_folders": [],
-        }
+        return {"target_branch": "develop", "required_files": ["/Dockerfile"], "required_folders": ["BuildAndPublish"], "optional_folders": []}
     if application_type == "Collections":
-        return {
-            "target_branch": BOOTSTRAP_BRANCH,
-            "required_files": [],
-            "required_folders": ["manifests", "share-config"],
-            "optional_folders": [],
-        }
+        return {"target_branch": BOOTSTRAP_BRANCH, "required_files": [], "required_folders": ["manifests", "share-config"], "optional_folders": []}
     if application_type == "H2H":
-        return {
-            "target_branch": BOOTSTRAP_BRANCH,
-            "required_files": ["/Dockerfile"],
-            "required_folders": [],
-            "optional_folders": ["manifests", "shared-config"],
-        }
+        return {"target_branch": BOOTSTRAP_BRANCH, "required_files": ["/Dockerfile"], "required_folders": [], "optional_folders": ["manifests", "shared-config"]}
     raise RuntimeError(f"Template bootstrap is not configured for {application_type}")
 
 
@@ -128,42 +117,35 @@ def reference_files(reference_repository_name: str, reference_branch: str, appli
     branch = reference_branch.strip().removeprefix("refs/heads/")
     if not branch:
         raise RuntimeError("Reference repository branch must be provided by DevOps")
-
     profile = _application_bootstrap_profile(application_type)
     available_paths = list_branch_paths(repository["id"], branch, pat)
     pipeline_path = next((matched for candidate in PIPELINE_FILE_CANDIDATES if (matched := _find_exact_case_insensitive(available_paths, candidate))), None)
     missing: list[str] = []
     selected_paths: set[str] = set()
-
     if pipeline_path is None:
         missing.append("/azure-pipelines.yml or /azure-pipelines.yaml")
     else:
         selected_paths.add(pipeline_path)
-
     for required_file in profile["required_files"]:
         matched = _find_exact_case_insensitive(available_paths, required_file)
         if matched is None:
             missing.append(required_file)
         else:
             selected_paths.add(matched)
-
     for folder in profile["required_folders"]:
         folder_paths = _paths_under_case_insensitive(available_paths, folder)
         if not folder_paths:
             missing.append(f"/{folder}/")
         else:
             selected_paths.update(folder_paths)
-
     for folder in profile["optional_folders"]:
         folder_paths = _paths_under_case_insensitive(available_paths, folder)
         if folder_paths:
             selected_paths.update(folder_paths)
         else:
             selected_paths.add(f"/{folder}/.gitkeep")
-
     if missing:
         raise RuntimeError(f"Reference repository branch {branch} is missing required files or directories for {application_type}: {', '.join(missing)}")
-
     files: list[dict[str, str]] = []
     for path in sorted(selected_paths):
         content = "" if path.endswith("/.gitkeep") else get_reference_file_content(repository["id"], path, branch, pat)
@@ -191,7 +173,8 @@ def find_pipeline_by_name(name: str, pat: str) -> dict | None:
     code, body = azdo_request("GET", "_apis/pipelines?api-version=7.1", pat)
     if code != 200:
         raise RuntimeError(body.get("message", f"Unable to list pipelines with HTTP {code}"))
-    return next((item for item in body.get("value", []) if item.get("name") == name), None)
+    expected = _normalize_name(name)
+    return next((item for item in body.get("value", []) if _normalize_name(str(item.get("name") or "")) == expected), None)
 
 
 def create_build_pipeline(repository: dict, yaml_path: str, target_branch: str, pat: str) -> dict[str, Any]:
