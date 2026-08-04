@@ -111,7 +111,7 @@ export default function DeploymentManagementPage({ token, role }: { token: strin
         <article className="deployment-card deployment-orchestrator">
           {!selected?<div className="monitoring-empty">Select a deployment request.</div>:<>
             <div className="deployment-card-title"><FileText/><div><h2>{selected.application_type}{selected.country?` · ${selected.country}`:""}</h2><p>{selected.id} · {selected.document_name}</p></div></div>
-            <div className="deployment-step-row">{Object.entries(selected.steps||{}).map(([k,v])=><small key={k}><CheckCircle2 size={13}/>{k.replaceAll("_"," ")}: {v.status}</small>)}</div>
+            <div className="deployment-step-row">{Object.entries(selected.steps||{}).map(([k,v])=><small key={k}><CheckCircle2 size={13}/>{k.split("_").join(" ")}: {v.status}</small>)}</div>
             {selected.status==="Pending App Owner Approval"&&<div className="deployment-actions"><button className="secondary-button" onClick={()=>action(selected.id,"owner-approve")}>Record owner approval</button><button className="danger-button" onClick={()=>action(selected.id,"owner-reject")}>Reject</button></div>}
             {selected.status!=="App Owner Rejected"&&<>
               <div className="deployment-actions"><button className="primary-button" disabled={busy} onClick={()=>action(selected.id,"extract-document")}>Extract structured data</button></div>
