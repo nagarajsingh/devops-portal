@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -100,6 +101,14 @@ def _paths_under_case_insensitive(paths: set[str], folder: str) -> list[str]:
     return sorted(path for path in paths if path.casefold().startswith(prefix))
 
 
+def _replace_reference_name(content: str, reference_name: str, target_name: str) -> str:
+    source = reference_name.strip()
+    target = target_name.strip()
+    if not source or not target or source.casefold() == target.casefold():
+        return content
+    return re.sub(re.escape(source), lambda _: target, content, flags=re.IGNORECASE)
+
+
 def _application_bootstrap_profile(application_type: str) -> dict[str, Any]:
     if application_type == "Native-Mobile":
         return {"target_branch": "develop", "required_files": ["/Dockerfile"], "required_folders": ["BuildAndPublish"], "optional_folders": []}
@@ -156,7 +165,22 @@ def reference_files(reference_repository_name: str, reference_branch: str, appli
 def bootstrap_repository(target_repository: dict, reference_repository_name: str, reference_branch: str, application_type: str, pat: str) -> dict[str, Any]:
     profile = _application_bootstrap_profile(application_type)
     target_branch = profile["target_branch"]
-    files = reference_files(reference_repository_name.strip(), reference_branch, application_type, pat)
+    reference_name = reference_repository_name.strip()
+    target_name = str(target_repository.get("name") or "").strip()
+    if not target_name:
+        raise RuntimeError("Target repository name was not returned by Azure DevOps")
+
+    files = reference_files(reference_name, reference_branch, application_type, pat)
+    transformed_files: list[dict[str, str]] = []
+    transformed_count = 0
+    for item in files:
+        original_content = item["content"]
+        transformed_content = _replace_reference_name(original_content, reference_name, target_name)
+        if transformed_content != original_content:
+            transformed_count += 1
+        transformed_files.append({"path": item["path"], "content": transformed_content})
+    files = transformed_files
+
     repository_id = target_repository["id"]
     head = get_branch_head(repository_id, target_branch, pat)
     existing_paths = list_branch_paths(repository_id, target_branch, pat) if head else set()
@@ -166,7 +190,22 @@ def bootstrap_repository(target_repository: dict, reference_repository_name: str
     if code not in (200, 201):
         raise RuntimeError(body.get("message", f"Repository bootstrap failed with HTTP {code}"))
     action = "Updated" if head else "Created"
-    return {"status": "Completed", "message": f"{action} {target_branch} using {reference_repository_name}:{reference_branch}", "branch": target_branch, "source_branch": reference_branch, "files": [item["path"] for item in files], "url": target_repository.get("webUrl") or target_repository.get("remoteUrl")}
+    logger.info(
+        "Repository bootstrap completed repository=%s branch=%s source=%s transformed_files=%s",
+        target_name,
+        target_branch,
+        reference_name,
+        transformed_count,
+    )
+    return {
+        "status": "Completed",
+        "message": f"{action} {target_branch} using {reference_name}:{reference_branch}; updated reference names in {transformed_count} file(s)",
+        "branch": target_branch,
+        "source_branch": reference_branch,
+        "files": [item["path"] for item in files],
+        "transformed_files": transformed_count,
+        "url": target_repository.get("webUrl") or target_repository.get("remoteUrl"),
+    }
 
 
 def find_pipeline_by_name(name: str, pat: str) -> dict | None:
