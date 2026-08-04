@@ -6,6 +6,7 @@ export type PageKey =
   | "requests"
   | "file-placement"
   | "monitoring"
+  | "deployment-management"
   | "ms-portal"
   | "admin";
 
@@ -43,15 +44,8 @@ export interface PipelineRequestInput {
   comments?: string;
 }
 
-export interface KubernetesService {
-  name: string;
-  ports: number[];
-}
-
-export interface KubernetesTarget {
-  name: string;
-  mode: "direct" | "azure_pipeline";
-}
+export interface KubernetesService { name: string; ports: number[]; }
+export interface KubernetesTarget { name: string; mode: "direct" | "azure_pipeline"; }
 
 export interface ProvisionStep {
   status: string;
@@ -67,12 +61,7 @@ export interface ProvisionStep {
   target_cluster?: string;
 }
 
-export interface TimelineEvent {
-  at: string;
-  action: string;
-  actor: string;
-  detail?: string;
-}
+export interface TimelineEvent { at: string; action: string; actor: string; detail?: string; }
 
 export interface PipelineRequest extends PipelineRequestInput {
   id: string;
@@ -91,6 +80,4 @@ export interface PipelineRequest extends PipelineRequestInput {
   timeline?: TimelineEvent[];
 }
 
-export interface ReviewUpdate extends PipelineRequestInput {
-  review_comments?: string;
-}
+export interface ReviewUpdate extends PipelineRequestInput { review_comments?: string; }
