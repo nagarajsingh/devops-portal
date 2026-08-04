@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, Field, SecretStr
 
 from .auth import current_user, require_devops
-from .deployment_management import APPLICATION_TYPES, extract_release_document, list_deployment_requests, submit_document, update_action
+from .deployment_management import APPLICATION_TYPES, COLLECTIONS_COUNTRIES, extract_release_document, list_deployment_requests, submit_document, update_action
 from .models import UserContext
 
 router = APIRouter(prefix="/deployment-management", tags=["Deployment Management"])
@@ -18,29 +18,31 @@ class DeploymentAction(BaseModel):
 
 
 @router.get("/application-types")
-def application_types(_: UserContext = Depends(current_user)) -> list[str]:
-    return list(APPLICATION_TYPES)
+def application_types(_: UserContext = Depends(current_user)) -> dict[str, list[str]]:
+    return {"application_types": list(APPLICATION_TYPES), "collections_countries": list(COLLECTIONS_COUNTRIES)}
 
 
 @router.post("/submit-document", status_code=201)
 async def submit_release_document(
     application_type: str = Form(...),
     app_owner: str = Form(...),
+    country: str = Form(""),
     document: UploadFile = File(...),
     user: UserContext = Depends(current_user),
 ) -> dict:
     raw = await document.read()
-    return submit_document(application_type, app_owner, document, raw, user.username)
+    return submit_document(application_type, app_owner, document, raw, user.username, country)
 
 
 @router.post("/extract")
 async def extract_document(
     application_type: str = Form(""),
+    country: str = Form(""),
     document: UploadFile = File(...),
     _: UserContext = Depends(require_devops),
 ) -> dict:
     raw = await document.read()
-    return extract_release_document(document, raw, application_type)
+    return extract_release_document(document, raw, application_type, country)
 
 
 @router.get("/requests")
