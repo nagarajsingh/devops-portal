@@ -17,6 +17,10 @@ logger = get_logger("release-pipeline")
 ReleaseCustomizer = Callable[[dict[str, Any], str, str], dict[str, Any]]
 
 
+def _normalize_name(value: str) -> str:
+    return value.strip().casefold()
+
+
 def _release_request(method: str, path: str, pat: str, payload: dict | None = None) -> tuple[int, dict]:
     if not AZDO_ORG or not AZDO_PROJECT or not pat.strip():
         raise RuntimeError("Azure DevOps organization, project and DevOps PAT are required")
@@ -58,7 +62,7 @@ def _find_reference_release_definition(reference_repository_name: str, pat: str)
     if not reference_pipeline:
         raise RuntimeError(
             f"Reference build pipeline {reference_repository_name} was not found. "
-            "The reference repository and build pipeline must have the same name."
+            "Case-insensitive exact-name matching was used. The reference repository and build pipeline must have the same name."
         )
 
     code, body = _release_request("GET", "_apis/release/definitions?api-version=7.1&$top=1000", pat)
@@ -89,7 +93,15 @@ def _find_release_by_name(name: str, pat: str) -> dict[str, Any] | None:
     code, body = _release_request("GET", f"_apis/release/definitions?{query}", pat)
     if code != 200:
         raise RuntimeError(body.get("message", f"Unable to search release definitions with HTTP {code}"))
-    return next((item for item in body.get("value", []) if item.get("name") == name), None)
+    expected = _normalize_name(name)
+    return next(
+        (
+            item
+            for item in body.get("value", [])
+            if _normalize_name(str(item.get("name") or "")) == expected
+        ),
+        None,
+    )
 
 
 def _replace_strings(value: Any, replacements: dict[str, str]) -> Any:
