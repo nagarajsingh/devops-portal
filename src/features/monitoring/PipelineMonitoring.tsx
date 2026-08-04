@@ -1,4 +1,5 @@
-import { ExternalLink, Workflow } from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink, Workflow } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import type { LivePipelineMetrics, PipelineRun } from "./types";
 
 function statusClass(value: string): string {
@@ -16,21 +17,60 @@ function formatDate(value?: string): string {
 }
 
 function RunTable({ title, rows }: { title: string; rows: PipelineRun[] }) {
-  return <article className="monitoring-panel">
-    <div className="monitoring-panel-header"><div><span className="eyebrow">LIVE DETAILS</span><h3>{title}</h3></div><Workflow size={22}/></div>
-    {rows.length === 0 ? <div className="monitoring-empty">No records found for the selected period.</div> : <div className="table-card monitoring-table"><table>
-      <thead><tr><th>Pipeline</th><th>Run / Environment</th><th>Type</th><th>Status</th><th>Result</th><th>Requested by</th><th>Started</th><th>Link</th></tr></thead>
-      <tbody>{rows.map((row) => <tr key={`${title}-${row.id}`}>
-        <td><strong>{row.name}</strong></td>
-        <td>{row.build_number || row.environment || row.release_name || "-"}</td>
-        <td>{row.pipeline_type || (row.environment ? "Classic release" : "-")}</td>
-        <td><span className={`status ${statusClass(row.status)}`}>{row.status}</span></td>
-        <td><span className={`status ${statusClass(row.result || row.status)}`}>{row.result || "-"}</span></td>
-        <td>{row.requested_by || "-"}</td>
-        <td>{formatDate(row.start_time || row.started_on || row.queue_time)}</td>
-        <td>{row.url ? <a href={row.url} target="_blank" rel="noreferrer" className="monitoring-link" aria-label={`Open ${row.name} in Azure DevOps`}><ExternalLink size={15}/></a> : "-"}</td>
-      </tr>)}</tbody>
-    </table></div>}
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+
+  useEffect(() => {
+    setPage(1);
+  }, [rows, pageSize]);
+
+  const visibleRows = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return rows.slice(start, start + pageSize);
+  }, [page, pageSize, rows]);
+
+  const firstRow = rows.length === 0 ? 0 : (page - 1) * pageSize + 1;
+  const lastRow = Math.min(page * pageSize, rows.length);
+
+  return <article className="monitoring-panel monitoring-run-panel">
+    <div className="monitoring-panel-header">
+      <div><span className="eyebrow">LIVE DETAILS</span><h3>{title}</h3></div>
+      <div className="monitoring-table-toolbar">
+        <span>{rows.length} records</span>
+        <label>Rows
+          <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))}>
+            <option value={5}>5</option>
+            <option value={10}>10</option>
+            <option value={20}>20</option>
+          </select>
+        </label>
+        <Workflow size={22}/>
+      </div>
+    </div>
+    {rows.length === 0 ? <div className="monitoring-empty">No records found for the selected period.</div> : <>
+      <div className="table-card monitoring-table monitoring-table-compact"><table>
+        <thead><tr><th>Pipeline</th><th>Run / Environment</th><th>Type</th><th>Status</th><th>Result</th><th>Requested by</th><th>Started</th><th>Link</th></tr></thead>
+        <tbody>{visibleRows.map((row) => <tr key={`${title}-${row.id}`}>
+          <td><strong>{row.name}</strong></td>
+          <td>{row.build_number || row.environment || row.release_name || "-"}</td>
+          <td>{row.pipeline_type || (row.environment ? "Classic release" : "-")}</td>
+          <td><span className={`status ${statusClass(row.status)}`}>{row.status}</span></td>
+          <td><span className={`status ${statusClass(row.result || row.status)}`}>{row.result || "-"}</span></td>
+          <td>{row.requested_by || "-"}</td>
+          <td>{formatDate(row.start_time || row.started_on || row.queue_time)}</td>
+          <td>{row.url ? <a href={row.url} target="_blank" rel="noreferrer" className="monitoring-link" aria-label={`Open ${row.name} in Azure DevOps`}><ExternalLink size={15}/></a> : "-"}</td>
+        </tr>)}</tbody>
+      </table></div>
+      <div className="monitoring-pagination">
+        <span>Showing {firstRow}–{lastRow} of {rows.length}</span>
+        <div>
+          <button type="button" disabled={page === 1} onClick={() => setPage((value) => Math.max(1, value - 1))}><ChevronLeft size={16}/>Previous</button>
+          <span>Page {page} of {totalPages}</span>
+          <button type="button" disabled={page === totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>Next<ChevronRight size={16}/></button>
+        </div>
+      </div>
+    </>}
   </article>;
 }
 
