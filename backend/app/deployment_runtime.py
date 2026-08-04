@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -116,6 +117,75 @@ def refresh_status(request_id: str, pat: str, actor: str) -> dict[str, Any]:
     return row
 
 
+def reextract_document(request_id: str, actor: str) -> dict[str, Any]:
+    rows = dm._load()
+    row = next((item for item in rows if item.get("id") == request_id), None)
+    if not row:
+        raise HTTPException(status_code=404, detail="Deployment request not found")
+
+    document_path = Path(str(row.get("document_path") or ""))
+    if not document_path.is_file():
+        raise HTTPException(status_code=404, detail="Uploaded release document was not found")
+
+    extracted = dm._structured_extract(
+        str(row.get("document_name") or document_path.name),
+        document_path.read_bytes(),
+        str(row.get("application_type") or ""),
+        str(row.get("country") or ""),
+    )
+
+    extracted_fields = (
+        "filename",
+        "application",
+        "branch_name",
+        "environment",
+        "repository",
+        "target_branch",
+        "build_pipeline",
+        "war_files",
+        "jar_files",
+        "container_images",
+        "text_preview",
+        "confidence",
+        "collections_items",
+        "country",
+    )
+    for key in extracted_fields:
+        if key in extracted:
+            row[key] = extracted[key]
+
+    architecture = row.get("architecture") or dm.ARCHITECTURES.get(row.get("application_type"), {})
+    steps = row.setdefault("steps", {})
+    steps["document_extraction"] = {"status": "Completed", "actor": actor, "at": dm._now()}
+    steps["devops_review"] = {"status": "In Progress", "actor": actor, "at": dm._now()}
+    steps["code_pull"] = {"status": "Not Required" if not architecture.get("code_pull") else "Waiting"}
+    steps["pull_request"] = {"status": "Not Required" if not architecture.get("pull_request") else "Waiting"}
+    steps["build"] = {"status": "Waiting", "runs": []}
+    steps["deployment"] = {"status": "Waiting", "runs": []}
+
+    row["extracted"] = True
+    row["status"] = "DevOps Review"
+    row["progress_percent"] = 40 if row.get("application_type") == "Collections" else row.get("progress_percent", 0)
+    now = dm._now()
+    row["updated_at"] = now
+    row.setdefault("timeline", []).append(
+        {
+            "at": now,
+            "action": "Document fully re-extracted and orchestration state reset",
+            "actor": actor,
+            "extracted_items": len(row.get("collections_items") or row.get("container_images") or []),
+        }
+    )
+    dm._save(rows)
+    logger.info(
+        "Document fully re-extracted request_id=%s actor=%s extracted_items=%s",
+        request_id,
+        actor,
+        len(row.get("collections_items") or row.get("container_images") or []),
+    )
+    return row
+
+
 def trigger_collections_build(request_id: str, actor: str, pat: str, updates: dict[str, Any]) -> dict[str, Any]:
     rows = dm._load()
     row = next((item for item in rows if item.get("id") == request_id), None)
@@ -202,6 +272,9 @@ def perform_action(
             status_code=422,
             detail="Azure DevOps PAT is not configured. Set KUBERNETES_INVENTORY_PAT or enter a PAT.",
         )
+
+    if action == "extract-document":
+        return reextract_document(request_id, actor)
 
     if action == "refresh-status":
         return refresh_status(request_id, pat, actor)
