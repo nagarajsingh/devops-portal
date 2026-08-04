@@ -4,6 +4,14 @@ import { CheckCircle2, FileText, GitPullRequest, Play, RefreshCw, Rocket, Upload
 const API_BASE = "/devops-portal/api";
 const APP_TYPES = ["H2H", "Collections", "GTB-Applications", "Native-Mobile", "Safenet"];
 const COLLECTIONS_COUNTRIES = ["UAE", "Egypt"];
+const WORKFLOW_STAGES = [
+  { label: "Document", target: "deployment-document" },
+  { label: "Owner approval", target: "deployment-approval" },
+  { label: "DevOps extraction", target: "deployment-extraction" },
+  { label: "Code pull / PR", target: "deployment-code-pull" },
+  { label: "Build", target: "deployment-build" },
+  { label: "Deployment", target: "deployment-release" },
+];
 
 type Run = {
   pipeline_name?: string;
@@ -19,6 +27,7 @@ type Run = {
   duration_seconds?: number | null;
   service?: string;
   vendor_image?: string;
+  use_vendor_image?: boolean;
   environment_status?: string;
   error?: string;
 };
@@ -28,6 +37,7 @@ type CollectionsItem = {
   service: string;
   image_tag: string;
   vendor_image: string;
+  use_vendor_image: boolean;
   extraction_method?: string;
   pipeline_name: string;
   country: string;
@@ -52,7 +62,7 @@ function statusClass(status?: string) {
   const value = String(status || "").toLowerCase();
   if (value.includes("succeed") || value.includes("complete")) return "success";
   if (value.includes("fail") || value.includes("reject")) return "danger";
-  if (value.includes("running") || value.includes("queued")) return "warning";
+  if (value.includes("running") || value.includes("queued") || value.includes("pending")) return "warning";
   return "neutral";
 }
 
@@ -76,6 +86,10 @@ export default function DeploymentManagementPage({ token, role }: { token: strin
     }
   }
   useEffect(()=>{void loadRequests()},[token]);
+
+  function navigateTo(target:string){
+    document.getElementById(target)?.scrollIntoView({behavior:"smooth",block:"start"});
+  }
 
   async function submitDocument(){
     if(!file||!appOwner)return;
@@ -125,14 +139,14 @@ export default function DeploymentManagementPage({ token, role }: { token: strin
   const deploymentRuns=selected?.steps?.deployment?.runs||[];
   const buildSucceeded=selected?.steps?.build?.status==="Succeeded";
   const selectedCollectionsItems=(selected?.collections_items||[]).filter(item=>item.selected);
-  const collectionsBuildReady=selectedCollectionsItems.length>0&&selectedCollectionsItems.every(item=>item.vendor_image.trim()&&item.pipeline_name.trim());
+  const collectionsBuildReady=selectedCollectionsItems.length>0&&selectedCollectionsItems.every(item=>item.pipeline_name.trim()&&(!item.use_vendor_image||item.vendor_image.trim()));
 
   return <div className="deployment-management-page">
     <section className="deployment-hero"><div><span className="eyebrow">RELEASE ORCHESTRATION</span><h1>Deployment Management Dashboard</h1><p>Structured release documents, controlled approvals, code pull, pull requests, builds and deployments for five application architectures.</p></div><Rocket size={44}/></section>
-    <div className="deployment-workflow">{["Document", "Owner approval", "DevOps extraction", "Code pull / PR", "Build", "Deployment"].map((x,i)=><div key={x}><span>{i+1}</span><strong>{x}</strong></div>)}</div>
+    <div className="deployment-workflow">{WORKFLOW_STAGES.map((stage,i)=><button type="button" key={stage.label} onClick={()=>navigateTo(stage.target)}><span>{i+1}</span><strong>{stage.label}</strong></button>)}</div>
 
     {role!=="devops"?
-      <section className="deployment-card developer-release-card">
+      <section className="deployment-card developer-release-card" id="deployment-document">
         <div className="deployment-card-title"><UploadCloud/><div><h2>Submit release document</h2><p>Developers select the application type, target country when applicable, owner and document. DevOps extracts and orchestrates after approval.</p></div></div>
         <div className="deployment-form">
           <label>Application type<select value={appType} onChange={e=>setAppType(e.target.value)}>{APP_TYPES.map(x=><option key={x}>{x}</option>)}</select></label>
@@ -143,8 +157,8 @@ export default function DeploymentManagementPage({ token, role }: { token: strin
         <button className="primary-button" disabled={!file||!appOwner||busy} onClick={submitDocument}>{busy?"Submitting...":"Send for approval"}</button>
       </section>:
       <section className="deployment-grid devops-deployment-grid">
-        <article className="deployment-card deployment-queue">
-          <div className="deployment-card-title"><GitPullRequest/><div><h2>Deployment queue</h2><p>Select a request to extract and orchestrate.</p></div></div>
+        <article className="deployment-card deployment-queue" id="deployment-document">
+          <div className="deployment-card-title"><GitPullRequest/><div><h2>Deployment queue</h2><p>The queue never locks the dashboard. Select any request and use the workflow cards above at any time.</p></div></div>
           {requests.length===0?<div className="monitoring-empty">No deployment requests.</div>:requests.slice(0,20).map(r=><button className={`deployment-request deployment-request-button ${selected?.id===r.id?"selected":""}`} key={r.id} onClick={()=>setSelected(r)}><div><span>{r.id}</span><h3>{r.application||r.application_type}</h3><p>{r.document_name} · {r.requested_by}{r.country?` · ${r.country}`:""}</p></div><span className={`status ${statusClass(r.status)}`}>{r.status}</span></button>)}
         </article>
 
@@ -153,16 +167,18 @@ export default function DeploymentManagementPage({ token, role }: { token: strin
             <div className="deployment-card-title"><FileText/><div><h2>{selected.application_type}{selected.country?` · ${selected.country}`:""}</h2><p>{selected.id} · {selected.document_name}</p></div></div>
             {selected.application_type==="Collections"&&<div className="deployment-progress-card"><div><span>Overall progress</span><strong>{selected.progress_percent||0}%</strong></div><div className="deployment-progress-track"><span style={{width:`${selected.progress_percent||0}%`}}/></div></div>}
             <div className="deployment-step-row">{Object.entries(selected.steps||{}).map(([k,v])=><small key={k}><CheckCircle2 size={13}/>{k.split("_").join(" ")}: {v.status}</small>)}</div>
-            {selected.status==="Pending App Owner Approval"&&<div className="deployment-actions"><button className="secondary-button" onClick={()=>action(selected.id,"owner-approve")}>Record owner approval</button><button className="danger-button" onClick={()=>action(selected.id,"owner-reject")}>Reject</button></div>}
+            <section id="deployment-approval" className="deployment-stage-anchor">
+              {selected.status==="Pending App Owner Approval"?<div className="deployment-actions"><button className="secondary-button" onClick={()=>action(selected.id,"owner-approve")}>Record owner approval</button><button className="danger-button" onClick={()=>action(selected.id,"owner-reject")}>Reject</button></div>:<div className={`stage-status-card ${statusClass(selected.steps?.owner_approval?.status)}`}>Owner approval: {selected.steps?.owner_approval?.status||selected.status}</div>}
+            </section>
             {selected.status!=="App Owner Rejected"&&<>
-              <div className="deployment-actions"><button className="primary-button" disabled={busy} onClick={()=>action(selected.id,"extract-document")}>Extract structured data</button></div>
+              <section id="deployment-extraction" className="deployment-stage-anchor"><div className="deployment-actions"><button className="primary-button" disabled={busy} onClick={()=>action(selected.id,"extract-document")}>{selected.extracted?"Re-extract structured data":"Extract structured data"}</button></div></section>
               {selected.extracted&&<>
                 {selected.application_type==="Collections"?
-                  <div className="collections-image-review">
-                    <div className="deployment-result-header"><div><span className="eyebrow">COLLECTIONS BUILD INPUT REVIEW</span><h3>{selected.country} vendor images and pipelines</h3><p>Review and edit every selected vendor image before triggering the build.</p></div><strong>{selectedCollectionsItems.length} selected</strong></div>
-                    {(selected.collections_items||[]).length===0?<div className="monitoring-empty">No mapped Collections images were found in the document.</div>:<div className="table-card collections-image-table"><table><thead><tr><th>Select</th><th>Service</th><th>Image tag</th><th>Vendor image parameter</th><th>Extraction</th><th>Pipeline</th></tr></thead><tbody>{(selected.collections_items||[]).map((item,index)=><tr key={`${item.service}-${item.image_tag}`}><td><input type="checkbox" checked={item.selected} onChange={e=>updateCollectionItem(index,"selected",e.target.checked)}/></td><td><strong>{item.service}</strong></td><td>{item.image_tag}</td><td><input className="collections-vendor-image-input" value={item.vendor_image} disabled={!item.selected||buildRuns.length>0} onChange={e=>updateCollectionItem(index,"vendor_image",e.target.value)} aria-label={`Vendor image for ${item.service}`}/><small className="collections-parameter-preview">Sent as vendorImage</small></td><td>{item.extraction_method||"Rule-Based"}</td><td>{item.pipeline_name||<span className="status warning">Mapping missing</span>}</td></tr>)}</tbody></table></div>}
-                    {!collectionsBuildReady&&<div className="deployment-message error">Select at least one service and ensure every selected row has a vendor image and mapped pipeline.</div>}
-                  </div>:
+                  <section className="collections-image-review" id="deployment-build">
+                    <div className="deployment-result-header"><div><span className="eyebrow">COLLECTIONS BUILD INPUT REVIEW</span><h3>{selected.country} vendor images and pipelines</h3><p>Review the vendorImage text and useVendorImage toggle before triggering each build.</p></div><strong>{selectedCollectionsItems.length} selected</strong></div>
+                    {(selected.collections_items||[]).length===0?<div className="monitoring-empty">No mapped Collections images were found in the document.</div>:<div className="table-card collections-image-table"><table><thead><tr><th>Select</th><th>Service</th><th>Image tag</th><th>Use vendor image</th><th>Vendor image parameter</th><th>Extraction</th><th>Pipeline</th></tr></thead><tbody>{(selected.collections_items||[]).map((item,index)=><tr key={`${item.service}-${item.image_tag}`}><td><input type="checkbox" checked={item.selected} onChange={e=>updateCollectionItem(index,"selected",e.target.checked)}/></td><td><strong>{item.service}</strong></td><td>{item.image_tag}</td><td><label className="collections-toggle"><input type="checkbox" checked={item.use_vendor_image!==false} disabled={!item.selected||buildRuns.length>0} onChange={e=>updateCollectionItem(index,"use_vendor_image",e.target.checked)}/><span/><small>{item.use_vendor_image!==false?"TRUE":"FALSE"}</small></label></td><td><input className="collections-vendor-image-input" value={item.vendor_image} disabled={!item.selected||item.use_vendor_image===false||buildRuns.length>0} onChange={e=>updateCollectionItem(index,"vendor_image",e.target.value)} aria-label={`Vendor image for ${item.service}`}/><small className="collections-parameter-preview">Sent as vendorImage</small></td><td>{item.extraction_method||"Rule-Based"}</td><td>{item.pipeline_name||<span className="status warning">Mapping missing</span>}</td></tr>)}</tbody></table></div>}
+                    {!collectionsBuildReady&&<div className="deployment-message error">Select at least one service. Every selected row must have a mapped pipeline, and vendorImage is required when useVendorImage is enabled.</div>}
+                  </section>:
                   <div className="deployment-form">
                     <label>Application<input value={selected.application||""} onChange={e=>updateSelected("application",e.target.value)}/></label>
                     <label>Source branch<input value={selected.branch_name||""} onChange={e=>updateSelected("branch_name",e.target.value)}/></label>
@@ -175,7 +191,7 @@ export default function DeploymentManagementPage({ token, role }: { token: strin
                   </div>}
                 <button className="secondary-button" onClick={saveUpdates}>Save reviewed data</button>
                 <label className="deployment-pat">Azure DevOps PAT<input type="password" value={pat} onChange={e=>setPat(e.target.value)} placeholder="Required for pipeline and PR actions"/></label>
-                <div className="deployment-actions orchestration-actions">
+                <div className="deployment-actions orchestration-actions" id="deployment-code-pull">
                   {selected.application_type==="GTB-Applications"&&<><button className="primary-button" onClick={()=>action(selected.id,"trigger-code-pull")}><Play size={15}/>Code pull</button><button className="secondary-button" onClick={()=>action(selected.id,"create-pr")}>Raise PR</button></>}
                   <button className="primary-button" disabled={busy||(selected.application_type==="Collections"&&!collectionsBuildReady)} onClick={()=>action(selected.id,"trigger-build",selected.application_type==="Collections"?{collections_items:selected.collections_items||[]}:{})}>Trigger build</button>
                   <button className="secondary-button" onClick={()=>action(selected.id,"refresh-status")}><RefreshCw size={15}/>Refresh status</button>
@@ -184,9 +200,9 @@ export default function DeploymentManagementPage({ token, role }: { token: strin
               </>}
             </>}
 
-            {selected.application_type==="Collections"&&<section className="collections-lifecycle-panel">
+            {selected.application_type==="Collections"&&<section className="collections-lifecycle-panel" id="deployment-release">
               <div className="deployment-result-header"><div><span className="eyebrow">BUILD LIFECYCLE</span><h3>Build pipelines</h3></div><span className={`status ${statusClass(selected.steps?.build?.status)}`}>{selected.steps?.build?.status||"Waiting"}</span></div>
-              {buildRuns.length===0?<div className="monitoring-empty">No build runs yet.</div>:<div className="table-card lifecycle-table"><table><thead><tr><th>Service</th><th>Vendor image</th><th>Pipeline</th><th>Status</th><th>Duration</th><th>Pipeline URL</th><th>Logs</th></tr></thead><tbody>{buildRuns.map((run,index)=><tr key={`${run.pipeline_name}-${run.run_id}-${index}`}><td>{run.service||"—"}</td><td><code>{run.vendor_image||"—"}</code></td><td>{run.pipeline_name||"—"}</td><td><span className={`status ${statusClass(run.status)}`}>{run.status||"Unknown"}</span></td><td>{formatDuration(run.duration_seconds)}</td><td>{run.url?<a href={run.url} target="_blank" rel="noreferrer">Open pipeline</a>:"—"}</td><td>{run.logs_url?<a href={run.logs_url} target="_blank" rel="noreferrer">View logs</a>:"—"}</td></tr>)}</tbody></table></div>}
+              {buildRuns.length===0?<div className="monitoring-empty">No build runs yet.</div>:<div className="table-card lifecycle-table"><table><thead><tr><th>Service</th><th>useVendorImage</th><th>Vendor image</th><th>Pipeline</th><th>Status</th><th>Duration</th><th>Pipeline URL</th><th>Logs</th></tr></thead><tbody>{buildRuns.map((run,index)=><tr key={`${run.pipeline_name}-${run.run_id}-${index}`}><td>{run.service||"—"}</td><td>{run.use_vendor_image===false?"FALSE":"TRUE"}</td><td><code>{run.vendor_image||"—"}</code></td><td>{run.pipeline_name||"—"}</td><td><span className={`status ${statusClass(run.status)}`}>{run.status||"Unknown"}</span></td><td>{formatDuration(run.duration_seconds)}</td><td>{run.url?<a href={run.url} target="_blank" rel="noreferrer">Open pipeline</a>:"—"}</td><td>{run.logs_url?<a href={run.logs_url} target="_blank" rel="noreferrer">View logs</a>:"—"}</td></tr>)}</tbody></table></div>}
 
               <div className="deployment-result-header lifecycle-heading"><div><span className="eyebrow">DEPLOYMENT LIFECYCLE</span><h3>Release / deployment pipelines</h3></div><span className={`status ${statusClass(selected.steps?.deployment?.status)}`}>{selected.steps?.deployment?.status||"Waiting"}</span></div>
               {deploymentRuns.length===0?<div className="monitoring-empty">Deployment is available after every selected build succeeds.</div>:<div className="table-card lifecycle-table"><table><thead><tr><th>Pipeline</th><th>Status</th><th>Duration</th><th>Pipeline URL</th><th>Logs</th><th>Environment</th></tr></thead><tbody>{deploymentRuns.map((run,index)=><tr key={`${run.pipeline_name}-${run.release_id||run.run_id}-${index}`}><td>{run.pipeline_name||"—"}</td><td><span className={`status ${statusClass(run.status)}`}>{run.status||"Unknown"}</span></td><td>{formatDuration(run.duration_seconds)}</td><td>{run.url?<a href={run.url} target="_blank" rel="noreferrer">Open deployment</a>:"—"}</td><td>{run.logs_url?<a href={run.logs_url} target="_blank" rel="noreferrer">View logs</a>:"—"}</td><td>{run.environment_status||selected.country||"—"}</td></tr>)}</tbody></table></div>}
