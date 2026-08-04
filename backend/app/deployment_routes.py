@@ -1,46 +1,46 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, Field, SecretStr
 
 from .auth import current_user, require_devops
-from .deployment_management import create_deployment_request, extract_release_document, list_deployment_requests, update_action
+from .deployment_management import APPLICATION_TYPES, extract_release_document, list_deployment_requests, submit_document, update_action
 from .models import UserContext
 
 router = APIRouter(prefix="/deployment-management", tags=["Deployment Management"])
 
 
-class DeploymentRequestCreate(BaseModel):
-    application: str
-    branch_name: str
-    environment: str
-    app_owner: str
-    repository: str = ""
-    target_branch: str = "release/uat"
-    war_files: list[str] = Field(default_factory=list)
-    jar_files: list[str] = Field(default_factory=list)
-    document_name: str = ""
-
-
 class DeploymentAction(BaseModel):
     azure_devops_pat: SecretStr | None = None
+    updates: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.get("/application-types")
+def application_types(_: UserContext = Depends(current_user)) -> list[str]:
+    return list(APPLICATION_TYPES)
+
+
+@router.post("/submit-document", status_code=201)
+async def submit_release_document(
+    application_type: str = Form(...),
+    app_owner: str = Form(...),
+    document: UploadFile = File(...),
+    user: UserContext = Depends(current_user),
+) -> dict:
+    raw = await document.read()
+    return submit_document(application_type, app_owner, document, raw, user.username)
 
 
 @router.post("/extract")
 async def extract_document(
+    application_type: str = Form(""),
     document: UploadFile = File(...),
-    _: UserContext = Depends(current_user),
+    _: UserContext = Depends(require_devops),
 ) -> dict:
     raw = await document.read()
-    return extract_release_document(document, raw)
-
-
-@router.post("/requests", status_code=201)
-def create_request(
-    payload: DeploymentRequestCreate,
-    user: UserContext = Depends(current_user),
-) -> dict:
-    return create_deployment_request(payload.model_dump(), user.username)
+    return extract_release_document(document, raw, application_type)
 
 
 @router.get("/requests")
@@ -56,4 +56,4 @@ def perform_action(
     user: UserContext = Depends(require_devops),
 ) -> dict:
     pat = payload.azure_devops_pat.get_secret_value() if payload.azure_devops_pat else ""
-    return update_action(request_id, action, user.username, pat)
+    return update_action(request_id, action, user.username, pat, payload.updates)
