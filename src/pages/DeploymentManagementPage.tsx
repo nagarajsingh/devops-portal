@@ -1,11 +1,28 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, FileText, GitPullRequest, Play, Rocket, UploadCloud } from "lucide-react";
+import { CheckCircle2, FileText, GitPullRequest, Play, RefreshCw, Rocket, UploadCloud } from "lucide-react";
 
 const API_BASE = "/devops-portal/api";
 const APP_TYPES = ["H2H", "Collections", "GTB-Applications", "Native-Mobile", "Safenet"];
 const COLLECTIONS_COUNTRIES = ["UAE", "Egypt"];
 
-type Step = { status: string; url?: string };
+type Run = {
+  pipeline_name?: string;
+  pipeline_id?: number;
+  run_id?: number;
+  release_id?: number;
+  status?: string;
+  result?: string;
+  url?: string;
+  logs_url?: string;
+  started_at?: string;
+  finished_at?: string | null;
+  duration_seconds?: number | null;
+  service?: string;
+  vendor_image?: string;
+  environment_status?: string;
+  error?: string;
+};
+type Step = { status: string; url?: string; runs?: Run[] };
 type CollectionsItem = {
   selected: boolean;
   service: string;
@@ -17,10 +34,26 @@ type CollectionsItem = {
 type DeploymentRequest = {
   id:string; application_type:string; application:string; branch_name:string; environment:string;
   country?:string; app_owner:string; repository:string; target_branch:string; build_pipeline:string; status:string;
-  requested_by:string; created_at:string; document_name:string; extracted:boolean;
+  requested_by:string; created_at:string; document_name:string; extracted:boolean; progress_percent?:number;
   war_files:string[]; jar_files:string[]; container_images:string[]; collections_items?:CollectionsItem[];
   steps:Record<string,Step>;
 };
+
+function formatDuration(value?: number | null) {
+  if (value === undefined || value === null) return "—";
+  const hours = Math.floor(value / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  const seconds = value % 60;
+  return [hours ? `${hours}h` : "", minutes ? `${minutes}m` : "", `${seconds}s`].filter(Boolean).join(" ");
+}
+
+function statusClass(status?: string) {
+  const value = String(status || "").toLowerCase();
+  if (value.includes("succeed") || value.includes("complete")) return "success";
+  if (value.includes("fail") || value.includes("reject")) return "danger";
+  if (value.includes("running") || value.includes("queued")) return "warning";
+  return "neutral";
+}
 
 export default function DeploymentManagementPage({ token, role }: { token: string; role: string }) {
   const [file,setFile]=useState<File|null>(null);
@@ -87,6 +120,10 @@ export default function DeploymentManagementPage({ token, role }: { token: strin
     collections_items:selected.collections_items||[],
   });
 
+  const buildRuns=selected?.steps?.build?.runs||[];
+  const deploymentRuns=selected?.steps?.deployment?.runs||[];
+  const buildSucceeded=selected?.steps?.build?.status==="Succeeded";
+
   return <div className="deployment-management-page">
     <section className="deployment-hero"><div><span className="eyebrow">RELEASE ORCHESTRATION</span><h1>Deployment Management Dashboard</h1><p>Structured release documents, controlled approvals, code pull, pull requests, builds and deployments for five application architectures.</p></div><Rocket size={44}/></section>
     <div className="deployment-workflow">{["Document", "Owner approval", "DevOps extraction", "Code pull / PR", "Build", "Deployment"].map((x,i)=><div key={x}><span>{i+1}</span><strong>{x}</strong></div>)}</div>
@@ -105,12 +142,13 @@ export default function DeploymentManagementPage({ token, role }: { token: strin
       <section className="deployment-grid devops-deployment-grid">
         <article className="deployment-card deployment-queue">
           <div className="deployment-card-title"><GitPullRequest/><div><h2>Deployment queue</h2><p>Select a request to extract and orchestrate.</p></div></div>
-          {requests.length===0?<div className="monitoring-empty">No deployment requests.</div>:requests.slice(0,20).map(r=><button className={`deployment-request deployment-request-button ${selected?.id===r.id?"selected":""}`} key={r.id} onClick={()=>setSelected(r)}><div><span>{r.id}</span><h3>{r.application||r.application_type}</h3><p>{r.document_name} · {r.requested_by}{r.country?` · ${r.country}`:""}</p></div><span className="status warning">{r.status}</span></button>)}
+          {requests.length===0?<div className="monitoring-empty">No deployment requests.</div>:requests.slice(0,20).map(r=><button className={`deployment-request deployment-request-button ${selected?.id===r.id?"selected":""}`} key={r.id} onClick={()=>setSelected(r)}><div><span>{r.id}</span><h3>{r.application||r.application_type}</h3><p>{r.document_name} · {r.requested_by}{r.country?` · ${r.country}`:""}</p></div><span className={`status ${statusClass(r.status)}`}>{r.status}</span></button>)}
         </article>
 
         <article className="deployment-card deployment-orchestrator">
           {!selected?<div className="monitoring-empty">Select a deployment request.</div>:<>
             <div className="deployment-card-title"><FileText/><div><h2>{selected.application_type}{selected.country?` · ${selected.country}`:""}</h2><p>{selected.id} · {selected.document_name}</p></div></div>
+            {selected.application_type==="Collections"&&<div className="deployment-progress-card"><div><span>Overall progress</span><strong>{selected.progress_percent||0}%</strong></div><div className="deployment-progress-track"><span style={{width:`${selected.progress_percent||0}%`}}/></div></div>}
             <div className="deployment-step-row">{Object.entries(selected.steps||{}).map(([k,v])=><small key={k}><CheckCircle2 size={13}/>{k.split("_").join(" ")}: {v.status}</small>)}</div>
             {selected.status==="Pending App Owner Approval"&&<div className="deployment-actions"><button className="secondary-button" onClick={()=>action(selected.id,"owner-approve")}>Record owner approval</button><button className="danger-button" onClick={()=>action(selected.id,"owner-reject")}>Reject</button></div>}
             {selected.status!=="App Owner Rejected"&&<>
@@ -136,10 +174,19 @@ export default function DeploymentManagementPage({ token, role }: { token: strin
                 <div className="deployment-actions orchestration-actions">
                   {selected.application_type==="GTB-Applications"&&<><button className="primary-button" onClick={()=>action(selected.id,"trigger-code-pull")}><Play size={15}/>Code pull</button><button className="secondary-button" onClick={()=>action(selected.id,"create-pr")}>Raise PR</button></>}
                   <button className="primary-button" onClick={()=>action(selected.id,"trigger-build",selected.application_type==="Collections"?{collections_items:selected.collections_items||[]}:{})}>Trigger build</button>
-                  <button className="primary-button" onClick={()=>{const name=window.prompt(`Deployment pipeline name${selected.country?` for ${selected.country}`:""} (leave blank to use configured value)`);void action(selected.id,"trigger-deployment",name?{pipeline_name:name}:{})}}>Trigger deployment</button>
+                  <button className="secondary-button" onClick={()=>action(selected.id,"refresh-status")}><RefreshCw size={15}/>Refresh status</button>
+                  <button className="primary-button" disabled={selected.application_type==="Collections"&&!buildSucceeded} onClick={()=>{const name=window.prompt(`Deployment pipeline name${selected.country?` for ${selected.country}`:""} (leave blank to use configured/discovered value)`);void action(selected.id,"trigger-deployment",name?{pipeline_name:name}:{})}}>Trigger deployment</button>
                 </div>
               </>}
             </>}
+
+            {selected.application_type==="Collections"&&<section className="collections-lifecycle-panel">
+              <div className="deployment-result-header"><div><span className="eyebrow">BUILD LIFECYCLE</span><h3>Build pipelines</h3></div><span className={`status ${statusClass(selected.steps?.build?.status)}`}>{selected.steps?.build?.status||"Waiting"}</span></div>
+              {buildRuns.length===0?<div className="monitoring-empty">No build runs yet.</div>:<div className="table-card lifecycle-table"><table><thead><tr><th>Service</th><th>Pipeline</th><th>Status</th><th>Duration</th><th>Pipeline URL</th><th>Logs</th></tr></thead><tbody>{buildRuns.map((run,index)=><tr key={`${run.pipeline_name}-${run.run_id}-${index}`}><td>{run.service||"—"}</td><td>{run.pipeline_name||"—"}</td><td><span className={`status ${statusClass(run.status)}`}>{run.status||"Unknown"}</span></td><td>{formatDuration(run.duration_seconds)}</td><td>{run.url?<a href={run.url} target="_blank" rel="noreferrer">Open pipeline</a>:"—"}</td><td>{run.logs_url?<a href={run.logs_url} target="_blank" rel="noreferrer">View logs</a>:"—"}</td></tr>)}</tbody></table></div>}
+
+              <div className="deployment-result-header lifecycle-heading"><div><span className="eyebrow">DEPLOYMENT LIFECYCLE</span><h3>Release / deployment pipelines</h3></div><span className={`status ${statusClass(selected.steps?.deployment?.status)}`}>{selected.steps?.deployment?.status||"Waiting"}</span></div>
+              {deploymentRuns.length===0?<div className="monitoring-empty">Deployment is available after every selected build succeeds.</div>:<div className="table-card lifecycle-table"><table><thead><tr><th>Pipeline</th><th>Status</th><th>Duration</th><th>Pipeline URL</th><th>Logs</th><th>Environment</th></tr></thead><tbody>{deploymentRuns.map((run,index)=><tr key={`${run.pipeline_name}-${run.release_id||run.run_id}-${index}`}><td>{run.pipeline_name||"—"}</td><td><span className={`status ${statusClass(run.status)}`}>{run.status||"Unknown"}</span></td><td>{formatDuration(run.duration_seconds)}</td><td>{run.url?<a href={run.url} target="_blank" rel="noreferrer">Open deployment</a>:"—"}</td><td>{run.logs_url?<a href={run.logs_url} target="_blank" rel="noreferrer">View logs</a>:"—"}</td><td>{run.environment_status||selected.country||"—"}</td></tr>)}</tbody></table></div>}
+            </section>}
           </>}
         </article>
       </section>}
