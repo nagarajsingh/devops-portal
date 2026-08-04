@@ -13,6 +13,7 @@ from .deployment_management import (
     list_deployment_requests,
     submit_document,
 )
+from .deployment_notifications import send_devops_ready, send_owner_approval_request
 from .deployment_runtime import perform_action as execute_action
 from .logging_config import get_logger
 from .models import UserContext
@@ -44,12 +45,13 @@ async def submit_release_document(
 ) -> dict:
     raw = await document.read()
     logger.info(
-        "Deployment document submission started user=%s application_type=%s country=%s filename=%s size_bytes=%s",
+        "Deployment document submission started user=%s application_type=%s country=%s filename=%s size_bytes=%s owner=%s",
         user.username,
         application_type,
         country or "N/A",
         document.filename or "release-document",
         len(raw),
+        app_owner,
     )
     try:
         result = submit_document(
@@ -59,6 +61,14 @@ async def submit_release_document(
             raw,
             user.username,
             country,
+        )
+        mail_sent = send_owner_approval_request(result)
+        result["owner_mail_sent"] = mail_sent
+        logger.info(
+            "Owner approval email result request_id=%s owner=%s sent=%s",
+            result.get("id"),
+            app_owner,
+            mail_sent,
         )
     except Exception:
         logger.exception(
@@ -128,11 +138,7 @@ def perform_action(
     payload: DeploymentAction,
     user: UserContext = Depends(require_devops),
 ) -> dict:
-    explicit_pat = (
-        payload.azure_devops_pat.get_secret_value()
-        if payload.azure_devops_pat
-        else ""
-    )
+    explicit_pat = payload.azure_devops_pat.get_secret_value() if payload.azure_devops_pat else ""
     logger.info(
         "Deployment action started request_id=%s action=%s actor=%s update_keys=%s explicit_pat=%s",
         request_id,
@@ -149,6 +155,16 @@ def perform_action(
             explicit_pat,
             payload.updates,
         )
+        if action == "owner-approve":
+            bypassed = bool(payload.updates.get("bypass_owner_approval"))
+            mail_sent = send_devops_ready(result, bypassed=bypassed)
+            result["devops_mail_sent"] = mail_sent
+            logger.info(
+                "DevOps notification email result request_id=%s bypassed=%s sent=%s",
+                request_id,
+                bypassed,
+                mail_sent,
+            )
     except Exception:
         logger.exception(
             "Deployment action failed request_id=%s action=%s actor=%s",
