@@ -170,6 +170,7 @@ def _collections_items(text: str, country: str) -> list[dict[str, Any]]:
             "service": service,
             "image_tag": tag,
             "vendor_image": f"{extracted_service}:{tag}",
+            "use_vendor_image": True,
             "extraction_method": "Rule-Based",
             "pipeline_name": mapping.get(service, ""),
             "country": country,
@@ -455,7 +456,9 @@ def refresh_request_status(request_id: str, pat: str) -> dict[str, Any]:
     if row.get("application_type") == "Collections" and steps.get("build", {}).get("status") == "Succeeded":
         _refresh_collections_release_links(row, pat)
     _update_progress(row)
-    row["updated_at"] = _now()
+    now = _now()
+    row["updated_at"] = now
+    row.setdefault("timeline", []).append({"at": now, "action": "refresh-status", "actor": "System"})
     _save(rows)
     return row
 
@@ -471,12 +474,17 @@ def _trigger_collections_builds(row: dict[str, Any], updates: dict[str, Any], pa
         if not pipeline_name:
             runs.append({**item, "status": "Failed", "result": "mapping_missing", "error": "Pipeline mapping not found"})
             continue
+        use_vendor_image = bool(item.get("use_vendor_image", True))
+        vendor_image = str(item.get("vendor_image") or "").strip()
+        if use_vendor_image and not vendor_image:
+            runs.append({**item, "status": "Failed", "result": "invalid_parameters", "error": "vendorImage is required when useVendorImage is enabled"})
+            continue
         parameters = {
-            "vendorImage": item.get("vendor_image", ""),
-            "useVendorImage": True,
+            "vendorImage": vendor_image,
+            "useVendorImage": use_vendor_image,
         }
         run = _pipeline_run(pipeline_name, parameters, pat)
-        runs.append({**item, **run, "parameters": parameters})
+        runs.append({**item, **run, "use_vendor_image": use_vendor_image, "parameters": parameters})
     row["collections_items"] = selected
     overall = "Queued" if runs and all(run.get("status") == "Queued" for run in runs) else "Running"
     return {"status": overall, "runs": runs}
