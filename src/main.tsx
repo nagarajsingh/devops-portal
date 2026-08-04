@@ -4,6 +4,7 @@ import App from "./App";
 import "./styles.css";
 import "./feature.css";
 import "./notifications.css";
+import "./layout-fixes.css";
 import "./features/monitoring/monitoring.css";
 import "./features/monitoring/categories.css";
 import "./features/monitoring/details.css";
