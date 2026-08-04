@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import copy
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -113,7 +114,7 @@ def _replace_strings(value: Any, replacements: dict[str, str]) -> Any:
         updated = value
         for source, target in replacements.items():
             if source:
-                updated = updated.replace(source, target)
+                updated = re.sub(re.escape(source), lambda _: target, updated, flags=re.IGNORECASE)
         return updated
     return value
 
@@ -125,16 +126,21 @@ def _prepare_cloned_definition(
     target_build_pipeline: dict[str, Any],
 ) -> dict[str, Any]:
     definition = copy.deepcopy(reference_definition)
-    reference_alias = f"_{reference_repository_name}"
     target_alias = f"_{target_repository_name}"
 
-    definition = _replace_strings(
-        definition,
-        {
-            reference_alias: target_alias,
-            reference_repository_name: target_repository_name,
-        },
-    )
+    build_artifact_aliases = [
+        str(artifact.get("alias") or "")
+        for artifact in definition.get("artifacts", [])
+        if artifact.get("type") == "Build" and artifact.get("alias")
+    ]
+    replacements = {
+        reference_repository_name: target_repository_name,
+        f"_{reference_repository_name}": target_alias,
+    }
+    for artifact_alias in build_artifact_aliases:
+        replacements[artifact_alias] = target_alias
+
+    definition = _replace_strings(definition, replacements)
 
     definition["name"] = target_repository_name
     definition.pop("id", None)
