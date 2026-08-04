@@ -12,8 +12,8 @@ from .deployment_management import (
     extract_release_document,
     list_deployment_requests,
     submit_document,
-    update_action,
 )
+from .deployment_runtime import perform_action as execute_action
 from .logging_config import get_logger
 from .models import UserContext
 
@@ -128,17 +128,27 @@ def perform_action(
     payload: DeploymentAction,
     user: UserContext = Depends(require_devops),
 ) -> dict:
-    pat = payload.azure_devops_pat.get_secret_value() if payload.azure_devops_pat else ""
+    explicit_pat = (
+        payload.azure_devops_pat.get_secret_value()
+        if payload.azure_devops_pat
+        else ""
+    )
     logger.info(
-        "Deployment action started request_id=%s action=%s actor=%s update_keys=%s pat_configured=%s",
+        "Deployment action started request_id=%s action=%s actor=%s update_keys=%s explicit_pat=%s",
         request_id,
         action,
         user.username,
         sorted(payload.updates.keys()),
-        bool(pat),
+        bool(explicit_pat),
     )
     try:
-        result = update_action(request_id, action, user.username, pat, payload.updates)
+        result = execute_action(
+            request_id,
+            action,
+            user.username,
+            explicit_pat,
+            payload.updates,
+        )
     except Exception:
         logger.exception(
             "Deployment action failed request_id=%s action=%s actor=%s",
