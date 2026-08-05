@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse
 from .auth import authenticate, current_user, require_devops
 from .cluster_inventory import inventory_ingresses, inventory_namespaces, inventory_services
 from .config import APP_OWNER_EMAILS, KUBERNETES_TARGETS, LOCAL_KUBERNETES_TARGET
-from .deployment_routes import router as deployment_management_router
+from .deployment_management import router as deployment_management_router
 from .kubernetes_ops import cluster_namespaces, namespace_ingresses, namespace_services
 from .logging_config import get_logger
 from .models import ApproveRequest, CloseRequest, KubernetesTargetOption, LoginRequest, LoginResponse, PipelineRequest, PipelineRequestCreate, RejectRequest, ReviewUpdate, ServiceOption, UserContext
