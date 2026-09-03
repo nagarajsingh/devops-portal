@@ -162,6 +162,32 @@ def reference_files(reference_repository_name: str, reference_branch: str, appli
     return files
 
 
+def _ensure_pull_request(repository_id: str, repository_name: str, source_branch: str, target_branch: str, application_type: str, pat: str) -> dict[str, Any]:
+    source_ref = f"refs/heads/{source_branch}"
+    target_ref = f"refs/heads/{target_branch}"
+    query = urllib.parse.urlencode({"searchCriteria.status": "active", "searchCriteria.sourceRefName": source_ref, "searchCriteria.targetRefName": target_ref, "api-version": "7.1"})
+    code, body = azdo_request("GET", f"_apis/git/repositories/{repository_id}/pullrequests?{query}", pat)
+    if code != 200:
+        raise RuntimeError(body.get("message", f"Unable to inspect existing pull requests with HTTP {code}"))
+    existing = next(iter(body.get("value", [])), None)
+    if existing:
+        pr_id = existing.get("pullRequestId")
+        return {"status": "Already Exists", "id": pr_id, "source_branch": source_branch, "target_branch": target_branch, "url": f"https://dev.azure.com/{AZDO_ORG}/{AZDO_PROJECT}/_git/{urllib.parse.quote(repository_name)}/pullrequest/{pr_id}"}
+
+    payload = {
+        "sourceRefName": source_ref,
+        "targetRefName": target_ref,
+        "title": f"DevOps pipeline onboarding - {repository_name}",
+        "description": f"Automated DevOps onboarding changes for {application_type}. Review and merge {source_branch} into {target_branch}.",
+    }
+    code, body = azdo_request("POST", f"_apis/git/repositories/{repository_id}/pullrequests?api-version=7.1", pat, payload)
+    if code not in (200, 201):
+        raise RuntimeError(body.get("message", f"Pull request creation failed with HTTP {code}"))
+    pr_id = body.get("pullRequestId")
+    logger.info("Azure DevOps pull request created repository=%s pr=%s source=%s target=%s", repository_name, pr_id, source_branch, target_branch)
+    return {"status": "Completed", "id": pr_id, "source_branch": source_branch, "target_branch": target_branch, "url": f"https://dev.azure.com/{AZDO_ORG}/{AZDO_PROJECT}/_git/{urllib.parse.quote(repository_name)}/pullrequest/{pr_id}"}
+
+
 def bootstrap_repository(target_repository: dict, reference_repository_name: str, reference_branch: str, application_type: str, pat: str) -> dict[str, Any]:
     profile = _application_bootstrap_profile(application_type)
     target_branch = profile["target_branch"]
@@ -183,27 +209,35 @@ def bootstrap_repository(target_repository: dict, reference_repository_name: str
 
     repository_id = target_repository["id"]
     head = get_branch_head(repository_id, target_branch, pat)
-    existing_paths = list_branch_paths(repository_id, target_branch, pat) if head else set()
+    develop_head = get_branch_head(repository_id, "develop", pat)
+    base_head = develop_head if not head and develop_head and target_branch != "develop" else None
+    existing_paths = list_branch_paths(repository_id, target_branch, pat) if head else (list_branch_paths(repository_id, "develop", pat) if base_head else set())
     changes = [{"changeType": "edit" if item["path"] in existing_paths else "add", "item": {"path": item["path"]}, "newContent": {"content": item["content"], "contentType": "rawtext"}} for item in files]
-    payload = {"refUpdates": [{"name": f"refs/heads/{target_branch}", "oldObjectId": head or "0" * 40}], "commits": [{"comment": f"Bootstrap {application_type} repository structure from {reference_branch}", "changes": changes}]}
+    commit = {"comment": f"Bootstrap {application_type} repository structure from {reference_branch}", "changes": changes}
+    if base_head:
+        commit["parents"] = [base_head]
+    payload = {"refUpdates": [{"name": f"refs/heads/{target_branch}", "oldObjectId": head or "0" * 40}], "commits": [commit]}
     code, body = azdo_request("POST", f"_apis/git/repositories/{repository_id}/pushes?api-version=7.1", pat, payload)
     if code not in (200, 201):
         raise RuntimeError(body.get("message", f"Repository bootstrap failed with HTTP {code}"))
     action = "Updated" if head else "Created"
-    logger.info(
-        "Repository bootstrap completed repository=%s branch=%s source=%s transformed_files=%s",
-        target_name,
-        target_branch,
-        reference_name,
-        transformed_count,
-    )
+
+    pull_request: dict[str, Any] | None = None
+    if develop_head and target_branch != "develop":
+        pull_request = _ensure_pull_request(repository_id, target_name, target_branch, "develop", application_type, pat)
+
+    logger.info("Repository bootstrap completed repository=%s branch=%s source=%s transformed_files=%s pr=%s", target_name, target_branch, reference_name, transformed_count, pull_request.get("id") if pull_request else None)
+    message = f"{action} {target_branch} using {reference_name}:{reference_branch}; updated reference names in {transformed_count} file(s)"
+    if pull_request:
+        message += f"; PR #{pull_request.get('id')} raised from {target_branch} to develop"
     return {
         "status": "Completed",
-        "message": f"{action} {target_branch} using {reference_name}:{reference_branch}; updated reference names in {transformed_count} file(s)",
+        "message": message,
         "branch": target_branch,
         "source_branch": reference_branch,
         "files": [item["path"] for item in files],
         "transformed_files": transformed_count,
+        "pull_request": pull_request,
         "url": target_repository.get("webUrl") or target_repository.get("remoteUrl"),
     }
 
