@@ -169,4 +169,9 @@ def close_request(request_id: str, payload: CloseRequest, user: UserContext = De
 
 @app.post("/requests/{request_id}/approve", response_model=PipelineRequest)
 def approve_request(request_id: str, payload: ApproveRequest, user: UserContext = Depends(require_devops)) -> PipelineRequest:
-    return approve_pipeline_request(request_id, user, payload.azure_devops_pat.get_secret_value())
+    return approve_pipeline_request(
+        request_id,
+        user,
+        payload.azure_devops_pat.get_secret_value(),
+        payload.allow_existing_repository_bootstrap,
+    )
