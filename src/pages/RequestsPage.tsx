@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  ApiError,
   approvePipelineRequest,
   closePipelineRequest,
+  confirmExistingRepository,
   getIngresses,
   getKubernetesTargets,
   getNamespaces,
@@ -179,9 +181,10 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
     ];
 
     setBusy(true); setError(""); setNotice(""); setOperationTotal(stages.length);
+    const patForRetry = azureDevOpsPat;
     const operation = (async () => {
       await updatePipelineRequest(selected.id, draft, token);
-      return approvePipelineRequest(selected.id, azureDevOpsPat, token);
+      return approvePipelineRequest(selected.id, patForRetry, token);
     })().then((value) => ({ value, error: null as unknown })).catch((operationError: unknown) => ({ value: null, error: operationError }));
 
     try {
@@ -193,6 +196,29 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
       const updated = result.value as PipelineRequest;
       setAzureDevOpsPat(""); setSelected(updated); setNotice(`Provisioning finished with status: ${updated.status}. Review and close the ticket.`); await load();
     } catch (reason) {
+      if (reason instanceof ApiError && reason.code === "existing_repository_confirmation_required" && selected.application_type === "Native-Mobile") {
+        setBusy(false); setOperationStatus(""); setOperationStep(0); setOperationTotal(0);
+        const confirmed = window.confirm(
+          `Repository ${selected.repository_name} already exists.\n\nCreate only the devops/pipeline branch using ${draft.reference_repository_name}:${draft.reference_branch || "develop"}?\n\nExisting branches and existing code will not be modified.`
+        );
+        if (confirmed) {
+          setBusy(true); setOperationStatus("Creating devops/pipeline and continuing provisioning..."); setOperationStep(1); setOperationTotal(1);
+          try {
+            const updated = await confirmExistingRepository(selected.id, patForRetry, token);
+            setSelected(updated);
+            setNotice(`Existing repository kept intact. devops/pipeline provisioning finished with status: ${updated.status}.`);
+            await load();
+          } catch (confirmError) {
+            setError(confirmError instanceof Error ? confirmError.message : "Unable to continue with the existing repository");
+          } finally {
+            setAzureDevOpsPat(""); setBusy(false); setOperationStatus(""); setOperationStep(0); setOperationTotal(0);
+          }
+          return;
+        }
+        setError("Repository was left unchanged. No devops/pipeline branch was created.");
+        setAzureDevOpsPat(""); await load();
+        return;
+      }
       setAzureDevOpsPat(""); setError(reason instanceof Error ? reason.message : "Approval failed"); await load();
     } finally { setBusy(false); setOperationStatus(""); setOperationStep(0); setOperationTotal(0); }
   };
