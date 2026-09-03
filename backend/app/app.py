@@ -15,7 +15,7 @@ from .kubernetes_ops import cluster_namespaces, namespace_ingresses, namespace_s
 from .logging_config import get_logger
 from .models import ApproveRequest, CloseRequest, KubernetesTargetOption, LoginRequest, LoginResponse, PipelineRequest, PipelineRequestCreate, RejectRequest, ReviewUpdate, ServiceOption, UserContext
 from .monitoring import build_monitoring_summary
-from .request_service import approve_pipeline_request, close_pipeline_request, create_pipeline_request, get_pipeline_request, list_pipeline_requests, process_app_owner_action, reject_pipeline_request, update_pipeline_request
+from .request_service import approve_pipeline_request, close_pipeline_request, confirm_existing_repository_bootstrap, create_pipeline_request, get_pipeline_request, list_pipeline_requests, process_app_owner_action, reject_pipeline_request, update_pipeline_request
 
 logger = get_logger("api")
 app = FastAPI(title="DevOps Portal API", version="3.9.0")
@@ -170,3 +170,8 @@ def close_request(request_id: str, payload: CloseRequest, user: UserContext = De
 @app.post("/requests/{request_id}/approve", response_model=PipelineRequest)
 def approve_request(request_id: str, payload: ApproveRequest, user: UserContext = Depends(require_devops)) -> PipelineRequest:
     return approve_pipeline_request(request_id, user, payload.azure_devops_pat.get_secret_value())
+
+
+@app.post("/requests/{request_id}/confirm-existing-repository", response_model=PipelineRequest)
+def confirm_existing_repository(request_id: str, payload: ApproveRequest, user: UserContext = Depends(require_devops)) -> PipelineRequest:
+    return confirm_existing_repository_bootstrap(request_id, user, payload.azure_devops_pat.get_secret_value())
