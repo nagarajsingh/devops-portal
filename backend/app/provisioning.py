@@ -22,9 +22,9 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
     try:
         existing_repo = get_repository(item["repository_name"], azure_devops_pat)
         previous_repo_id = item.get("provisioning", {}).get("repository", {}).get("id")
-        allow_existing_repo = bool(item.get("allow_existing_repo_bootstrap")) and item.get("application_type") == "Native-Mobile"
+        allow_existing_repo = bool(item.get("allow_existing_repo_bootstrap"))
         if existing_repo and previous_repo_id != existing_repo.get("id") and not allow_existing_repo:
-            steps["repository"] = {"status": "Warning", "message": "Repository already exists", "id": existing_repo.get("id"), "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl"), "requires_confirmation": True, "confirmation_action": "create_devops_pipeline_branch"}
+            steps["repository"] = {"status": "Warning", "message": "Repository already exists", "id": existing_repo.get("id"), "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl"), "requires_confirmation": True, "confirmation_action": "create_pipeline_branch"}
             return "Pending Action", steps
         if existing_repo:
             target_repo = existing_repo
@@ -64,7 +64,11 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
             application_type = item.get("application_type", "H2H")
             build_pipeline_result = create_build_pipeline(target_repo, yaml_path, target_branch, azure_devops_pat, application_type)
             steps["pipeline"] = build_pipeline_result
-            logger.info("Build pipeline resolved request_id=%s pipeline_id=%s status=%s; continuing to release pipeline setup", request_id, build_pipeline_result.get("id"), build_pipeline_result.get("status"))
+            if build_pipeline_result.get("status") == "Already Exists" and not item.get("allow_existing_pipeline_release"):
+                steps["pipeline"] = {**build_pipeline_result, "requires_confirmation": True, "confirmation_action": "reuse_build_pipeline_for_release", "message": f"Build pipeline {build_pipeline_result.get('name') or item.get('repository_name')} already exists. Proceed with release pipeline creation using this build pipeline?"}
+                logger.info("Existing build pipeline requires confirmation request_id=%s pipeline_id=%s", request_id, build_pipeline_result.get("id"))
+                return "Pending Action", steps
+            logger.info("Build pipeline resolved request_id=%s pipeline_id=%s status=%s", request_id, build_pipeline_result.get("id"), build_pipeline_result.get("status"))
         except Exception as exc:
             logger.exception("Pipeline creation failed request_id=%s repository=%s", request_id, item.get("repository_name"))
             steps["pipeline"] = {"status": "Failed", "message": str(exc)}
