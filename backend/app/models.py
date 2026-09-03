@@ -49,6 +49,7 @@ class ReviewUpdate(PipelineRequestCreate):
 
 class ApproveRequest(BaseModel):
     azure_devops_pat: SecretStr = Field(min_length=10)
+    allow_existing_repository_bootstrap: bool = False
 
 
 class RejectRequest(BaseModel):
