@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  ApiError,
   approvePipelineRequest,
   closePipelineRequest,
   getIngresses,
@@ -157,6 +158,12 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
     finally { setBusy(false); setOperationStatus(""); setOperationStep(0); setOperationTotal(0); }
   };
 
+  const runProvisioning = async (allowExistingRepositoryBootstrap: boolean) => {
+    if (!selected || !draft) throw new Error("No request selected");
+    await updatePipelineRequest(selected.id, draft, token);
+    return approvePipelineRequest(selected.id, azureDevOpsPat, token, allowExistingRepositoryBootstrap);
+  };
+
   const approve = async () => {
     if (!selected || !draft) return;
     if (!draft.target_cluster) return setError("Select a Kubernetes target before approval.");
@@ -169,8 +176,8 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
 
     const stages = [
       "Saving approved request values...",
-      "Checking and creating Azure DevOps repository...",
-      draft.reference_repository_name ? "Copying reference repository files..." : "Reference repository not selected; skipping template copy...",
+      "Checking Azure DevOps repository...",
+      draft.reference_repository_name ? "Preparing isolated devops/pipeline branch from the reference repository..." : "Reference repository not selected; skipping template copy...",
       draft.setup_pipeline ? "Creating Azure DevOps build pipeline..." : "Pipeline setup disabled; skipping build pipeline creation...",
       draft.setup_pipeline ? "Cloning and configuring Azure DevOps release pipeline..." : "Pipeline setup disabled; skipping release pipeline creation...",
       draft.create_service ? "Creating Kubernetes service..." : "Validating existing Kubernetes service...",
@@ -179,21 +186,38 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
     ];
 
     setBusy(true); setError(""); setNotice(""); setOperationTotal(stages.length);
-    const operation = (async () => {
-      await updatePipelineRequest(selected.id, draft, token);
-      return approvePipelineRequest(selected.id, azureDevOpsPat, token);
-    })().then((value) => ({ value, error: null as unknown })).catch((operationError: unknown) => ({ value: null, error: operationError }));
-
     try {
       for (let index = 0; index < stages.length; index += 1) {
-        setOperationStep(index + 1); setOperationStatus(stages[index]); await wait(1000);
+        setOperationStep(index + 1); setOperationStatus(stages[index]); await wait(700);
       }
-      const result = await operation;
-      if (result.error) throw result.error;
-      const updated = result.value as PipelineRequest;
-      setAzureDevOpsPat(""); setSelected(updated); setNotice(`Provisioning finished with status: ${updated.status}. Review and close the ticket.`); await load();
+
+      let updated: PipelineRequest;
+      try {
+        updated = await runProvisioning(false);
+      } catch (reason) {
+        if (reason instanceof ApiError && reason.status === 409 && typeof reason.detail === "object" && reason.detail !== null && (reason.detail as any).code === "existing_repository_confirmation_required") {
+          const confirmed = window.confirm(
+            `Repository ${draft.repository_name} already exists.\n\nCreate only the devops/pipeline branch using ${draft.reference_repository_name}:${draft.reference_branch}?\n\nExisting branches and existing code will not be modified.`,
+          );
+          if (!confirmed) {
+            setNotice("Existing repository was left unchanged. Provisioning is waiting for your confirmation.");
+            await load();
+            return;
+          }
+          setOperationStatus("Creating isolated devops/pipeline branch without touching existing branches...");
+          updated = await runProvisioning(true);
+        } else {
+          throw reason;
+        }
+      }
+
+      setAzureDevOpsPat("");
+      setSelected(updated);
+      setNotice(`Provisioning finished with status: ${updated.status}. Review and close the ticket.`);
+      await load();
     } catch (reason) {
-      setAzureDevOpsPat(""); setError(reason instanceof Error ? reason.message : "Approval failed"); await load();
+      setError(reason instanceof Error ? reason.message : "Approval failed");
+      await load();
     } finally { setBusy(false); setOperationStatus(""); setOperationStep(0); setOperationTotal(0); }
   };
 
