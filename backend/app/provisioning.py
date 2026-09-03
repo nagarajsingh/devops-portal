@@ -60,7 +60,8 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
             if not yaml_path:
                 raise RuntimeError("Pipeline YAML file was not found in the bootstrapped repository")
             target_branch = bootstrap_result.get("branch") or "feature/devops"
-            build_pipeline_result = create_build_pipeline(target_repo, yaml_path, target_branch, azure_devops_pat)
+            application_type = item.get("application_type", "H2H")
+            build_pipeline_result = create_build_pipeline(target_repo, yaml_path, target_branch, azure_devops_pat, application_type)
             steps["pipeline"] = build_pipeline_result
             logger.info("Build pipeline resolved request_id=%s pipeline_id=%s status=%s; continuing to release pipeline setup", request_id, build_pipeline_result.get("id"), build_pipeline_result.get("status"))
         except Exception as exc:
