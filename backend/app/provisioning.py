@@ -12,30 +12,47 @@ from .remote_kubernetes_pipeline import provision_through_pipeline
 logger = get_logger("provisioning")
 
 
-def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
+def provision(item: dict, azure_devops_pat: str, allow_existing_repository_bootstrap: bool = False) -> tuple[str, dict[str, Any]]:
     steps: dict[str, Any] = {}
     target_repo: dict | None = None
     request_id = item.get("id")
     logger.info(
-        "Provisioning started request_id=%s repository=%s namespace=%s target_cluster=%s",
+        "Provisioning started request_id=%s repository=%s namespace=%s target_cluster=%s allow_existing_repository_bootstrap=%s",
         request_id,
         item.get("repository_name"),
         item.get("namespace"),
         item.get("target_cluster") or LOCAL_KUBERNETES_TARGET,
+        allow_existing_repository_bootstrap,
     )
 
     try:
         existing_repo = get_repository(item["repository_name"], azure_devops_pat)
-        previous_repo_id = item.get("provisioning", {}).get("repository", {}).get("id")
-        if existing_repo and previous_repo_id != existing_repo.get("id"):
-            steps["repository"] = {"status": "Warning", "message": "Repository already exists", "id": existing_repo.get("id"), "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl")}
+        if existing_repo and not allow_existing_repository_bootstrap:
+            steps["repository"] = {
+                "status": "Confirmation Required",
+                "message": "Repository already exists. Confirm creation of an isolated DevOps pipeline branch before continuing.",
+                "id": existing_repo.get("id"),
+                "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl"),
+                "existing": True,
+            }
             return "Pending Action", steps
         if existing_repo:
             target_repo = existing_repo
-            steps["repository"] = {"status": "Already Exists", "message": "Reusing repository created during an earlier provisioning attempt", "id": existing_repo.get("id"), "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl")}
+            steps["repository"] = {
+                "status": "Already Exists",
+                "message": "Existing repository will be reused without modifying any existing branch. Only the isolated DevOps pipeline branch will be created or updated.",
+                "id": existing_repo.get("id"),
+                "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl"),
+                "existing": True,
+            }
         else:
             target_repo = create_repository(item["repository_name"], azure_devops_pat)
-            steps["repository"] = {"status": "Completed", "id": target_repo.get("id"), "url": target_repo.get("webUrl") or target_repo.get("remoteUrl")}
+            steps["repository"] = {
+                "status": "Completed",
+                "id": target_repo.get("id"),
+                "url": target_repo.get("webUrl") or target_repo.get("remoteUrl"),
+                "existing": False,
+            }
     except Exception as exc:
         logger.exception("Repository provisioning failed request_id=%s repository=%s", request_id, item.get("repository_name"))
         steps["repository"] = {"status": "Failed", "message": str(exc)}
@@ -44,7 +61,13 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
     reference_repo = (item.get("reference_repository_name") or "").strip()
     if target_repo and reference_repo:
         try:
-            bootstrap_result = bootstrap_repository(target_repo, reference_repo, item.get("reference_branch", ""), item.get("application_type", "H2H"), azure_devops_pat)
+            bootstrap_result = bootstrap_repository(
+                target_repo,
+                reference_repo,
+                item.get("reference_branch", ""),
+                item.get("application_type", "H2H"),
+                azure_devops_pat,
+            )
             steps["repository_bootstrap"] = bootstrap_result
         except Exception as exc:
             logger.exception("Repository bootstrap failed request_id=%s repository=%s", request_id, item.get("repository_name"))
@@ -64,7 +87,7 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
             yaml_path = next((path for path in bootstrap_result.get("files", []) if path.lower() in ("/azure-pipelines.yml", "/azure-pipelines.yaml")), None)
             if not yaml_path:
                 raise RuntimeError("Pipeline YAML file was not found in the bootstrapped repository")
-            target_branch = bootstrap_result.get("branch") or "feature/devops"
+            target_branch = bootstrap_result.get("branch") or "devops/pipeline"
             build_pipeline_result = create_build_pipeline(target_repo, yaml_path, target_branch, azure_devops_pat)
             steps["pipeline"] = build_pipeline_result
         except Exception as exc:
