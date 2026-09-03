@@ -26,7 +26,7 @@ DEVELOPER_PASSWORD = env("DEVELOPER_PASSWORD", "developer123")
 
 AZDO_ORG = env("AZURE_DEVOPS_ORGANIZATION")
 AZDO_PROJECT = env("AZURE_DEVOPS_PROJECT")
-BOOTSTRAP_BRANCH = env("BOOTSTRAP_BRANCH", "feature/devops") or "feature/devops"
+BOOTSTRAP_BRANCH = env("BOOTSTRAP_BRANCH", "devops/pipeline") or "devops/pipeline"
 
 LOCAL_KUBERNETES_TARGET = env("LOCAL_KUBERNETES_TARGET", "mashreq-titan-non-prod") or "mashreq-titan-non-prod"
 DEFAULT_KUBERNETES_TARGETS = [
