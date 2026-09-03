@@ -16,36 +16,18 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
     steps: dict[str, Any] = {}
     target_repo: dict | None = None
     request_id = item.get("id")
-    logger.info(
-        "Provisioning started request_id=%s repository=%s namespace=%s target_cluster=%s",
-        request_id,
-        item.get("repository_name"),
-        item.get("namespace"),
-        item.get("target_cluster") or LOCAL_KUBERNETES_TARGET,
-    )
+    logger.info("Provisioning started request_id=%s repository=%s namespace=%s target_cluster=%s", request_id, item.get("repository_name"), item.get("namespace"), item.get("target_cluster") or LOCAL_KUBERNETES_TARGET)
 
     try:
         existing_repo = get_repository(item["repository_name"], azure_devops_pat)
         previous_repo_id = item.get("provisioning", {}).get("repository", {}).get("id")
         allow_existing_repo = bool(item.get("allow_existing_repo_bootstrap")) and item.get("application_type") == "Native-Mobile"
         if existing_repo and previous_repo_id != existing_repo.get("id") and not allow_existing_repo:
-            steps["repository"] = {
-                "status": "Warning",
-                "message": "Repository already exists",
-                "id": existing_repo.get("id"),
-                "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl"),
-                "requires_confirmation": True,
-                "confirmation_action": "create_devops_pipeline_branch",
-            }
+            steps["repository"] = {"status": "Warning", "message": "Repository already exists", "id": existing_repo.get("id"), "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl"), "requires_confirmation": True, "confirmation_action": "create_devops_pipeline_branch"}
             return "Pending Action", steps
         if existing_repo:
             target_repo = existing_repo
-            steps["repository"] = {
-                "status": "Already Exists",
-                "message": "Using the existing repository without modifying its current branches or code",
-                "id": existing_repo.get("id"),
-                "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl"),
-            }
+            steps["repository"] = {"status": "Already Exists", "message": "Using the existing repository without modifying its current branches or code", "id": existing_repo.get("id"), "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl")}
         else:
             target_repo = create_repository(item["repository_name"], azure_devops_pat)
             steps["repository"] = {"status": "Completed", "id": target_repo.get("id"), "url": target_repo.get("webUrl") or target_repo.get("remoteUrl")}
@@ -80,6 +62,7 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
             target_branch = bootstrap_result.get("branch") or "feature/devops"
             build_pipeline_result = create_build_pipeline(target_repo, yaml_path, target_branch, azure_devops_pat)
             steps["pipeline"] = build_pipeline_result
+            logger.info("Build pipeline resolved request_id=%s pipeline_id=%s status=%s; continuing to release pipeline setup", request_id, build_pipeline_result.get("id"), build_pipeline_result.get("status"))
         except Exception as exc:
             logger.exception("Pipeline creation failed request_id=%s repository=%s", request_id, item.get("repository_name"))
             steps["pipeline"] = {"status": "Failed", "message": str(exc)}
@@ -88,15 +71,11 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
 
     if item.get("setup_pipeline") and reference_repo:
         try:
-            if not build_pipeline_result or not build_pipeline_result.get("id"):
+            pipeline_id = build_pipeline_result.get("id") if build_pipeline_result else None
+            if not pipeline_id:
                 raise RuntimeError("Build pipeline must be created or found before release pipeline cloning")
-            steps["release_pipeline"] = create_release_pipeline(
-                item.get("application_type", "H2H"),
-                reference_repo,
-                item["repository_name"],
-                build_pipeline_result,
-                azure_devops_pat,
-            )
+            logger.info("Starting release pipeline setup request_id=%s build_pipeline_id=%s build_pipeline_status=%s", request_id, pipeline_id, build_pipeline_result.get("status"))
+            steps["release_pipeline"] = create_release_pipeline(item.get("application_type", "H2H"), reference_repo, item["repository_name"], build_pipeline_result, azure_devops_pat)
         except Exception as exc:
             logger.exception("Release pipeline creation failed request_id=%s repository=%s", request_id, item.get("repository_name"))
             steps["release_pipeline"] = {"status": "Failed", "message": str(exc)}
@@ -120,20 +99,10 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
     else:
         try:
             remote_result = provision_through_pipeline(item, azure_devops_pat)
-            steps["service"] = {
-                **remote_result,
-                "message": "Kubernetes service created or validated successfully",
-            }
-            steps["ingress"] = {
-                **remote_result,
-                "message": "Ingress path created or updated successfully",
-            }
+            steps["service"] = {**remote_result, "message": "Kubernetes service created or validated successfully"}
+            steps["ingress"] = {**remote_result, "message": "Ingress path created or updated successfully"}
         except Exception as exc:
-            logger.exception(
-                "Remote Kubernetes provisioning pipeline failed request_id=%s target_cluster=%s",
-                request_id,
-                target_cluster,
-            )
+            logger.exception("Remote Kubernetes provisioning pipeline failed request_id=%s target_cluster=%s", request_id, target_cluster)
             failed = {"status": "Failed", "message": str(exc), "target_cluster": target_cluster}
             steps["service"] = failed
             steps["ingress"] = failed.copy()
