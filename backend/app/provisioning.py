@@ -27,12 +27,25 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
     try:
         existing_repo = get_repository(item["repository_name"], azure_devops_pat)
         previous_repo_id = item.get("provisioning", {}).get("repository", {}).get("id")
-        if existing_repo and previous_repo_id != existing_repo.get("id"):
-            steps["repository"] = {"status": "Warning", "message": "Repository already exists", "id": existing_repo.get("id"), "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl")}
+        allow_existing_repo = bool(item.get("allow_existing_repo_bootstrap")) and item.get("application_type") == "Native-Mobile"
+        if existing_repo and previous_repo_id != existing_repo.get("id") and not allow_existing_repo:
+            steps["repository"] = {
+                "status": "Warning",
+                "message": "Repository already exists",
+                "id": existing_repo.get("id"),
+                "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl"),
+                "requires_confirmation": True,
+                "confirmation_action": "create_devops_pipeline_branch",
+            }
             return "Pending Action", steps
         if existing_repo:
             target_repo = existing_repo
-            steps["repository"] = {"status": "Already Exists", "message": "Reusing repository created during an earlier provisioning attempt", "id": existing_repo.get("id"), "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl")}
+            steps["repository"] = {
+                "status": "Already Exists",
+                "message": "Using the existing repository without modifying its current branches or code",
+                "id": existing_repo.get("id"),
+                "url": existing_repo.get("webUrl") or existing_repo.get("remoteUrl"),
+            }
         else:
             target_repo = create_repository(item["repository_name"], azure_devops_pat)
             steps["repository"] = {"status": "Completed", "id": target_repo.get("id"), "url": target_repo.get("webUrl") or target_repo.get("remoteUrl")}
