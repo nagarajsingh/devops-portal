@@ -2,6 +2,18 @@ import type { ApplicationType, AuthSession, KubernetesService, KubernetesTarget,
 
 const API_BASE = "/devops-portal/api";
 
+export class ApiError extends Error {
+  status: number;
+  detail: unknown;
+
+  constructor(message: string, status: number, detail: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -14,8 +26,9 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: "Request failed" }));
-    const detail = typeof body.detail === "string" ? body.detail : body.detail?.message ?? "Request failed";
-    throw new Error(detail);
+    const detail = body.detail;
+    const message = typeof detail === "string" ? detail : detail?.message ?? "Request failed";
+    throw new ApiError(message, response.status, detail);
   }
 
   return response.json() as Promise<T>;
@@ -57,10 +70,18 @@ export function updatePipelineRequest(id: string, payload: ReviewUpdate, token: 
   return request<PipelineRequest>(`/requests/${id}`, { method: "PUT", body: JSON.stringify(payload) }, token);
 }
 
-export function approvePipelineRequest(id: string, azureDevOpsPat: string, token: string): Promise<PipelineRequest> {
+export function approvePipelineRequest(
+  id: string,
+  azureDevOpsPat: string,
+  token: string,
+  allowExistingRepositoryBootstrap = false,
+): Promise<PipelineRequest> {
   return request<PipelineRequest>(`/requests/${id}/approve`, {
     method: "POST",
-    body: JSON.stringify({ azure_devops_pat: azureDevOpsPat }),
+    body: JSON.stringify({
+      azure_devops_pat: azureDevOpsPat,
+      allow_existing_repository_bootstrap: allowExistingRepositoryBootstrap,
+    }),
   }, token);
 }
 
