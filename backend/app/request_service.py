@@ -244,6 +244,50 @@ def approve_pipeline_request(request_id: str, user: UserContext, azure_devops_pa
     current["timeline"].append(timeline_event(final_status, "system", "Provisioning workflow finished"))
     items[index] = current
     write_requests(items)
-    if steps.get("repository", {}).get("status") == "Warning":
+
+    repository_step = steps.get("repository", {})
+    if repository_step.get("status") == "Warning":
+        if current.get("application_type") == "Native-Mobile" and repository_step.get("requires_confirmation"):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "existing_repository_confirmation_required",
+                    "message": "Repository already exists. Create only devops/pipeline from the selected reference repository without modifying existing branches or code?",
+                    "request": current,
+                },
+            )
         raise HTTPException(status_code=409, detail={"message": "Repository already exists", "request": current})
+    return PipelineRequest(**current)
+
+
+def confirm_existing_repository_bootstrap(request_id: str, user: UserContext, azure_devops_pat: str) -> PipelineRequest:
+    items = read_requests()
+    index, current = find_request(items, request_id)
+    if current.get("application_type") != "Native-Mobile":
+        raise HTTPException(status_code=400, detail="Existing repository branch bootstrap confirmation is only supported for Native-Mobile")
+    if current.get("status") != "Pending Action":
+        raise HTTPException(status_code=409, detail=f"Request cannot continue from status {current.get('status')}")
+    if not current.get("reference_repository_name", "").strip():
+        raise HTTPException(status_code=400, detail="Reference repository is required")
+    if not current.get("reference_branch", "").strip():
+        raise HTTPException(status_code=400, detail="Reference repository branch is required")
+    if not azure_devops_pat.strip():
+        raise HTTPException(status_code=400, detail="Azure DevOps PAT is required for provisioning")
+
+    current["allow_existing_repo_bootstrap"] = True
+    current["status"] = "Provisioning"
+    current["updated_at"] = now_iso()
+    current.setdefault("timeline", []).append(
+        timeline_event(
+            "Existing Repository Confirmed",
+            user.username,
+            "DevOps confirmed creation of devops/pipeline only; existing branches and code must remain unchanged",
+        )
+    )
+    final_status, steps = provision(current, azure_devops_pat)
+    current.pop("allow_existing_repo_bootstrap", None)
+    current.update({"provisioning": steps, "status": final_status, "updated_at": now_iso()})
+    current["timeline"].append(timeline_event(final_status, "system", "Provisioning workflow finished"))
+    items[index] = current
+    write_requests(items)
     return PipelineRequest(**current)
