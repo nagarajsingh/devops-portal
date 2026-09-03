@@ -219,7 +219,12 @@ def close_pipeline_request(request_id: str, comment: str, user: UserContext) -> 
     return PipelineRequest(**current)
 
 
-def approve_pipeline_request(request_id: str, user: UserContext, azure_devops_pat: str) -> PipelineRequest:
+def approve_pipeline_request(
+    request_id: str,
+    user: UserContext,
+    azure_devops_pat: str,
+    allow_existing_repository_bootstrap: bool = False,
+) -> PipelineRequest:
     items = read_requests()
     index, current = find_request(items, request_id)
     if current.get("status") not in ("Pending Approval", "Pending Action", "Partially Completed"):
@@ -239,11 +244,28 @@ def approve_pipeline_request(request_id: str, user: UserContext, azure_devops_pa
 
     current.update({"status": "Provisioning", "reviewed_by": user.username, "updated_at": now_iso()})
     current.setdefault("timeline", []).append(timeline_event("Approved by DevOps", user.username, "Provisioning started"))
-    final_status, steps = provision(current, azure_devops_pat)
+    final_status, steps = provision(current, azure_devops_pat, allow_existing_repository_bootstrap)
     current.update({"provisioning": steps, "status": final_status, "updated_at": now_iso()})
+
+    repository_step = steps.get("repository", {})
+    if repository_step.get("status") == "Confirmation Required":
+        current["timeline"].append(timeline_event(
+            "Existing Repository Confirmation Required",
+            "system",
+            "Repository already exists. Waiting for DevOps confirmation to create only the isolated devops/pipeline branch from the selected reference repository.",
+        ))
+        items[index] = current
+        write_requests(items)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "existing_repository_confirmation_required",
+                "message": "Repository already exists. Create devops/pipeline from the reference repository without changing existing branches or code?",
+                "request": current,
+            },
+        )
+
     current["timeline"].append(timeline_event(final_status, "system", "Provisioning workflow finished"))
     items[index] = current
     write_requests(items)
-    if steps.get("repository", {}).get("status") == "Warning":
-        raise HTTPException(status_code=409, detail={"message": "Repository already exists", "request": current})
     return PipelineRequest(**current)
