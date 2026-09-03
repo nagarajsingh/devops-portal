@@ -111,7 +111,7 @@ def _replace_reference_name(content: str, reference_name: str, target_name: str)
 
 def _application_bootstrap_profile(application_type: str) -> dict[str, Any]:
     if application_type == "Native-Mobile":
-        return {"target_branch": "develop", "required_files": ["/Dockerfile"], "required_folders": ["BuildAndPublish"], "optional_folders": []}
+        return {"target_branch": "devops/pipeline", "required_files": ["/Dockerfile"], "required_folders": ["BuildAndPublish"], "optional_folders": []}
     if application_type == "Collections":
         return {"target_branch": BOOTSTRAP_BRANCH, "required_files": [], "required_folders": ["manifests", "share-config"], "optional_folders": []}
     if application_type == "H2H":
