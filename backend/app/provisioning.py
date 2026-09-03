@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from .azure_devops import bootstrap_repository, create_build_pipeline, create_repository, get_repository
+from .azure_devops import bootstrap_repository, create_repository, get_repository
 from .config import LOCAL_KUBERNETES_TARGET
 from .kubernetes_ops import ensure_ingress_path, ensure_service
 from .logging_config import get_logger
+from .pipeline_setup import create_build_pipeline
 from .release_pipelines import create_release_pipeline
 from .remote_kubernetes_pipeline import provision_through_pipeline
 
