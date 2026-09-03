@@ -2,6 +2,20 @@ import type { ApplicationType, AuthSession, KubernetesService, KubernetesTarget,
 
 const API_BASE = "/devops-portal/api";
 
+export class ApiError extends Error {
+  code?: string;
+  status?: number;
+  payload?: unknown;
+
+  constructor(message: string, options: { code?: string; status?: number; payload?: unknown } = {}) {
+    super(message);
+    this.name = "ApiError";
+    this.code = options.code;
+    this.status = options.status;
+    this.payload = options.payload;
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -14,8 +28,13 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: "Request failed" }));
-    const detail = typeof body.detail === "string" ? body.detail : body.detail?.message ?? "Request failed";
-    throw new Error(detail);
+    const detailBody = body?.detail;
+    const detail = typeof detailBody === "string" ? detailBody : detailBody?.message ?? "Request failed";
+    throw new ApiError(detail, {
+      code: typeof detailBody === "object" && detailBody ? detailBody.code : undefined,
+      status: response.status,
+      payload: detailBody,
+    });
   }
 
   return response.json() as Promise<T>;
@@ -59,6 +78,13 @@ export function updatePipelineRequest(id: string, payload: ReviewUpdate, token: 
 
 export function approvePipelineRequest(id: string, azureDevOpsPat: string, token: string): Promise<PipelineRequest> {
   return request<PipelineRequest>(`/requests/${id}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ azure_devops_pat: azureDevOpsPat }),
+  }, token);
+}
+
+export function confirmExistingRepository(id: string, azureDevOpsPat: string, token: string): Promise<PipelineRequest> {
+  return request<PipelineRequest>(`/requests/${id}/confirm-existing-repository`, {
     method: "POST",
     body: JSON.stringify({ azure_devops_pat: azureDevOpsPat }),
   }, token);
