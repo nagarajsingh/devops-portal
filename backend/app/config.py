@@ -19,59 +19,42 @@ JWT_ALGORITHM = "HS256"
 DATA_FILE = Path(env("REQUEST_DATA_FILE", "/data/requests.json"))
 NAMESPACE_ALLOWLIST = [item.strip() for item in env("ALLOWED_NAMESPACES", "automation").split(",") if item.strip()]
 
-DEVOPS_USER = env("DEVOPS_USERNAME", "devops")
-DEVOPS_PASSWORD = env("DEVOPS_PASSWORD", "devops123")
-DEVELOPER_USER = env("DEVELOPER_USERNAME", "developer")
-DEVELOPER_PASSWORD = env("DEVELOPER_PASSWORD", "developer123")
+# Portal authentication is stored in MS SQL. Never put database credentials or user passwords in source control.
+DB_SERVER = env("DB_SERVER")
+DB_PORT = int(env("DB_PORT", "1433"))
+DB_NAME = env("DB_NAME", "DevOpsPortal")
+DB_USERNAME = env("DB_USERNAME")
+DB_PASSWORD = env("DB_PASSWORD")
+DB_DRIVER = env("DB_DRIVER", "ODBC Driver 18 for SQL Server")
+DB_ENCRYPT = env("DB_ENCRYPT", "yes")
+DB_TRUST_SERVER_CERTIFICATE = env("DB_TRUST_SERVER_CERTIFICATE", "no")
 
 AZDO_ORG = env("AZURE_DEVOPS_ORGANIZATION")
 AZDO_PROJECT = env("AZURE_DEVOPS_PROJECT")
 BOOTSTRAP_BRANCH = env("BOOTSTRAP_BRANCH", "feature/devops") or "feature/devops"
 
 LOCAL_KUBERNETES_TARGET = env("LOCAL_KUBERNETES_TARGET", "mashreq-titan-non-prod") or "mashreq-titan-non-prod"
-DEFAULT_KUBERNETES_TARGETS = [
-    LOCAL_KUBERNETES_TARGET,
-    "mashreq-nativemob-safenet-nonprod",
-    "mashreq-titan-non-prod",
-    "mashreqdigicollecteguat",
-]
-_configured_targets = [
-    item.strip()
-    for item in env("KUBERNETES_TARGETS", ",".join(DEFAULT_KUBERNETES_TARGETS)).split(",")
-    if item.strip()
-]
+DEFAULT_KUBERNETES_TARGETS = [LOCAL_KUBERNETES_TARGET, "mashreq-nativemob-safenet-nonprod", "mashreq-titan-non-prod", "mashreqdigicollecteguat"]
+_configured_targets = [item.strip() for item in env("KUBERNETES_TARGETS", ",".join(DEFAULT_KUBERNETES_TARGETS)).split(",") if item.strip()]
 KUBERNETES_TARGETS = list(dict.fromkeys(_configured_targets))
 KUBERNETES_PROVISIONING_PIPELINE_ID = int(env("KUBERNETES_PROVISIONING_PIPELINE_ID", "1586"))
 KUBERNETES_PROVISIONING_TIMEOUT_SECONDS = int(env("KUBERNETES_PROVISIONING_TIMEOUT_SECONDS", "900"))
 KUBERNETES_PROVISIONING_POLL_SECONDS = max(2, int(env("KUBERNETES_PROVISIONING_POLL_SECONDS", "10")))
-
 KUBERNETES_INVENTORY_PIPELINE_ID = int(env("KUBERNETES_INVENTORY_PIPELINE_ID", "0"))
 KUBERNETES_INVENTORY_ARTIFACT_NAME = env("KUBERNETES_INVENTORY_ARTIFACT_NAME", "cluster-inventory") or "cluster-inventory"
 KUBERNETES_INVENTORY_REFRESH_SECONDS = max(60, int(env("KUBERNETES_INVENTORY_REFRESH_SECONDS", "300")))
 KUBERNETES_INVENTORY_FILE = Path(env("KUBERNETES_INVENTORY_FILE", "/data/cluster-inventory.json"))
 KUBERNETES_INVENTORY_PAT = env("KUBERNETES_INVENTORY_PAT")
-
 PORTAL_PUBLIC_URL = env("PORTAL_PUBLIC_URL", "http://localhost:8000").rstrip("/")
 APPROVAL_TOKEN_HOURS = int(env("APPROVAL_TOKEN_HOURS", "72"))
 
-DEFAULT_APP_OWNERS = {
-    "H2H": "Nagarajs@mashreq.com",
-    "Native-Mobile": "mujahid@mashreq.com",
-    "Collections": "mohanreddy1@mashreq.com",
-    "Safenet": "krishnakants@mashreq.com",
-}
+DEFAULT_APP_OWNERS = {"H2H": "Nagarajs@mashreq.com", "Native-Mobile": "mujahid@mashreq.com", "Collections": "mohanreddy1@mashreq.com", "Safenet": "krishnakants@mashreq.com"}
 try:
     APP_OWNER_EMAILS = {**DEFAULT_APP_OWNERS, **json.loads(env("APP_OWNER_EMAILS", "{}"))}
 except json.JSONDecodeError:
     APP_OWNER_EMAILS = DEFAULT_APP_OWNERS
 
-LANGUAGE_PORTS = {
-    "java-maven": 8080,
-    "node": 3000,
-    "python": 8000,
-    "container": 8080,
-}
-
+LANGUAGE_PORTS = {"java-maven": 8080, "node": 3000, "python": 8000, "container": 8080}
 SMTP_HOST = env("SMTP_HOST")
 SMTP_PORT = int(env("SMTP_PORT", "25"))
 SMTP_USERNAME = env("SMTP_USERNAME")
