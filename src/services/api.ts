@@ -7,6 +7,7 @@ export const getPortalUsers=(token:string)=>request<PortalUser[]>("/admin/users"
 export const createPortalUser=(payload:{email:string;password:string;role:Role;is_admin:boolean},token:string)=>request<PortalUser>("/admin/users",{method:"POST",body:JSON.stringify(payload)},token);
 export const updatePortalUser=(id:number,payload:{role:Role;is_admin:boolean;is_active:boolean;password?:string},token:string)=>request<PortalUser>(`/admin/users/${id}`,{method:"PUT",body:JSON.stringify(payload)},token);
 export const deletePortalUser=(id:number,token:string)=>request<void>(`/admin/users/${id}`,{method:"DELETE"},token);
+export const getDevOpsTaskAssignees=(token:string)=>request<{email:string;is_admin:boolean}[]>("/devops-tasks/assignees",{},token);
 export const getDevOpsTasks=(token:string,filters:Record<string,string>={})=>{const q=new URLSearchParams(Object.entries(filters).filter(([,v])=>v));return request<DevOpsTask[]>(`/devops-tasks?${q}`,{},token)};
 export const createDevOpsTask=(p:{title:string;description:string;assignee:string},token:string)=>request<DevOpsTask>("/devops-tasks",{method:"POST",body:JSON.stringify(p)},token);
 export const updateDevOpsTask=(id:string,p:{title?:string;description?:string;status?:DevOpsTaskStatus},token:string)=>request<DevOpsTask>(`/devops-tasks/${id}`,{method:"PUT",body:JSON.stringify(p)},token);
