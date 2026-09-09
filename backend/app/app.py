@@ -5,6 +5,8 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from .admin_routes import router as admin_router
+from .gtb_agent import router as gtb_agent_router
+from .gtb_delivery import router as gtb_delivery_router
 from .auth import authenticate, current_user, require_devops
 from .cluster_inventory import inventory_ingresses, inventory_namespaces, inventory_services
 from .config import APP_OWNER_EMAILS, KUBERNETES_TARGETS, LOCAL_KUBERNETES_TARGET
@@ -19,6 +21,8 @@ from .user_store import initialize_user_database
 logger=get_logger("api")
 app=FastAPI(title="DevOps Portal API",version="4.1.0")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
+app.include_router(gtb_agent_router)
+app.include_router(gtb_delivery_router)
 app.include_router(deployment_management_router); app.include_router(admin_router); app.include_router(devops_tasks_router)
 @app.on_event("startup")
 def startup_event():

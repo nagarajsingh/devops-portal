@@ -25,3 +25,18 @@ export const approvePipelineRequest=(id:string,pat:string,token:string)=>request
 export const confirmExistingRepository=(id:string,pat:string,token:string)=>request<PipelineRequest>(`/requests/${id}/confirm-existing-repository`,{method:"POST",body:JSON.stringify({azure_devops_pat:pat})},token);
 export const rejectPipelineRequest=(id:string,reason:string,token:string)=>request<PipelineRequest>(`/requests/${id}/reject`,{method:"POST",body:JSON.stringify({reason})},token);
 export const closePipelineRequest=(id:string,comment:string,token:string)=>request<PipelineRequest>(`/requests/${id}/close`,{method:"POST",body:JSON.stringify({comment})},token);
+
+export interface AgentScope { id:string; application:string; cluster:string; namespace:string; environment:string; }
+export interface AgentRun {
+  id:string; created_at:string; created_by:string; mode:string; scope:AgentScope; objective:string;
+  status:string; assessment:string; limitations:string[];
+  trace:{tool:string;at:string;status:string;evidence:Record<string,unknown>[]}[];
+  findings:{code:string;severity:string;resource:string;detail:string;recommendation:string;evidence_tool:string}[];
+}
+export const getAgentScopes=(token:string)=>request<AgentScope[]>("/gtb-agent/scopes",{},token);
+export const getAgentRuns=(token:string)=>request<AgentRun[]>("/gtb-agent/runs",{},token);
+export const runAgent=(payload:{scope_id:string;objective:"health"|"connectivity"|"readiness"},token:string)=>request<AgentRun>("/gtb-agent/runs",{method:"POST",body:JSON.stringify(payload)},token);
+export interface DeliveryCatalog {gtb_components:string[];collections_components:Record<string,string[]>;environments:string[];}
+export interface DeliveryPlan {mode:string;reference:string;application:string;component:string;blockers:string[];steps:({id:string;title:string;gate:string}&Record<string,unknown>)[];notes:string[];}
+export const getDeliveryCatalog=(token:string)=>request<DeliveryCatalog>("/gtb-agent/delivery/catalog",{},token);
+export const planDelivery=(payload:Record<string,unknown>,token:string)=>request<DeliveryPlan>("/gtb-agent/delivery/plan",{method:"POST",body:JSON.stringify(payload)},token);

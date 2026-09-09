@@ -1,0 +1,31 @@
+# Optional: apply one Role/RoleBinding per approved application namespace.
+# Replace the example namespace and service account if needed.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: devops-portal-agent-reader
+  namespace: gtb-uat
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "persistentvolumeclaims", "services"]
+    verbs: ["list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["list"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: devops-portal-agent-reader
+  namespace: gtb-uat
+subjects:
+  - kind: ServiceAccount
+    name: devops-portal-backend
+    namespace: automation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: devops-portal-agent-reader

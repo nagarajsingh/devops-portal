@@ -62,3 +62,13 @@ src/
 - Approval Workflows
 - File Placement Automation
 - RabbitMQ & Cluster Health Monitoring
+
+## GTB Operations Agent
+
+The DevOps-only **GTB Operations Agent** adds reference-aligned GTB/Collections
+delivery plans and scoped, read-only Kubernetes investigations with persistent
+history. Existing pipeline and release execution paths are preserved.
+
+See [the repository analysis, configuration and agentic solution](docs/gtb-agentic-solution.md)
+for the implemented scope, Collections-Dashboard reference contracts, rollout
+requirements, tests and the path to model-driven delivery automation.

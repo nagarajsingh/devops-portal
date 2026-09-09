@@ -1,0 +1,117 @@
+{
+  "moc": {
+    "pipeline_name": "new-moc-build-pipeline",
+    "pipeline_id": "",
+    "pipeline_version_ref": "refs/heads/develop",
+    "parameters": {
+      "branch": "{build_branch}",
+      "war_files": "{war_files}",
+      "jar_files": "{jar_files}",
+      "deploy_type": "{deploy_type}"
+    }
+  },
+  "obtfpm": {
+    "pipeline_name": "new-obtfpm-build-pipeline",
+    "pipeline_id": "",
+    "pipeline_version_ref": "refs/heads/develop",
+    "parameters": {
+      "branch": "{build_branch}",
+      "war_files": "{war_files}",
+      "jar_files": "{jar_files}",
+      "deploy_type": "{deploy_type}"
+    }
+  },
+  "cmncore": {
+    "pipeline_name": "new-cmncore-build-pipeline",
+    "pipeline_id": "",
+    "pipeline_version_ref": "refs/heads/develop",
+    "parameters": {
+      "branch": "{build_branch}",
+      "war_files": "{war_files}",
+      "jar_files": "{jar_files}",
+      "deploy_type": "{deploy_type}"
+    }
+  },
+  "plato": {
+    "pipeline_name": "new-plato-build-pipeline",
+    "pipeline_id": "",
+    "pipeline_version_ref": "refs/heads/develop",
+    "parameters": {
+      "branch": "{build_branch}",
+      "war_files": "{war_files}",
+      "jar_files": "{jar_files}",
+      "deploy_type": "{deploy_type}"
+    }
+  },
+  "obtf": {
+    "pipeline_name": "r2-obtf-build-pipeline",
+    "pipeline_id": "",
+    "pipeline_version_ref": "refs/heads/develop",
+    "parameters": {
+      "Environment": "{environment}"
+    }
+  },
+  "obp": {
+    "pipeline_name": "r2-obp-build-pipeline",
+    "pipeline_id": "",
+    "pipeline_version_ref": "refs/heads/develop",
+    "parameters": {
+      "Environment": "{environment}"
+    }
+  },
+  "obdx": {
+    "pipeline_name": "r2-obdx-build-pipeline",
+    "pipeline_id": "",
+    "pipeline_version_ref": "refs/heads/develop",
+    "parameters": {
+      "branch": "{build_branch}",
+      "war_files": "{war_files}",
+      "jar_files": "{jar_files}",
+      "deploy_type": "{deploy_type}"
+    }
+  },
+  "oblm": {
+    "pipeline_name": "new-oblm-build-pipeline",
+    "pipeline_id": "",
+    "pipeline_version_ref": "refs/heads/develop",
+    "parameters": {
+      "branch": "{build_branch}",
+      "war_files": "{war_files}",
+      "jar_files": "{jar_files}",
+      "deploy_type": "{deploy_type}"
+    }
+  },
+  "oblmic": {
+    "pipeline_name": "new-oblm-ic-build-pipeline",
+    "pipeline_id": "",
+    "pipeline_version_ref": "refs/heads/develop",
+    "parameters": {
+      "branch": "{build_branch}",
+      "war_files": "{war_files}",
+      "jar_files": "{jar_files}",
+      "deploy_type": "{deploy_type}"
+    }
+  },
+  "obvam": {
+    "pipeline_name": "new-obvam-build-pipeline",
+    "pipeline_id": "",
+    "pipeline_version_ref": "refs/heads/develop",
+    "parameters": {
+      "branch": "{build_branch}",
+      "war_files": "{war_files}",
+      "jar_files": "{jar_files}",
+      "deploy_type": "{deploy_type}"
+    }
+  },
+  "obvamic": {
+    "pipeline_name": "new-obvam-ic-build-pipeline",
+    "pipeline_id": "",
+    "pipeline_version_ref": "refs/heads/develop",
+    "parameters": {
+      "branch": "{build_branch}",
+      "war_files": "{war_files}",
+      "jar_files": "{jar_files}",
+      "deploy_type": "{deploy_type}"
+    }
+  }
+}

@@ -1,5 +1,5 @@
 export type Role = "developer" | "devops";
-export type PageKey = "home"|"dashboard"|"requests"|"file-placement"|"monitoring"|"deployment-management"|"ms-portal"|"devops-tasks"|"admin";
+export type PageKey = "gtb-agent"| "home"|"dashboard"|"requests"|"file-placement"|"monitoring"|"deployment-management"|"ms-portal"|"devops-tasks"|"admin";
 export interface NavItem { key:PageKey; label:string; devopsOnly?:boolean; adminOnly?:boolean; href?:string; }
 export interface AuthSession { access_token:string; token_type:string; username:string; role:Role; is_admin:boolean; }
 export interface PortalUser { id:number; email:string; role:Role; is_admin:boolean; is_active:boolean; created_at:string; updated_at:string; }
