@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from uuid import uuid4
 
 from fastapi import HTTPException
 
@@ -16,6 +15,18 @@ from .storage import find_request, now_iso, read_requests, timeline_event, write
 logger = get_logger("requests")
 
 
+def _next_request_id(items: list[dict]) -> str:
+    highest = 0
+    for item in items:
+        request_id = str(item.get("id", ""))
+        if request_id.startswith("PCR-"):
+            try:
+                highest = max(highest, int(request_id.rsplit("-", 1)[-1]))
+            except ValueError:
+                pass
+    return f"PCR-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{highest + 1:04d}"
+
+
 def _record_notification_event(request_id: str, action: str, detail: str) -> PipelineRequest:
     items = read_requests(); index, current = find_request(items, request_id); current.setdefault("timeline", []).append(timeline_event(action, "system", detail)); current["updated_at"] = now_iso(); items[index] = current; write_requests(items); return PipelineRequest(**current)
 
@@ -25,9 +36,9 @@ def create_pipeline_request(payload: PipelineRequestCreate, user: UserContext) -
     if not app_owner: raise HTTPException(status_code=400, detail=f"No app owner is configured for {payload.application_type}")
     pipeline_type = (payload.pipeline_type or "").strip(); default_port = LANGUAGE_PORTS.get(pipeline_type, 8080); reference_repository_name = payload.reference_repository_name.strip(); original = payload.model_dump()
     original.update({"app_owner": app_owner, "namespace": "", "target_cluster": LOCAL_KUBERNETES_TARGET, "setup_pipeline": bool(reference_repository_name), "create_service": False, "service_name": payload.repository_name.replace("_", "-"), "service_port": default_port, "reference_repository_name": reference_repository_name, "reference_branch": "develop" if payload.application_type == "Native-Mobile" else (payload.reference_branch or "")})
-    created = now_iso(); request_id = f"PR-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:6].upper()}"
+    created = now_iso(); items = read_requests(); request_id = _next_request_id(items)
     item = PipelineRequest(**original, id=request_id, requested_by=user.username, status="Pending App Owner Approval", created_at=created, updated_at=created, original_request=original, timeline=[timeline_event("Submitted", user.username, f"Sent to app owner {app_owner} for approval")])
-    items = read_requests(); items.append(item.model_dump()); write_requests(items)
+    items.append(item.model_dump()); write_requests(items)
     try: send_app_owner_approval_email(item.model_dump()); item = _record_notification_event(request_id, "Approval Email Sent", app_owner)
     except Exception as exc: logger.exception("Unable to send app owner email request_id=%s app_owner=%s", request_id, app_owner); item = _record_notification_event(request_id, "Approval Email Failed", str(exc))
     return item
@@ -116,12 +127,10 @@ def confirm_existing_repository_bootstrap(request_id: str, user: UserContext, az
     items = read_requests(); index, current = find_request(items, request_id)
     if current.get("status") != "Pending Action": raise HTTPException(status_code=409, detail=f"Request cannot continue from status {current.get('status')}")
     if not azure_devops_pat.strip(): raise HTTPException(status_code=400, detail="Azure DevOps PAT is required for provisioning")
-
     pending_pipeline = current.get("provisioning", {}).get("pipeline", {})
     if pending_pipeline.get("requires_confirmation"):
         current["allow_existing_repo_bootstrap"] = True; current["allow_existing_pipeline_release"] = True; current["status"] = "Provisioning"; current["updated_at"] = now_iso(); current.setdefault("timeline", []).append(timeline_event("Existing Build Pipeline Confirmed", user.username, f"DevOps confirmed reuse of build pipeline {pending_pipeline.get('name') or pending_pipeline.get('id')} for release pipeline creation"))
         final_status, steps = provision(current, azure_devops_pat); current.pop("allow_existing_repo_bootstrap", None); current.pop("allow_existing_pipeline_release", None); _save_provisioning_result(items, index, current, final_status, steps); return PipelineRequest(**current)
-
     if not current.get("reference_repository_name", "").strip(): raise HTTPException(status_code=400, detail="Reference repository is required")
     if not current.get("reference_branch", "").strip(): raise HTTPException(status_code=400, detail="Reference repository branch is required")
     current["allow_existing_repo_bootstrap"] = True; current["status"] = "Provisioning"; current["updated_at"] = now_iso(); current.setdefault("timeline", []).append(timeline_event("Existing Repository Confirmed", user.username, "DevOps confirmed isolated pipeline branch creation; existing branches and code remain unchanged"))
