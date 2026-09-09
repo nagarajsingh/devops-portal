@@ -10,9 +10,7 @@ from .user_store import list_users
 
 router=APIRouter(prefix="/devops-tasks",tags=["devops-tasks"])
 DATA=Path(os.getenv("DEVOPS_TASK_DATA_FILE","/data/devops-tasks.json")); LOCK=threading.RLock()
-VALID_STATUSES={"backlog","inprogress","completed"}
-VALID_PRIORITIES={"low","medium","high","critical"}
-NEXT_STATUS={"backlog":"inprogress","inprogress":"completed"}
+VALID_STATUSES={"backlog","inprogress","completed"}; VALID_PRIORITIES={"low","medium","high","critical"}; NEXT_STATUS={"backlog":"inprogress","inprogress":"completed"}
 def now(): return datetime.now(timezone.utc).isoformat()
 def load():
  with LOCK:
@@ -25,6 +23,14 @@ def load():
 def save(rows):
  with LOCK:
   DATA.parent.mkdir(parents=True,exist_ok=True); tmp=DATA.with_suffix(".tmp"); tmp.write_text(json.dumps(rows,indent=2)); tmp.replace(DATA)
+def next_task_id(rows):
+ highest=0
+ for row in rows:
+  task_id=str(row.get("id",""))
+  if task_id.startswith("DT-"):
+   try: highest=max(highest,int(task_id.rsplit("-",1)[-1]))
+   except ValueError: pass
+ return f"DT-{datetime.now().strftime('%Y%m%d')}-{highest+1:04d}"
 def get_task(rows,tid):
  for t in rows:
   if t["id"]==tid:return t
@@ -36,22 +42,20 @@ class Update(BaseModel):
 class Reassign(BaseModel): assignee:str
 class Comment(BaseModel): text:str=Field(min_length=1,max_length=3000)
 @router.get("/assignees")
-def assignees(user:UserContext=Depends(require_devops)):
- return [{"email":u.email,"is_admin":u.is_admin} for u in list_users() if u.role=="devops" and u.is_active]
+def assignees(user:UserContext=Depends(require_devops)): return [{"email":u.email,"is_admin":u.is_admin} for u in list_users() if u.role=="devops" and u.is_active]
 @router.get("")
 def tasks(status:str|None=None,assignee:str|None=None,priority:str|None=None,q:str|None=None,start_date:str|None=None,end_date:str|None=None,month:str|None=Query(None,description="YYYY-MM"),user:UserContext=Depends(require_devops)):
  rows=load()
  if not any([start_date,end_date,month]): month=datetime.now().strftime("%Y-%m")
  def keep(t):
-  created=t["created_at"][:10]
-  return (not status or t["status"]==status) and (not assignee or t["assignee"].lower()==assignee.lower()) and (not priority or t.get("priority","medium")==priority) and (not q or q.lower() in t["title"].lower() or q.lower() in t["description"].lower()) and (not month or created.startswith(month)) and (not start_date or created>=start_date) and (not end_date or created<=end_date)
+  created=t["created_at"][:10]; return (not status or t["status"]==status) and (not assignee or t["assignee"].lower()==assignee.lower()) and (not priority or t.get("priority","medium")==priority) and (not q or q.lower() in t["title"].lower() or q.lower() in t["description"].lower()) and (not month or created.startswith(month)) and (not start_date or created>=start_date) and (not end_date or created<=end_date)
  return sorted([t for t in rows if keep(t)],key=lambda x:x["updated_at"],reverse=True)
 @router.post("",status_code=201)
 def create(p:Create,user:UserContext=Depends(require_devops)):
  valid_assignees={u.email.lower() for u in list_users() if u.role=="devops" and u.is_active}
  if p.assignee.lower() not in valid_assignees: raise HTTPException(400,"Assignee must be an active DevOps portal user")
  if p.priority not in VALID_PRIORITIES: raise HTTPException(400,"Priority must be low, medium, high or critical")
- rows=load(); ts=now(); t={"id":f"DT-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}","title":p.title.strip(),"description":p.description.strip(),"assignee":p.assignee.lower(),"priority":p.priority,"status":"backlog","created_by":user.username,"created_at":ts,"updated_at":ts,"comments":[],"history":[{"at":ts,"actor":user.username,"action":f"Task created with {p.priority} priority"}]}; rows.append(t);save(rows);return t
+ rows=load(); ts=now(); t={"id":next_task_id(rows),"title":p.title.strip(),"description":p.description.strip(),"assignee":p.assignee.lower(),"priority":p.priority,"status":"backlog","created_by":user.username,"created_at":ts,"updated_at":ts,"comments":[],"history":[{"at":ts,"actor":user.username,"action":f"Task created with {p.priority} priority"}]}; rows.append(t);save(rows);return t
 @router.put("/{tid}")
 def update(tid:str,p:Update,user:UserContext=Depends(require_devops)):
  rows=load();t=get_task(rows,tid)
