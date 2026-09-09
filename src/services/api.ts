@@ -1,4 +1,4 @@
-import type { ApplicationType, AuthSession, DevOpsTask, DevOpsTaskStatus, KubernetesService, KubernetesTarget, PipelineRequest, PipelineRequestInput, PortalUser, ReviewUpdate, Role } from "../types";
+import type { ApplicationType, AuthSession, DevOpsTask, DevOpsTaskPriority, DevOpsTaskStatus, KubernetesService, KubernetesTarget, PipelineRequest, PipelineRequestInput, PortalUser, ReviewUpdate, Role } from "../types";
 const API_BASE="/devops-portal/api";
 export class ApiError extends Error{code?:string;status?:number;payload?:unknown;constructor(message:string,options:{code?:string;status?:number;payload?:unknown}={}){super(message);this.name="ApiError";Object.assign(this,options);}}
 async function request<T>(path:string,options:RequestInit={},token?:string):Promise<T>{const response=await fetch(`${API_BASE}${path}`,{...options,headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{}) ,...options.headers}});if(!response.ok){const body=await response.json().catch(()=>({detail:"Request failed"}));const d=body?.detail;throw new ApiError(typeof d==="string"?d:d?.message??"Request failed",{code:typeof d==="object"&&d?d.code:undefined,status:response.status,payload:d});}if(response.status===204)return undefined as T;return response.json() as Promise<T>;}
@@ -9,8 +9,8 @@ export const updatePortalUser=(id:number,payload:{role:Role;is_admin:boolean;is_
 export const deletePortalUser=(id:number,token:string)=>request<void>(`/admin/users/${id}`,{method:"DELETE"},token);
 export const getDevOpsTaskAssignees=(token:string)=>request<{email:string;is_admin:boolean}[]>("/devops-tasks/assignees",{},token);
 export const getDevOpsTasks=(token:string,filters:Record<string,string>={})=>{const q=new URLSearchParams(Object.entries(filters).filter(([,v])=>v));return request<DevOpsTask[]>(`/devops-tasks?${q}`,{},token)};
-export const createDevOpsTask=(p:{title:string;description:string;assignee:string},token:string)=>request<DevOpsTask>("/devops-tasks",{method:"POST",body:JSON.stringify(p)},token);
-export const updateDevOpsTask=(id:string,p:{title?:string;description?:string;status?:DevOpsTaskStatus},token:string)=>request<DevOpsTask>(`/devops-tasks/${id}`,{method:"PUT",body:JSON.stringify(p)},token);
+export const createDevOpsTask=(p:{title:string;description:string;assignee:string;priority:DevOpsTaskPriority},token:string)=>request<DevOpsTask>("/devops-tasks",{method:"POST",body:JSON.stringify(p)},token);
+export const updateDevOpsTask=(id:string,p:{title?:string;description?:string;status?:DevOpsTaskStatus;priority?:DevOpsTaskPriority},token:string)=>request<DevOpsTask>(`/devops-tasks/${id}`,{method:"PUT",body:JSON.stringify(p)},token);
 export const reassignDevOpsTask=(id:string,assignee:string,token:string)=>request<DevOpsTask>(`/devops-tasks/${id}/reassign`,{method:"POST",body:JSON.stringify({assignee})},token);
 export const commentDevOpsTask=(id:string,text:string,token:string)=>request<DevOpsTask>(`/devops-tasks/${id}/comments`,{method:"POST",body:JSON.stringify({text})},token);
 export const getApplicationOwners=(token:string)=>request<Record<ApplicationType,string>>("/configuration/app-owners",{},token);
