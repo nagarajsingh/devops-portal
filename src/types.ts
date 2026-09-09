@@ -4,8 +4,9 @@ export interface NavItem { key:PageKey; label:string; devopsOnly?:boolean; admin
 export interface AuthSession { access_token:string; token_type:string; username:string; role:Role; is_admin:boolean; }
 export interface PortalUser { id:number; email:string; role:Role; is_admin:boolean; is_active:boolean; created_at:string; updated_at:string; }
 export type DevOpsTaskStatus="backlog"|"inprogress"|"completed";
+export type DevOpsTaskPriority="low"|"medium"|"high"|"critical";
 export interface DevOpsTaskComment{id:string;author:string;text:string;created_at:string;}
-export interface DevOpsTask{id:string;title:string;description:string;assignee:string;status:DevOpsTaskStatus;created_by:string;created_at:string;updated_at:string;comments:DevOpsTaskComment[];history:{at:string;actor:string;action:string}[];}
+export interface DevOpsTask{id:string;title:string;description:string;assignee:string;status:DevOpsTaskStatus;priority:DevOpsTaskPriority;created_by:string;created_at:string;updated_at:string;comments:DevOpsTaskComment[];history:{at:string;actor:string;action:string}[];}
 export type ApplicationType="H2H"|"Collections"|"Native-Mobile"|"Safenet";
 export interface PipelineRequestInput { application_type:ApplicationType; app_owner:string; repository_name:string; reference_repository_name:string; reference_branch?:string; setup_pipeline:boolean; pipeline_type?:string; ingress_path:string; ingress_name?:string; create_service:boolean; service_name:string; service_port:number; namespace:string; target_cluster:string; comments?:string; }
 export interface KubernetesService {name:string;ports:number[];} export interface KubernetesTarget{name:string;mode:"direct"|"azure_pipeline";}
