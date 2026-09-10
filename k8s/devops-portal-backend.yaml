@@ -15,12 +15,6 @@ rules:
   - apiGroups: [""]
     resources: ["services"]
     verbs: ["get", "list", "create", "update", "patch"]
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list"]
-  - apiGroups: [""]
-    resources: ["pods/exec"]
-    verbs: ["get", "create"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
     verbs: ["get", "list", "update", "patch"]
@@ -37,6 +31,132 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: devops-portal-provisioner
+---
+# File placement uses a ClusterRole but is bound with namespace-scoped RoleBindings.
+# This prevents pods/exec access outside explicitly approved namespaces.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: devops-portal-file-placement
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["get", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: devops-portal-file-placement
+  namespace: automation
+subjects:
+  - kind: ServiceAccount
+    name: devops-portal-backend
+    namespace: automation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: devops-portal-file-placement
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: devops-portal-file-placement
+  namespace: h2h-dev
+subjects:
+  - kind: ServiceAccount
+    name: devops-portal-backend
+    namespace: automation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: devops-portal-file-placement
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: devops-portal-file-placement
+  namespace: h2h-sit
+subjects:
+  - kind: ServiceAccount
+    name: devops-portal-backend
+    namespace: automation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: devops-portal-file-placement
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: devops-portal-file-placement
+  namespace: mobile-orchestration-dev
+subjects:
+  - kind: ServiceAccount
+    name: devops-portal-backend
+    namespace: automation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: devops-portal-file-placement
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: devops-portal-file-placement
+  namespace: mobile-orchestration-sit
+subjects:
+  - kind: ServiceAccount
+    name: devops-portal-backend
+    namespace: automation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: devops-portal-file-placement
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: devops-portal-file-placement
+  namespace: collections
+subjects:
+  - kind: ServiceAccount
+    name: devops-portal-backend
+    namespace: automation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: devops-portal-file-placement
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: devops-portal-file-placement
+  namespace: safenet-dev
+subjects:
+  - kind: ServiceAccount
+    name: devops-portal-backend
+    namespace: automation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: devops-portal-file-placement
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: devops-portal-file-placement
+  namespace: safenet-sit
+subjects:
+  - kind: ServiceAccount
+    name: devops-portal-backend
+    namespace: automation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: devops-portal-file-placement
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -57,6 +177,7 @@ metadata:
   namespace: automation
 data:
   ALLOWED_NAMESPACES: "automation,h2h-dev,h2h-sit,mobile-orchestration-dev,mobile-orchestration-sit,collections,safenet-dev,safenet-sit"
+  FILE_PLACEMENT_NAMESPACES: "automation,h2h-dev,h2h-sit,mobile-orchestration-dev,mobile-orchestration-sit,collections,safenet-dev,safenet-sit"
   AZURE_DEVOPS_ORGANIZATION: "MashreqCorpTech"
   AZURE_DEVOPS_PROJECT: "Titan"
   BOOTSTRAP_BRANCH: "feature/devops"
