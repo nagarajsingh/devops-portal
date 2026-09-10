@@ -9,7 +9,6 @@ ApplicationType = Literal["H2H", "Collections", "Native-Mobile", "Safenet"]
 class LoginRequest(BaseModel):
     username: str
     password: str
-    role: Role
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
