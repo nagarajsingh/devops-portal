@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from .admin_routes import router as admin_router
-from .auth import authenticate, current_user, require_devops
+from .auth import authenticate, change_password, current_user, require_devops
 from .cluster_inventory import inventory_ingresses, inventory_namespaces, inventory_services
 from .config import APP_OWNER_EMAILS, KUBERNETES_TARGETS, LOCAL_KUBERNETES_TARGET
 from .deployment_routes import router as deployment_management_router
@@ -13,12 +13,12 @@ from .devops_tasks import router as devops_tasks_router
 from .file_placement import router as file_placement_router
 from .kubernetes_ops import cluster_namespaces, namespace_ingresses, namespace_services
 from .logging_config import get_logger
-from .models import ApproveRequest, CloseRequest, KubernetesTargetOption, LoginRequest, LoginResponse, PipelineRequest, PipelineRequestCreate, RejectRequest, ReviewUpdate, ServiceOption, UserContext
+from .models import ApproveRequest, ChangePasswordRequest, CloseRequest, KubernetesTargetOption, LoginRequest, LoginResponse, PipelineRequest, PipelineRequestCreate, RejectRequest, ReviewUpdate, ServiceOption, UserContext
 from .monitoring import build_monitoring_summary
 from .request_service import approve_pipeline_request, close_pipeline_request, confirm_existing_repository_bootstrap, create_pipeline_request, get_pipeline_request, list_pipeline_requests, process_app_owner_action, reject_pipeline_request, update_pipeline_request
 from .user_store import initialize_user_database
 logger=get_logger("api")
-app=FastAPI(title="DevOps Portal API",version="4.2.0")
+app=FastAPI(title="DevOps Portal API",version="4.3.0")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
 app.include_router(deployment_management_router); app.include_router(admin_router); app.include_router(devops_tasks_router); app.include_router(file_placement_router)
 @app.on_event("startup")
@@ -39,6 +39,8 @@ def app_owner_action(token:str):
     return HTMLResponse(f"<html><body style='font-family:Arial;background:#f5f7fb;padding:40px'><div style='max-width:650px;margin:auto;background:white;padding:32px;text-align:center'><h2>Application owner response recorded</h2><b style='color:{accent}'>{html.escape(status)}</b><p>{html.escape(detail)}</p></div></body></html>")
 @app.post("/auth/login",response_model=LoginResponse)
 def login(payload:LoginRequest): return authenticate(payload)
+@app.post("/auth/change-password")
+def update_own_password(payload:ChangePasswordRequest,user:UserContext=Depends(current_user)): return change_password(payload,user)
 @app.get("/configuration/app-owners",response_model=dict[str,str])
 def application_owners(_:UserContext=Depends(current_user)): return dict(APP_OWNER_EMAILS)
 @app.get("/configuration/kubernetes-targets",response_model=list[KubernetesTargetOption])
