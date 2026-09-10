@@ -13,7 +13,8 @@ from kubernetes.stream import stream
 from sqlalchemy import DateTime, Integer, String, Text, desc, select
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .auth import require_devops
+from .auth import current_user
+from .config import FILE_PLACEMENT_NAMESPACES
 from .kubernetes_ops import cluster_namespaces, load_k8s
 from .models import UserContext
 from .user_store import Base, session_factory
@@ -47,10 +48,16 @@ def _safe_filename(filename: str | None) -> str:
     return value or "upload.bin"
 
 
+def _allowed_namespaces() -> list[str]:
+    configured = set(FILE_PLACEMENT_NAMESPACES)
+    available = set(cluster_namespaces())
+    return sorted(configured.intersection(available))
+
+
 def _validate_namespace(namespace: str) -> str:
     value = namespace.strip()
-    if value not in cluster_namespaces():
-        raise HTTPException(status_code=400, detail="Namespace is not allowed")
+    if value not in _allowed_namespaces():
+        raise HTTPException(status_code=403, detail="File placement is not allowed for this namespace")
     return value
 
 
@@ -146,12 +153,12 @@ def _record_dict(record: FilePlacementAudit) -> dict:
 
 
 @router.get("/namespaces")
-def list_file_placement_namespaces(_: UserContext = Depends(require_devops)):
-    return cluster_namespaces()
+def list_file_placement_namespaces(_: UserContext = Depends(current_user)):
+    return _allowed_namespaces()
 
 
 @router.get("/pods/{namespace}")
-def list_file_placement_pods(namespace: str, _: UserContext = Depends(require_devops)):
+def list_file_placement_pods(namespace: str, _: UserContext = Depends(current_user)):
     namespace = _validate_namespace(namespace)
     try:
         load_k8s()
@@ -170,11 +177,14 @@ def list_file_placement_pods(namespace: str, _: UserContext = Depends(require_de
 
 
 @router.get("/audit")
-def list_file_placement_audit(limit: int = 25, _: UserContext = Depends(require_devops)):
+def list_file_placement_audit(limit: int = 25, user: UserContext = Depends(current_user)):
     limit = min(max(limit, 1), 100)
     factory = session_factory()
     with factory() as db:
-        records = list(db.scalars(select(FilePlacementAudit).order_by(desc(FilePlacementAudit.created_at)).limit(limit)).all())
+        statement = select(FilePlacementAudit)
+        if user.role != "devops":
+            statement = statement.where(FilePlacementAudit.user_email == user.username)
+        records = list(db.scalars(statement.order_by(desc(FilePlacementAudit.created_at)).limit(limit)).all())
         return [_record_dict(record) for record in records]
 
 
@@ -185,7 +195,7 @@ def upload_file_to_pod(
     destination_path: str = Form(...),
     container_name: str = Form(""),
     upload: UploadFile = File(...),
-    user: UserContext = Depends(require_devops),
+    user: UserContext = Depends(current_user),
 ):
     namespace = _validate_namespace(namespace)
     destination_path = _validate_destination_path(destination_path)
