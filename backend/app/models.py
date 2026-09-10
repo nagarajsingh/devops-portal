@@ -15,6 +15,10 @@ class LoginResponse(BaseModel):
     username: str
     role: Role
     is_admin: bool = False
+class ChangePasswordRequest(BaseModel):
+    current_password: SecretStr
+    new_password: SecretStr = Field(min_length=10, max_length=128)
+    confirm_password: SecretStr = Field(min_length=10, max_length=128)
 class PortalUserCreate(BaseModel):
     email: str
     password: SecretStr = Field(min_length=10, max_length=128)
