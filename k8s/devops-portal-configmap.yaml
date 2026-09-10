@@ -5,6 +5,9 @@ metadata:
   namespace: automation
 data:
   ALLOWED_NAMESPACES: "automation,h2h-dev,h2h-sit,mobile-orchestration-dev,mobile-orchestration-sit,collections,safenet-dev,safenet-sit"
+  # Only these namespaces are shown and accepted by File Placement.
+  # Keep this list aligned with the namespace RoleBindings for devops-portal-file-placement.
+  FILE_PLACEMENT_NAMESPACES: "automation,h2h-dev,h2h-sit,mobile-orchestration-dev,mobile-orchestration-sit,collections,safenet-dev,safenet-sit"
   AZURE_DEVOPS_ORGANIZATION: "MashreqCorpTech"
   AZURE_DEVOPS_PROJECT: "Titan"
   BOOTSTRAP_BRANCH: "feature/devops"
