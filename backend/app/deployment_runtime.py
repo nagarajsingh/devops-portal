@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from . import deployment_management as dm
 from .azure_devops import azdo_request
+from .azure_releases import discover_collections_releases
 from .logging_config import get_logger
 
 logger = get_logger("deployment-runtime")
@@ -56,8 +57,41 @@ def _refresh_build_run(run: dict[str, Any], pat: str) -> None:
             "started_at": started_at,
             "finished_at": finished_at,
             "duration_seconds": dm._duration_seconds(started_at, finished_at),
+            "pipeline_id": (body.get("definition") or {}).get("id") or run.get("pipeline_id"),
+            "pipeline_name": (body.get("definition") or {}).get("name") or run.get("pipeline_name"),
+            "build_number": body.get("buildNumber") or run.get("build_number"),
+            "project_id": (body.get("project") or {}).get("id") or run.get("project_id"),
         }
     )
+
+
+def _sync_collections_releases(row: dict[str, Any], pat: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Discover Classic Releases tied to the exact successful Collections build runs."""
+    runs, missing = discover_collections_releases(row, pat)
+    deployment = row.setdefault("steps", {}).setdefault("deployment", {"status": "Waiting", "runs": []})
+
+    if runs:
+        deployment["runs"] = runs
+        deployment["discovery_missing"] = missing
+        statuses = [str(run.get("status") or "") for run in runs]
+        if all(status == "Succeeded" for status in statuses):
+            deployment["status"] = "Succeeded"
+            row["status"] = "Deployment Completed"
+        elif any(status == "Failed" for status in statuses):
+            deployment["status"] = "Failed"
+            row["status"] = "Deployment Failed"
+        elif any(status == "Running" for status in statuses):
+            deployment["status"] = "Running"
+            row["status"] = "Deployment Running"
+        else:
+            deployment["status"] = "Ready"
+            row["status"] = "Release Discovered"
+    else:
+        deployment["runs"] = []
+        deployment["status"] = "Waiting"
+        deployment["discovery_missing"] = missing
+
+    return runs, missing
 
 
 def refresh_status(request_id: str, pat: str, actor: str) -> dict[str, Any]:
@@ -93,7 +127,7 @@ def refresh_status(request_id: str, pat: str, actor: str) -> dict[str, Any]:
             _refresh_build_run(run, pat)
 
     if row.get("application_type") == "Collections" and build.get("status") == "Succeeded":
-        dm._refresh_collections_release_links(row, pat)
+        _sync_collections_releases(row, pat)
 
     dm._update_progress(row)
     now = dm._now()
@@ -104,7 +138,7 @@ def refresh_status(request_id: str, pat: str, actor: str) -> dict[str, Any]:
             "action": "Pipeline status refreshed",
             "actor": actor,
             "build_status": build.get("status"),
-            "deployment_status": deployment.get("status"),
+            "deployment_status": row.get("steps", {}).get("deployment", {}).get("status"),
         }
     )
     dm._save(rows)
@@ -112,7 +146,7 @@ def refresh_status(request_id: str, pat: str, actor: str) -> dict[str, Any]:
         "Deployment status refreshed request_id=%s build=%s deployment=%s",
         request_id,
         build.get("status"),
-        deployment.get("status"),
+        row.get("steps", {}).get("deployment", {}).get("status"),
     )
     return row
 
@@ -250,6 +284,60 @@ def trigger_collections_build(request_id: str, actor: str, pat: str, updates: di
     return row
 
 
+def trigger_collections_deployment(request_id: str, actor: str, pat: str) -> dict[str, Any]:
+    rows = dm._load()
+    row = next((item for item in rows if item.get("id") == request_id), None)
+    if not row:
+        raise HTTPException(status_code=404, detail="Deployment request not found")
+
+    steps = row.setdefault("steps", {})
+    build = steps.setdefault("build", {"status": "Waiting", "runs": []})
+    for run in build.setdefault("runs", []):
+        _refresh_build_run(run, pat)
+
+    statuses = [str(run.get("status") or "") for run in build.get("runs", [])]
+    if not statuses or not all(status == "Succeeded" for status in statuses):
+        raise HTTPException(status_code=409, detail="All Collections build pipelines must succeed before release discovery")
+    build["status"] = "Succeeded"
+
+    releases, missing = _sync_collections_releases(row, pat)
+    if not releases:
+        details = "; ".join(
+            f"{item.get('build_pipeline_name') or item.get('build_run_id')}: {item.get('reason')}"
+            for item in missing
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Builds succeeded, but no linked Azure DevOps Classic Release was found yet. "
+                "The portal now discovers releases automatically from each exact build run. "
+                f"{details}" if details else
+                "Builds succeeded, but no linked Azure DevOps Classic Release was found yet."
+            ),
+        )
+
+    now = dm._now()
+    row["updated_at"] = now
+    row.setdefault("timeline", []).append(
+        {
+            "at": now,
+            "action": "Collections releases automatically discovered",
+            "actor": actor,
+            "releases": len(releases),
+            "missing": len(missing),
+        }
+    )
+    dm._update_progress(row)
+    dm._save(rows)
+    logger.info(
+        "Collections release discovery completed request_id=%s releases=%s missing=%s",
+        request_id,
+        len(releases),
+        len(missing),
+    )
+    return row
+
+
 def perform_action(
     request_id: str,
     action: str,
@@ -284,5 +372,11 @@ def perform_action(
         row = next((item for item in rows if item.get("id") == request_id), None)
         if row and row.get("application_type") == "Collections":
             return trigger_collections_build(request_id, actor, pat, updates)
+
+    if action == "trigger-deployment":
+        rows = dm._load()
+        row = next((item for item in rows if item.get("id") == request_id), None)
+        if row and row.get("application_type") == "Collections":
+            return trigger_collections_deployment(request_id, actor, pat)
 
     return dm.update_action(request_id, action, actor, pat, updates)
