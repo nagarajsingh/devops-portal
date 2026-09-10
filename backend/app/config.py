@@ -18,6 +18,11 @@ JWT_SECRET = env("JWT_SECRET", "change-me-in-secret")
 JWT_ALGORITHM = "HS256"
 DATA_FILE = Path(env("REQUEST_DATA_FILE", "/data/requests.json"))
 NAMESPACE_ALLOWLIST = [item.strip() for item in env("ALLOWED_NAMESPACES", "automation").split(",") if item.strip()]
+FILE_PLACEMENT_NAMESPACES = [
+    item.strip()
+    for item in env("FILE_PLACEMENT_NAMESPACES", ",".join(NAMESPACE_ALLOWLIST)).split(",")
+    if item.strip()
+]
 
 # Portal authentication is stored in MS SQL. Never put database credentials or user passwords in source control.
 DB_SERVER = env("DB_SERVER")
