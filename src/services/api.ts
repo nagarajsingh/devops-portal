@@ -5,6 +5,7 @@ async function request<T>(path:string,options:RequestInit={},token?:string):Prom
 export type FilePlacementPod={name:string;phase:string;containers:string[]};
 export type FilePlacementAudit={id:number;user_email:string;user_role:string;file_name:string;file_size:number;sha256?:string|null;namespace:string;pod_name:string;container_name:string;destination_path:string;status:string;detail?:string|null;created_at:string};
 export const login=(username:string,password:string)=>request<AuthSession>("/auth/login",{method:"POST",body:JSON.stringify({username,password})});
+export const changePassword=(payload:{current_password:string;new_password:string;confirm_password:string},token:string)=>request<{message:string}>("/auth/change-password",{method:"POST",body:JSON.stringify(payload)},token);
 export const getPortalUsers=(token:string)=>request<PortalUser[]>("/admin/users",{},token);
 export const createPortalUser=(payload:{email:string;password:string;role:Role;is_admin:boolean},token:string)=>request<PortalUser>("/admin/users",{method:"POST",body:JSON.stringify(payload)},token);
 export const updatePortalUser=(id:number,payload:{role:Role;is_admin:boolean;is_active:boolean;password?:string},token:string)=>request<PortalUser>(`/admin/users/${id}`,{method:"PUT",body:JSON.stringify(payload)},token);
