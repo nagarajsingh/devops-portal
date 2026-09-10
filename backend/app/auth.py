@@ -5,8 +5,8 @@ import jwt
 from fastapi import Depends, Header, HTTPException
 from .config import JWT_ALGORITHM, JWT_SECRET
 from .logging_config import get_logger
-from .models import LoginRequest, LoginResponse, Role, UserContext
-from .user_store import get_user, verify_password
+from .models import ChangePasswordRequest, LoginRequest, LoginResponse, Role, UserContext
+from .user_store import change_user_password, get_user, verify_password
 
 logger = get_logger("auth")
 
@@ -43,6 +43,24 @@ def current_user(authorization: str | None = Header(default=None)) -> UserContex
         raise
     except (jwt.PyJWTError, KeyError, ValueError) as exc:
         raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
+
+def change_password(payload: ChangePasswordRequest, user: UserContext) -> dict[str, str]:
+    current_password = payload.current_password.get_secret_value()
+    new_password = payload.new_password.get_secret_value()
+    confirm_password = payload.confirm_password.get_secret_value()
+    if new_password != confirm_password:
+        raise HTTPException(status_code=400, detail="New password and confirmation do not match")
+    if current_password == new_password:
+        raise HTTPException(status_code=400, detail="New password must be different from the current password")
+    account = get_user(user.username)
+    if not account or not account.is_active:
+        raise HTTPException(status_code=401, detail="Account is inactive or unavailable")
+    if not verify_password(current_password, account.password_hash):
+        logger.warning("Password change rejected username=%s reason=current-password-mismatch", user.username)
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    change_user_password(user.username, new_password)
+    logger.info("Password changed username=%s", user.username)
+    return {"message": "Password updated successfully"}
 
 def require_devops(user: UserContext = Depends(current_user)) -> UserContext:
     if user.role != "devops":
