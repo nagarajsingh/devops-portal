@@ -10,6 +10,9 @@ type Run = {
   pipeline_id?: number;
   run_id?: number;
   release_id?: number;
+  release_name?: string;
+  release_definition_id?: number;
+  release_definition_name?: string;
   status?: string;
   url?: string;
   logs_url?: string;
@@ -18,8 +21,9 @@ type Run = {
   vendor_image?: string;
   use_vendor_image?: boolean;
   environment_status?: string;
+  environments?: { id?: number; name?: string; status?: string; rank?: number }[];
 };
-type Step = { status: string; runs?: Run[] };
+type Step = { status: string; runs?: Run[]; discovery_missing?: Record<string, unknown>[] };
 type CollectionsItem = {
   selected: boolean;
   service: string;
@@ -140,7 +144,10 @@ export default function DeploymentManagementPage({ token, role }: { token: strin
       if (!response.ok) { if (!silent) setMessage(body.detail || "Action failed"); return; }
       setSelected(body);
       setRequests((rows) => rows.map((row) => row.id === body.id ? body : row));
-      if (!silent) setMessage(`${name} completed for ${id}.`);
+      if (!silent) {
+        const releaseCount = body?.application_type === "Collections" && name === "trigger-deployment" ? body?.steps?.deployment?.runs?.length || 0 : 0;
+        setMessage(releaseCount ? `${releaseCount} linked Azure DevOps release${releaseCount === 1 ? "" : "s"} discovered and loaded for ${id}.` : `${name} completed for ${id}.`);
+      }
     } catch (error) {
       if (!silent) setMessage(error instanceof Error ? error.message : "Action failed");
     } finally { if (!silent) setBusy(false); }
@@ -216,9 +223,9 @@ export default function DeploymentManagementPage({ token, role }: { token: strin
 
       {buildRuns.length > 0 && <div className="lifecycle-section"><div className="deployment-result-header"><h3>Build lifecycle</h3><span className={`status ${statusClass(selected.steps?.build?.status)}`}>{selected.steps?.build?.status}</span></div>{autoRefreshRequired && <p className="auto-refresh-note">Auto-refreshing every 5 seconds</p>}<div className="table-card lifecycle-table"><table><thead><tr><th>Service</th><th>Pipeline</th><th>Status</th><th>Duration</th><th>Link</th></tr></thead><tbody>{buildRuns.map((run, index) => <tr key={`${run.run_id}-${index}`}><td>{run.service || "—"}</td><td>{run.pipeline_name}</td><td><span className={`status ${statusClass(run.status)}`}>{run.status}</span></td><td>{formatDuration(run.duration_seconds)}</td><td>{run.url ? <a href={run.url} target="_blank" rel="noreferrer">Open</a> : "—"}</td></tr>)}</tbody></table></div></div>}
 
-      {step === "Deployment" && <div className="wizard-action-panel"><Rocket/><div><h3>Trigger deployment</h3><p>Build status: {selected.steps?.build?.status}</p><button className="primary-button" disabled={selected.application_type === "Collections" && selected.steps?.build?.status !== "Succeeded"} onClick={() => { const name = window.prompt("Deployment pipeline name (leave blank to use configured value)"); void action(selected.id, "trigger-deployment", name ? { pipeline_name: name } : {}); }}>Trigger deployment</button></div></div>}
+      {step === "Deployment" && <div className="wizard-action-panel"><Rocket/><div><h3>Trigger deployment</h3><p>Build status: {selected.steps?.build?.status}</p>{selected.application_type === "Collections" ? <><p>The portal will automatically discover the Classic Release linked to each successful build and load its environments and current status.</p><button className="primary-button" disabled={selected.steps?.build?.status !== "Succeeded" || busy} onClick={() => void action(selected.id, "trigger-deployment")}>{busy ? "Discovering release..." : "Trigger deployment"}</button></> : <button className="primary-button" onClick={() => { const name = window.prompt("Deployment pipeline name (leave blank to use configured value)"); void action(selected.id, "trigger-deployment", name ? { pipeline_name: name } : {}); }}>Trigger deployment</button>}</div></div>}
 
-      {deploymentRuns.length > 0 && <div className="lifecycle-section"><div className="deployment-result-header"><h3>Deployment lifecycle</h3><span className={`status ${statusClass(selected.steps?.deployment?.status)}`}>{selected.steps?.deployment?.status}</span></div><div className="table-card lifecycle-table"><table><thead><tr><th>Pipeline</th><th>Status</th><th>Duration</th><th>Environment</th><th>Link</th></tr></thead><tbody>{deploymentRuns.map((run, index) => <tr key={`${run.release_id || run.run_id}-${index}`}><td>{run.pipeline_name}</td><td><span className={`status ${statusClass(run.status)}`}>{run.status}</span></td><td>{formatDuration(run.duration_seconds)}</td><td>{run.environment_status || selected.country || selected.environment}</td><td>{run.url ? <a href={run.url} target="_blank" rel="noreferrer">Open</a> : "—"}</td></tr>)}</tbody></table></div></div>}
+      {deploymentRuns.length > 0 && <div className="lifecycle-section"><div className="deployment-result-header"><h3>Deployment lifecycle</h3><span className={`status ${statusClass(selected.steps?.deployment?.status)}`}>{selected.steps?.deployment?.status}</span></div><div className="table-card lifecycle-table"><table><thead><tr><th>Service</th><th>Release</th><th>Release definition</th><th>Status</th><th>Duration</th><th>Environment</th><th>Link</th></tr></thead><tbody>{deploymentRuns.map((run, index) => <tr key={`${run.release_id || run.run_id}-${index}`}><td>{run.service || "—"}</td><td>{run.release_name || run.pipeline_name || "—"}{run.release_id ? <small>#{run.release_id}</small> : null}</td><td>{run.release_definition_name || run.pipeline_name || "—"}</td><td><span className={`status ${statusClass(run.status)}`}>{run.status}</span></td><td>{formatDuration(run.duration_seconds)}</td><td>{run.environment_status || selected.country || selected.environment}</td><td>{run.url ? <a href={run.url} target="_blank" rel="noreferrer">Open release</a> : "—"}</td></tr>)}</tbody></table></div></div>}
 
       <div className="deployment-actions"><button className="secondary-button" onClick={() => action(selected.id, "refresh-status")}><RefreshCw size={15}/>Refresh status</button><button className="secondary-button" onClick={() => setSelected(null)}>Back to dashboard</button></div>
       <label className="deployment-pat">Azure DevOps PAT<input type="password" value={pat} onChange={(event) => setPat(event.target.value)} placeholder="Optional when KUBERNETES_INVENTORY_PAT is configured"/></label>
