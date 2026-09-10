@@ -104,6 +104,17 @@ def update_user(user_id: int, role: str, is_admin: bool, is_active: bool, passwo
         user.updated_at = datetime.now(timezone.utc); db.commit(); db.refresh(user); return user
 
 
+def change_user_password(email: str, new_password: str) -> None:
+    factory = session_factory()
+    with factory() as db:
+        user = db.scalar(select(PortalUser).where(PortalUser.email == email.strip().lower()))
+        if not user or not user.is_active:
+            raise HTTPException(status_code=404, detail="Active user account not found")
+        user.password_hash = hash_password(new_password)
+        user.updated_at = datetime.now(timezone.utc)
+        db.commit()
+
+
 def delete_user(user_id: int) -> None:
     factory = session_factory()
     with factory() as db:
