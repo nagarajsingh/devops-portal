@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 import { KeyRound, ShieldCheck, UserRound } from "lucide-react";
 import { changePassword } from "../services/api";
 import type { Role } from "../types";
+import "../profile.css";
 
 export default function ProfilePage({
   token,
