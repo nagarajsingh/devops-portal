@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, SecretStr
 
 from .auth import current_user, require_devops
+from .deployment_collections import normalize_collections_payload, normalize_persisted_collections_request
 from .deployment_management import (
     APPLICATION_TYPES,
     COLLECTIONS_COUNTRIES,
@@ -169,6 +170,7 @@ async def extract_document(
     )
     try:
         result = extract_release_document(document, raw, application_type, country)
+        result = normalize_collections_payload(result)
     except Exception:
         logger.exception(
             "Standalone document extraction failed user=%s application_type=%s country=%s filename=%s",
@@ -217,6 +219,10 @@ def perform_action(
             explicit_pat,
             payload.updates,
         )
+        if action == "extract-document" and result.get("application_type") == "Collections":
+            persisted = normalize_persisted_collections_request(request_id)
+            if persisted:
+                result = persisted
         if action == "owner-approve":
             bypassed = bool(payload.updates.get("bypass_owner_approval"))
             mail_sent = send_devops_ready(result, bypassed=bypassed)
