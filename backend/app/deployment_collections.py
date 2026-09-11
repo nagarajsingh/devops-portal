@@ -39,3 +39,19 @@ def normalize_persisted_collections_request(request_id: str) -> dict[str, Any]:
     normalize_collections_payload(row)
     dm._save(rows)
     return row
+
+
+def normalize_all_collections_requests() -> list[dict[str, Any]]:
+    rows = dm._load()
+    changed = False
+    for row in rows:
+        if str(row.get("application_type") or "") != "Collections":
+            continue
+        before_items = len(row.get("collections_items") or [])
+        before_images = list(row.get("container_images") or [])
+        normalize_collections_payload(row)
+        if before_items != len(row.get("collections_items") or []) or before_images != list(row.get("container_images") or []):
+            changed = True
+    if changed:
+        dm._save(rows)
+    return rows
