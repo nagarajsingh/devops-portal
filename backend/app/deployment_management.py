@@ -4,7 +4,6 @@ import json
 import os
 import re
 import threading
-import uuid
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -129,6 +128,20 @@ def _save(rows: list[dict[str, Any]]) -> None:
         temp.replace(_DATA_FILE)
 
 
+def _next_deployment_request_id(rows: list[dict[str, Any]]) -> str:
+    date_key = datetime.now(timezone.utc).strftime("%Y%m%d")
+    prefix = f"DM-{date_key}-"
+    highest = 0
+    for row in rows:
+        request_id = str(row.get("id") or "")
+        if not request_id.startswith(prefix):
+            continue
+        suffix = request_id[len(prefix):]
+        if suffix.isdigit():
+            highest = max(highest, int(suffix))
+    return f"{prefix}{highest + 1:04d}"
+
+
 def _extract_text(name: str, raw: bytes) -> str:
     lowered = name.lower()
     if lowered.endswith(".pdf"):
@@ -236,7 +249,8 @@ def submit_document(application_type: str, app_owner: str, upload: UploadFile, r
     if not raw:
         raise HTTPException(status_code=422, detail="Release document is empty")
     now = _now()
-    request_id = f"DM-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
+    rows = _load()
+    request_id = _next_deployment_request_id(rows)
     _DOCUMENT_DIR.mkdir(parents=True, exist_ok=True)
     suffix = Path(upload.filename or "release-document").suffix.lower()
     document_path = _DOCUMENT_DIR / f"{request_id}{suffix}"
@@ -259,7 +273,7 @@ def submit_document(application_type: str, app_owner: str, upload: UploadFile, r
         },
         "timeline": [{"at": now, "action": f"Document submitted{f' for {country}' if country else ''}", "actor": requested_by}],
     }
-    rows = _load(); rows.insert(0, row); _save(rows)
+    rows.insert(0, row); _save(rows)
     return row
 
 
