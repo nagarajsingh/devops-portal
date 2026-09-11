@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, SecretStr
 
 from .auth import current_user, require_devops
-from .deployment_collections import normalize_collections_payload, normalize_persisted_collections_request
+from .deployment_collections import normalize_all_collections_requests, normalize_collections_payload, normalize_persisted_collections_request
 from .deployment_management import (
     APPLICATION_TYPES,
     COLLECTIONS_COUNTRIES,
@@ -192,7 +192,7 @@ async def extract_document(
 
 @router.get("/requests")
 def list_requests(_: UserContext = Depends(current_user)) -> list[dict]:
-    return list_deployment_requests()
+    return normalize_all_collections_requests()
 
 
 @router.post("/requests/{request_id}/{action}")
