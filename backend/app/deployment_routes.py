@@ -3,7 +3,7 @@ from __future__ import annotations
 import html
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, SecretStr
 
@@ -203,6 +203,11 @@ def perform_action(
     user: UserContext = Depends(require_devops),
 ) -> dict:
     explicit_pat = payload.azure_devops_pat.get_secret_value() if payload.azure_devops_pat else ""
+    if action == "owner-approve" and not user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Only a DevOps Admin can manually approve or bypass an owner approval. The application owner can approve from the email link.",
+        )
     logger.info(
         "Deployment action started request_id=%s action=%s actor=%s update_keys=%s explicit_pat=%s",
         request_id,
