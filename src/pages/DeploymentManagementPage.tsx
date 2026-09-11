@@ -136,7 +136,7 @@ function nextStep(request: DeploymentRequest) {
   return "Deployment Status";
 }
 
-export default function DeploymentManagementPage({ token, role }: { token: string; role: string }) {
+export default function DeploymentManagementPage({ token, role, isAdmin }: { token: string; role: string; isAdmin: boolean }) {
   const [file, setFile] = useState<File | null>(null);
   const [appType, setAppType] = useState<string>("Collections");
   const [country, setCountry] = useState("UAE");
@@ -287,6 +287,10 @@ export default function DeploymentManagementPage({ token, role }: { token: strin
     const current = dialog;
     setDialog(null);
     if (current.kind === "bypass") {
+      if (!isAdmin) {
+        setInlineNotice({ variant: "error", message: "Only a DevOps Admin can bypass application-owner approval." });
+        return;
+      }
       await action(current.request.id, "owner-approve", { bypass_owner_approval: true });
     } else if (current.kind === "reject") {
       await action(current.request.id, "owner-reject");
@@ -298,7 +302,10 @@ export default function DeploymentManagementPage({ token, role }: { token: strin
 
   function renderDialog() {
     if (!dialog) return null;
-    if (dialog.kind === "bypass") return <PremiumDeploymentModal open variant="warning" eyebrow="OWNER APPROVAL" title="Bypass application-owner approval?" message="The owner has not approved this release yet. Continue only when DevOps has an authorized reason to bypass the approval gate." details={[{ label: "Request", value: dialog.request.id }, { label: "Application", value: dialog.request.application || dialog.request.application_type }, { label: "Owner", value: dialog.request.app_owner }]} primaryLabel="Yes, bypass approval" secondaryLabel="Keep pending" busy={busy} onPrimary={() => void confirmDialog()} onSecondary={() => setDialog(null)} />;
+    if (dialog.kind === "bypass") {
+      if (!isAdmin) return null;
+      return <PremiumDeploymentModal open variant="warning" eyebrow="DEVOPS ADMIN APPROVAL" title="Bypass application-owner approval?" message="This privileged action is available only to DevOps Admins. Continue only when there is an authorized reason to bypass the owner approval gate." details={[{ label: "Request", value: dialog.request.id }, { label: "Application", value: dialog.request.application || dialog.request.application_type }, { label: "Owner", value: dialog.request.app_owner }]} primaryLabel="Yes, bypass approval" secondaryLabel="Keep pending" busy={busy} onPrimary={() => void confirmDialog()} onSecondary={() => setDialog(null)} />;
+    }
     if (dialog.kind === "reject") return <PremiumDeploymentModal open variant="error" eyebrow="RELEASE DECISION" title="Reject this deployment request?" message="This stops the release workflow for this request and records the owner decision as rejected." details={[{ label: "Request", value: dialog.request.id }, { label: "Application", value: dialog.request.application || dialog.request.application_type }]} primaryLabel="Reject request" secondaryLabel="Cancel" busy={busy} onPrimary={() => void confirmDialog()} onSecondary={() => setDialog(null)} />;
     return <PremiumDeploymentModal open variant="info" eyebrow="DEPLOYMENT PIPELINE" title="Deployment pipeline" message="Enter the deployment pipeline name or leave it empty to use the pipeline configured for this application type." details={[{ label: "Request", value: dialog.request.id }, { label: "Application", value: dialog.request.application || dialog.request.application_type }]} inputLabel="Deployment pipeline name" inputValue={dialog.pipelineName} inputPlaceholder="Leave blank to use configured value" onInputChange={(value) => setDialog({ ...dialog, pipelineName: value })} primaryLabel="Trigger deployment" secondaryLabel="Cancel" busy={busy} onPrimary={() => void confirmDialog()} onSecondary={() => setDialog(null)} />;
   }
@@ -315,7 +322,7 @@ export default function DeploymentManagementPage({ token, role }: { token: strin
       {inlineNotice && <div className={`deployment-inline-notice ${inlineNotice.variant}`}>{inlineNotice.message}</div>}
       <div className="deployment-progress-card"><div><span>Overall progress</span><strong>{selected.progress_percent || 0}%</strong></div><div className="deployment-progress-track"><span style={{ width: `${selected.progress_percent || 0}%` }}/></div></div>
 
-      {step === "Approval" && <div className="wizard-action-panel"><ShieldCheck/><div><h3>Application-owner approval pending</h3><p>Owner: {selected.app_owner}. The owner can approve or reject directly from the release email.</p>{role === "devops" ? <div className="deployment-actions"><button className="primary-button" onClick={() => action(selected.id, "owner-approve")}>Record approval</button><button className="secondary-button" onClick={() => setDialog({ kind: "bypass", request: selected })}>Bypass approval</button><button className="danger-button" onClick={() => setDialog({ kind: "reject", request: selected })}>Reject</button></div> : <div className="approval-wait-note">Waiting for the application owner to respond from the approval email.</div>}</div></div>}
+      {step === "Approval" && <div className="wizard-action-panel"><ShieldCheck/><div><h3>Application-owner approval pending</h3><p>Owner: {selected.app_owner}. The owner can approve or reject directly from the release email.</p>{role === "devops" ? <><div className="approval-wait-note">{isAdmin ? "As a DevOps Admin, you can manually record or bypass approval when authorized." : "Waiting for the application owner. Only a DevOps Admin can manually approve or bypass this gate."}</div><div className="deployment-actions">{isAdmin&&<><button className="primary-button" onClick={() => action(selected.id, "owner-approve")}>Record approval</button><button className="secondary-button" onClick={() => setDialog({ kind: "bypass", request: selected })}>Bypass approval</button></>}<button className="danger-button" onClick={() => setDialog({ kind: "reject", request: selected })}>Reject</button></div></> : <div className="approval-wait-note">Waiting for the application owner to respond from the approval email.</div>}</div></div>}
 
       {step === "Rejected" && <div className="wizard-action-panel"><ShieldCheck/><div><h3>Release request rejected</h3><p>The application owner rejected this request. Raise a new deployment request when the release is ready again.</p></div></div>}
 
