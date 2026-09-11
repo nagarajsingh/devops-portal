@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Boxes, FileText, GitPullRequest, Play, RefreshCw, Rocket, Search, ShieldCheck, UploadCloud } from "lucide-react";
 import PremiumDeploymentModal from "../components/PremiumDeploymentModal";
 
@@ -151,13 +151,22 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
   const [requestSearch, setRequestSearch] = useState("");
   const [pat, setPat] = useState(readSessionPat);
   const [patEditable, setPatEditable] = useState(false);
+  const collectionsDirtyRef = useRef(false);
 
   async function loadRequests() {
     const response = await fetch(`${API_BASE}/deployment-management/requests`, { headers: { Authorization: `Bearer ${token}` } });
     if (!response.ok) return;
     const rows = (await readResponse(response)) as DeploymentRequest[];
     setRequests(rows);
-    setSelected((current) => current ? rows.find((row) => row.id === current.id) || current : null);
+    setSelected((current) => {
+      if (!current) return null;
+      const fresh = rows.find((row) => row.id === current.id);
+      if (!fresh) return current;
+      if (collectionsDirtyRef.current && current.application_type === "Collections") {
+        return { ...fresh, collections_items: current.collections_items };
+      }
+      return fresh;
+    });
   }
 
   useEffect(() => { void loadRequests(); }, [token]);
@@ -212,6 +221,9 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
         if (!silent) setInlineNotice({ variant: "error", message: body.detail || "The requested operation failed." });
         return;
       }
+      if (["save-extracted-data", "trigger-build", "extract-document"].includes(name)) {
+        collectionsDirtyRef.current = false;
+      }
       setSelected(body);
       setRequests((rows) => rows.map((row) => row.id === body.id ? body : row));
       if (!silent) {
@@ -242,6 +254,7 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
 
   function updateCollectionItem(index: number, key: keyof CollectionsItem, value: string | boolean) {
     if (!selected) return;
+    collectionsDirtyRef.current = true;
     const items = [...(selected.collections_items || [])];
     items[index] = { ...items[index], [key]: value };
     setSelected({ ...selected, collections_items: items });
@@ -278,6 +291,7 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
   const collectionsBuildReady = selectedItems.length > 0 && selectedItems.every((item) => ((item.use_vendor_image ?? true) ? item.vendor_image.trim() : true));
 
   function startRequest(request: DeploymentRequest) {
+    collectionsDirtyRef.current = false;
     setInlineNotice(null);
     setSelected(request);
   }
@@ -331,11 +345,11 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
       {selected.extracted && selected.application_type === "Collections" && ["Build", "Build Status"].includes(step) && <div className="collections-build-panel">
         <div className="deployment-result-header"><div><span className="eyebrow">COLLECTIONS BUILD INPUT REVIEW</span><h3>{selected.country} vendor images</h3><p>Only services with vendor image tags and mapped build pipelines are included.</p></div><strong>{selectedItems.length} selected</strong></div>
         <div className="table-card collections-image-table"><table><thead><tr><th>Select</th><th>Service</th><th>Tag</th><th>useVendorImage</th><th>vendorImage</th><th>Pipeline</th></tr></thead><tbody>
-          {(selected.collections_items || []).filter((item) => item.vendor_image.trim() && item.pipeline_name.trim()).map((item, index) => <tr key={`${item.service}-${index}`}>
-            <td><input type="checkbox" checked={item.selected} disabled={buildLocked || role !== "devops"} onChange={(event) => updateCollectionItem(index, "selected", event.target.checked)}/></td>
+          {(selected.collections_items || []).map((item, itemIndex) => ({ item, itemIndex })).filter(({ item }) => item.vendor_image.trim() && item.pipeline_name.trim()).map(({ item, itemIndex }) => <tr key={`${item.service}-${itemIndex}`}>
+            <td><input type="checkbox" checked={item.selected} disabled={buildLocked || role !== "devops"} onChange={(event) => updateCollectionItem(itemIndex, "selected", event.target.checked)}/></td>
             <td>{item.service}</td><td>{item.image_tag}</td>
-            <td><button type="button" className={`vendor-toggle-button ${(item.use_vendor_image ?? true) ? "enabled" : "disabled"}`} disabled={!item.selected || buildLocked || role !== "devops"} onClick={() => updateCollectionItem(index, "use_vendor_image", !(item.use_vendor_image ?? true))}>{(item.use_vendor_image ?? true) ? "TRUE" : "FALSE"}</button></td>
-            <td><input className="collections-vendor-image-input" value={item.vendor_image} disabled={!item.selected || !(item.use_vendor_image ?? true) || buildLocked || role !== "devops"} onChange={(event) => updateCollectionItem(index, "vendor_image", event.target.value)}/></td>
+            <td><button type="button" className={`vendor-toggle-button ${(item.use_vendor_image ?? true) ? "enabled" : "disabled"}`} disabled={!item.selected || buildLocked || role !== "devops"} onClick={() => updateCollectionItem(itemIndex, "use_vendor_image", !(item.use_vendor_image ?? true))}>{(item.use_vendor_image ?? true) ? "TRUE" : "FALSE"}</button></td>
+            <td><input className="collections-vendor-image-input" value={item.vendor_image} disabled={!item.selected || !(item.use_vendor_image ?? true) || buildLocked || role !== "devops"} onChange={(event) => updateCollectionItem(itemIndex, "vendor_image", event.target.value)}/></td>
             <td>{item.pipeline_name}</td>
           </tr>)}
         </tbody></table></div>
@@ -352,7 +366,7 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
 
       {deploymentRuns.length > 0 && <div className="lifecycle-section"><div className="deployment-result-header"><h3>Deployment lifecycle</h3><span className={`status ${statusClass(selected.steps?.deployment?.status)}`}>{selected.steps?.deployment?.status}</span></div><div className="table-card lifecycle-table"><table><thead><tr><th>Service</th><th>Release</th><th>Release definition</th><th>Status</th><th>Duration</th><th>Environment</th><th>Link</th></tr></thead><tbody>{deploymentRuns.map((run, index) => <tr key={`${run.release_id || run.run_id}-${index}`}><td>{run.service || "—"}</td><td>{run.release_name || run.pipeline_name || "—"}{run.release_id ? <small>#{run.release_id}</small> : null}</td><td>{run.release_definition_name || run.pipeline_name || "—"}</td><td><span className={`status ${statusClass(run.status)}`}>{run.status}</span></td><td>{formatDuration(run.duration_seconds)}</td><td>{run.environment_status || selected.country || selected.environment}</td><td>{run.url ? <a href={run.url} target="_blank" rel="noreferrer">Open release</a> : "—"}</td></tr>)}</tbody></table></div></div>}
 
-      <div className="deployment-actions">{role === "devops" && <button className="secondary-button" onClick={() => action(selected.id, "refresh-status")}><RefreshCw size={15}/>Refresh status</button>}<button className="secondary-button" onClick={() => { setSelected(null); setInlineNotice(null); }}><ArrowLeft size={15}/>Back to requests</button></div>
+      <div className="deployment-actions">{role === "devops" && <button className="secondary-button" onClick={() => action(selected.id, "refresh-status")}><RefreshCw size={15}/>Refresh status</button>}<button className="secondary-button" onClick={() => { collectionsDirtyRef.current = false; setSelected(null); setInlineNotice(null); }}><ArrowLeft size={15}/>Back to requests</button></div>
       {role === "devops" && <div className="deployment-pat-card"><label className="deployment-pat">Azure DevOps PAT<input type="password" name="azure-devops-session-pat" value={pat} onChange={(event) => setPat(event.target.value)} onFocus={() => setPatEditable(true)} readOnly={!patEditable} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" spellCheck={false} placeholder="Enter once for this login session"/></label><div className="pat-session-note"><span>{pat ? "PAT available for this session" : "No session PAT entered"}</span><small>The token is kept only in this browser session and is cleared on logout.</small>{pat && <button type="button" className="secondary-button" onClick={() => { setPat(""); setPatEditable(true); }}>Clear PAT</button>}</div></div>}
     </section>;
   }
