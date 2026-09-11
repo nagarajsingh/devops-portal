@@ -104,6 +104,19 @@ def update_user(user_id: int, role: str, is_admin: bool, is_active: bool, passwo
         user.updated_at = datetime.now(timezone.utc); db.commit(); db.refresh(user); return user
 
 
+def reset_user_password(user_id: int, new_password: str) -> PortalUser:
+    factory = session_factory()
+    with factory() as db:
+        user = db.get(PortalUser, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        user.password_hash = hash_password(new_password)
+        user.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(user)
+        return user
+
+
 def change_user_password(email: str, new_password: str) -> None:
     factory = session_factory()
     with factory() as db:
