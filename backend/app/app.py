@@ -15,12 +15,13 @@ from .kubernetes_ops import cluster_namespaces, namespace_ingresses, namespace_s
 from .logging_config import get_logger
 from .models import ApproveRequest, ChangePasswordRequest, CloseRequest, KubernetesTargetOption, LoginRequest, LoginResponse, PipelineRequest, PipelineRequestCreate, RejectRequest, ReviewUpdate, ServiceOption, UserContext
 from .monitoring import build_monitoring_summary
+from .repo_sync_routes import router as repo_sync_router
 from .request_service import approve_pipeline_request, close_pipeline_request, confirm_existing_repository_bootstrap, create_pipeline_request, get_pipeline_request, list_pipeline_requests, process_app_owner_action, reject_pipeline_request, update_pipeline_request
 from .user_store import initialize_user_database
 logger=get_logger("api")
-app=FastAPI(title="DevOps Portal API",version="4.3.0")
+app=FastAPI(title="DevOps Portal API",version="4.4.0")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
-app.include_router(deployment_management_router); app.include_router(admin_router); app.include_router(devops_tasks_router); app.include_router(file_placement_router)
+app.include_router(deployment_management_router); app.include_router(admin_router); app.include_router(devops_tasks_router); app.include_router(file_placement_router); app.include_router(repo_sync_router)
 @app.on_event("startup")
 def startup_event():
     initialize_user_database(); logger.info("DevOps Portal backend started version=%s",app.version)
