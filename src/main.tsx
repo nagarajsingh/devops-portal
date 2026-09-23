@@ -5,6 +5,7 @@ import "./styles.css";
 import "./feature.css";
 import "./notifications.css";
 import "./deployment-management.css";
+import "./repo-sync.css";
 import "./deployment-management-refinements.css";
 import "./features/monitoring/monitoring.css";
 import "./features/monitoring/categories.css";
