@@ -98,7 +98,7 @@ export default function RepoSyncPage({ token }: { token: string }) {
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(${API_BASE}/repo-sync/${mode}, {
+      const response = await fetch(`${API_BASE}/repo-sync/${mode}`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
