@@ -15,10 +15,10 @@ from .kubernetes_ops import cluster_namespaces, namespace_ingresses, namespace_s
 from .logging_config import get_logger
 from .models import ApproveRequest, ChangePasswordRequest, CloseRequest, KubernetesTargetOption, LoginRequest, LoginResponse, PipelineRequest, PipelineRequestCreate, RejectRequest, ReviewUpdate, ServiceOption, UserContext
 from .monitoring import build_monitoring_summary
-from .request_service import approve_pipeline_request, close_pipeline_request, confirm_existing_build_pipeline, confirm_existing_repository_bootstrap, create_pipeline_request, get_pipeline_request, list_pipeline_requests, process_app_owner_action, reject_pipeline_request, update_pipeline_request
+from .request_service import approve_pipeline_request, close_pipeline_request, confirm_existing_build_pipeline, confirm_existing_repository_bootstrap, create_pipeline_request, get_pipeline_request, list_pipeline_requests, process_app_owner_action, provision_remote_kubernetes_request, reject_pipeline_request, update_pipeline_request
 from .user_store import initialize_user_database
 logger=get_logger("api")
-app=FastAPI(title="DevOps Portal API",version="4.3.1")
+app=FastAPI(title="DevOps Portal API",version="4.3.2")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
 app.include_router(deployment_management_router); app.include_router(admin_router); app.include_router(devops_tasks_router); app.include_router(file_placement_router)
 @app.on_event("startup")
@@ -78,6 +78,8 @@ def reject_request(request_id:str,payload:RejectRequest,user:UserContext=Depends
 def close_request(request_id:str,payload:CloseRequest,user:UserContext=Depends(require_devops)): return close_pipeline_request(request_id,payload.comment,user)
 @app.post("/requests/{request_id}/approve",response_model=PipelineRequest)
 def approve_request(request_id:str,payload:ApproveRequest,user:UserContext=Depends(require_devops)): return approve_pipeline_request(request_id,user,payload.azure_devops_pat.get_secret_value())
+@app.post("/requests/{request_id}/provision-remote-kubernetes",response_model=PipelineRequest)
+def provision_remote_kubernetes(request_id:str,payload:ApproveRequest,user:UserContext=Depends(require_devops)): return provision_remote_kubernetes_request(request_id,user,payload.azure_devops_pat.get_secret_value())
 @app.post("/requests/{request_id}/confirm-existing-repository",response_model=PipelineRequest)
 def confirm_existing_repository(request_id:str,payload:ApproveRequest,user:UserContext=Depends(require_devops)): return confirm_existing_repository_bootstrap(request_id,user,payload.azure_devops_pat.get_secret_value())
 @app.post("/requests/{request_id}/confirm-existing-build-pipeline",response_model=PipelineRequest)
