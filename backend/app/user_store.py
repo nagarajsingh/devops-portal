@@ -47,6 +47,11 @@ def session_factory():
 
 
 def initialize_user_database() -> None:
+    # Import feature stores before create_all so their SQLAlchemy models are
+    # registered on the shared metadata without introducing migration-time
+    # coupling between modules.
+    from . import datasource_store  # noqa: F401
+
     factory = session_factory()
     Base.metadata.create_all(bind=factory.kw["bind"])
 
