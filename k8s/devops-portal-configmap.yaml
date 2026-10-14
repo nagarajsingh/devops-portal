@@ -11,6 +11,14 @@ data:
   AZURE_DEVOPS_ORGANIZATION: "MashreqCorpTech"
   AZURE_DEVOPS_PROJECT: "Titan"
   BOOTSTRAP_BRANCH: "feature/devops"
+
+  # WebLogic datasource preview/apply pipeline. Set the ID after creating
+  # an Azure DevOps pipeline from datasource-management-pipeline.yaml.
+  DATASOURCE_PIPELINE_ID: "0"
+  DATASOURCE_PIPELINE_TIMEOUT_SECONDS: "900"
+  DATASOURCE_PIPELINE_POLL_SECONDS: "10"
+  DATASOURCE_PREVIEW_ARTIFACT_NAME: "datasource-plan"
+
   REQUEST_DATA_FILE: "/data/requests.json"
   LOG_LEVEL: "INFO"
 
