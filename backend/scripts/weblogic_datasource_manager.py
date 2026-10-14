@@ -188,7 +188,22 @@ def capture_reference(ds, reference_entity, target_entity, request):
     }
 
 
-def matches_reference(ds, reference_entity):
+def is_gridlink(ds):
+    try:
+        oracle = ds.getJDBCResource().getJDBCOracleParams()
+        return bool(bean_value(oracle, "FanEnabled", False)) or bool(
+            text(bean_value(oracle, "OnsNodeList", "") or "").strip()
+        )
+    except Exception:
+        return False
+
+
+def matches_reference(ds, reference_entity, datasource_type):
+    if datasource_type == "gridlink" and not is_gridlink(ds):
+        return False
+    if datasource_type == "standalone" and is_gridlink(ds):
+        return False
+
     token = re.compile(
         re.escape(reference_entity) + r"(?=$|_)",
         flags=re.IGNORECASE,
@@ -311,7 +326,7 @@ def main():
     matches = [
         ds
         for ds in (cmo.getJDBCSystemResources() or [])
-        if matches_reference(ds, reference_entity)
+        if matches_reference(ds, reference_entity, request["datasource_type"])
     ]
 
     if not matches:
