@@ -92,7 +92,8 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
   const repositoryUrl = selected?.provisioning?.repository?.url;
   const buildPipelineUrl = selected?.provisioning?.pipeline?.url;
   const releasePipelineUrl = selected?.provisioning?.release_pipeline?.url;
-  const selectedTarget = targets.find((target) => target.name === selected?.target_cluster);
+  const activeTargetName = draft?.target_cluster || selected?.target_cluster;
+  const selectedTarget = targets.find((target) => target.name === activeTargetName);
   const remoteKubernetesTarget = selectedTarget?.mode === "azure_pipeline";
   const pendingPipelineConfirmation = Boolean(selected?.status === "Pending Action" && selected?.provisioning?.pipeline?.requires_confirmation);
   const originalChanges = useMemo(() => !selected?.original_request ? [] : Object.entries(selected.original_request).filter(([key, value]) => selected[key as keyof PipelineRequest] !== value).map(([key, value]) => ({ key, requested: String(value ?? ""), approved: String(selected[key as keyof PipelineRequest] ?? "") })), [selected]);
