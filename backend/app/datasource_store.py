@@ -387,7 +387,7 @@ def upsert_entity_profile(
     db_host: str,
     db_port: int,
     ons_nodes: str,
-    password_pattern: str,
+    password_pattern: str | None,
 ) -> dict[str, Any]:
     factory = session_factory()
     entity = entity_code.strip().upper()
@@ -401,6 +401,11 @@ def upsert_entity_profile(
             )
         )
         if not row:
+            if not password_pattern:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Password pattern is required when creating a datasource entity profile",
+                )
             row = DatasourceEntityProfile(
                 environment_instance_id=environment_id,
                 entity_code=entity,
@@ -416,7 +421,8 @@ def upsert_entity_profile(
             row.db_host = db_host.strip()
             row.db_port = int(db_port)
             row.ons_nodes = ons_nodes.strip() or None
-            row.password_pattern_ciphertext = encrypt_secret(password_pattern)
+            if password_pattern:
+                row.password_pattern_ciphertext = encrypt_secret(password_pattern)
             row.updated_at = _utcnow()
         db.commit()
         db.refresh(row)
