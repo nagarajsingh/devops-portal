@@ -59,6 +59,14 @@ export type WebLogicEnvironmentInput={
   is_active:boolean;
 };
 
+export type DatasourceEntityInput={
+  service_id:string;
+  db_host:string;
+  db_port:number;
+  ons_nodes:string;
+  password_pattern?:string;
+};
+
 export type DatasourcePreviewInput={
   environment_instance_id:number;
   reference_entity:string;
@@ -75,6 +83,7 @@ export type DatasourcePreviewInput={
 export const getDatasourceEnvironments=(token:string)=>request<WebLogicEnvironment[]>("/datasources/environments",{},token);
 export const createDatasourceEnvironment=(payload:WebLogicEnvironmentInput,token:string)=>request<WebLogicEnvironment>("/datasources/environments",{method:"POST",body:JSON.stringify(payload)},token);
 export const updateDatasourceEnvironment=(id:number,payload:WebLogicEnvironmentInput,token:string)=>request<WebLogicEnvironment>(`/datasources/environments/${id}`,{method:"PUT",body:JSON.stringify(payload)},token);
+export const saveDatasourceEntityProfile=(environmentId:number,entityCode:string,payload:DatasourceEntityInput,token:string)=>request<import("../types").DatasourceEntityProfile>(`/datasources/environments/${environmentId}/entities/${encodeURIComponent(entityCode)}`,{method:"PUT",body:JSON.stringify(payload)},token);
 export const getDatasourceOperations=(token:string,limit=50)=>request<DatasourceOperation[]>(`/datasources/operations?limit=${limit}`,{},token);
 export const previewDatasources=(payload:DatasourcePreviewInput,token:string)=>request<DatasourceOperation>("/datasources/preview",{method:"POST",body:JSON.stringify(payload)},token);
 export const applyDatasourceOperation=(id:number,pat:string,token:string)=>request<DatasourceOperation>(`/datasources/operations/${id}/apply`,{method:"POST",body:JSON.stringify({azure_devops_pat:pat})},token);
