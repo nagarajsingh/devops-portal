@@ -69,6 +69,14 @@ def provision_through_pipeline(item: dict, azure_devops_pat: str) -> dict[str, A
         azure_devops_pat,
         payload,
     )
+    logger.info(
+        "Kubernetes provisioning pipeline queue response request_id=%s target_cluster=%s pipeline_id=%s http_status=%s run_id=%s",
+        item.get("id"),
+        target_cluster,
+        pipeline_id,
+        code,
+        body.get("id") if isinstance(body, dict) else None,
+    )
     if code not in (200, 201):
         raise RuntimeError(
             body.get(
