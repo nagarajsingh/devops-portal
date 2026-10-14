@@ -14,7 +14,8 @@ data:
 
   # WebLogic datasource preview/apply pipeline. Set the ID after creating
   # an Azure DevOps pipeline from datasource-management-pipeline.yaml.
-  DATASOURCE_PIPELINE_ID: "0"
+  DATASOURCE_AZURE_DEVOPS_PROJECT: "DevOps"
+  DATASOURCE_PIPELINE_ID: "1809"
   DATASOURCE_PIPELINE_TIMEOUT_SECONDS: "900"
   DATASOURCE_PIPELINE_POLL_SECONDS: "10"
   DATASOURCE_PREVIEW_ARTIFACT_NAME: "datasource-plan"
