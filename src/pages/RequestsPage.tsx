@@ -146,8 +146,8 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
           if (serviceStatus !== "Completed" || ingressStatus !== "Completed") {
             const serviceMessage = updated.provisioning?.service?.message || serviceStatus || "Unknown";
             const ingressMessage = updated.provisioning?.ingress?.message || ingressStatus || "Unknown";
-            setError(`Remote Kubernetes provisioning did not complete. Service: ${serviceMessage}. Ingress: ${ingressMessage}.`);
             await load();
+            setError(`Remote Kubernetes provisioning did not complete. Service: ${serviceMessage}. Ingress: ${ingressMessage}.`);
             return;
           }
           setNotice("Remote Kubernetes Service and Ingress provisioning completed. Confirm the existing build pipeline to continue release-pipeline creation.");
@@ -156,8 +156,8 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
         setAzureDevOpsPat("");
         setConfirmation({ type: "pipeline", pat: patForRetry, pipelineName: updated.provisioning?.pipeline?.name || selected.provisioning?.pipeline?.name });
       } catch (reason) {
-        setError(reason instanceof Error ? reason.message : "Unable to prepare provisioning continuation");
         await load();
+        setError(reason instanceof Error ? reason.message : "Unable to prepare provisioning continuation");
       } finally {
         setBusy(false); setOperationStatus(""); setOperationStep(0); setOperationTotal(0);
       }
