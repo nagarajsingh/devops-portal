@@ -1,0 +1,205 @@
+name: '$(Date:yyyyMMdd).$(Rev:r)-${{ parameters.environment }}-${{ parameters.application }}-${{ parameters.action }}'
+
+trigger: none
+
+parameters:
+  - name: action
+    type: string
+    default: preview
+    values:
+      - preview
+      - apply
+
+  - name: requestId
+    type: string
+
+  - name: application
+    type: string
+
+  - name: environment
+    type: string
+
+  - name: instanceName
+    type: string
+    default: app1
+
+  - name: agentPool
+    type: string
+
+  - name: adminHost
+    type: string
+
+  - name: adminPort
+    type: string
+
+  - name: sshPort
+    type: string
+    default: '22'
+
+  - name: basePath
+    type: string
+    default: ''
+
+  - name: domainName
+    type: string
+
+  - name: wlstPath
+    type: string
+
+  - name: sshUsername
+    type: string
+
+  - name: weblogicUsername
+    type: string
+
+  - name: referenceEntity
+    type: string
+
+  - name: targetEntity
+    type: string
+
+  - name: datasourceType
+    type: string
+    values:
+      - standalone
+      - gridlink
+
+  - name: dbHost
+    type: string
+
+  - name: dbPort
+    type: string
+
+  - name: serviceId
+    type: string
+
+  - name: onsNodes
+    type: string
+    default: ''
+
+jobs:
+  - job: datasource_management
+    displayName: '${{ parameters.action }} WebLogic datasources'
+    pool:
+      name: '${{ parameters.agentPool }}'
+
+    steps:
+      - checkout: self
+        clean: true
+
+      - bash: |
+          set -euo pipefail
+          command -v sshpass >/dev/null
+          command -v python3 >/dev/null
+          test -f backend/scripts/weblogic_datasource_manager.py
+        displayName: 'Validate execution agent'
+
+      - bash: |
+          set -euo pipefail
+          umask 077
+
+          OUTPUT_DIR="$(Pipeline.Workspace)/datasource-output"
+          LOCAL_REQUEST="$(Pipeline.Workspace)/datasource-request.json"
+          REMOTE_DIR="/tmp/devops-portal-ds-${P_REQUEST_ID}"
+
+          mkdir -p "$OUTPUT_DIR"
+
+          python3 - <<'PY'
+          import json
+          import os
+
+          payload = {
+              "request_id": os.environ["P_REQUEST_ID"],
+              "application": os.environ["P_APPLICATION"],
+              "environment": os.environ["P_ENVIRONMENT"],
+              "instance_name": os.environ["P_INSTANCE_NAME"],
+              "domain_name": os.environ["P_DOMAIN_NAME"],
+              "admin_host": os.environ["P_ADMIN_HOST"],
+              "admin_port": int(os.environ["P_ADMIN_PORT"]),
+              "reference_entity": os.environ["P_REFERENCE_ENTITY"],
+              "target_entity": os.environ["P_TARGET_ENTITY"],
+              "datasource_type": os.environ["P_DATASOURCE_TYPE"],
+              "db_host": os.environ["P_DB_HOST"],
+              "db_port": int(os.environ["P_DB_PORT"]),
+              "service_id": os.environ["P_SERVICE_ID"],
+              "ons_nodes": os.environ.get("P_ONS_NODES", ""),
+              "weblogic_username": os.environ["P_WEBLOGIC_USERNAME"],
+              "weblogic_password": os.environ["WEBLOGIC_PASSWORD"],
+              "password_pattern": os.environ["DATASOURCE_PASSWORD_PATTERN"],
+          }
+
+          with open(os.environ["LOCAL_REQUEST"], "w") as handle:
+              json.dump(payload, handle)
+          PY
+
+          SSH_OPTS=(
+            -p "${P_SSH_PORT}"
+            -o StrictHostKeyChecking=accept-new
+            -o UserKnownHostsFile="$(Pipeline.Workspace)/datasource-known-hosts"
+          )
+
+          SCP_OPTS=(
+            -P "${P_SSH_PORT}"
+            -o StrictHostKeyChecking=accept-new
+            -o UserKnownHostsFile="$(Pipeline.Workspace)/datasource-known-hosts"
+          )
+
+          SSHPASS="$SSH_PASSWORD" sshpass -e ssh "${SSH_OPTS[@]}"             "${P_SSH_USERNAME}@${P_ADMIN_HOST}"             "mkdir -p '$REMOTE_DIR' && chmod 700 '$REMOTE_DIR'"
+
+          SSHPASS="$SSH_PASSWORD" sshpass -e scp "${SCP_OPTS[@]}"             "$LOCAL_REQUEST"             backend/scripts/weblogic_datasource_manager.py             "${P_SSH_USERNAME}@${P_ADMIN_HOST}:$REMOTE_DIR/"
+
+          REMOTE_COMMAND=$(printf "%q %q %q %q"             "${P_WLST_PATH}"             "$REMOTE_DIR/weblogic_datasource_manager.py"             "$REMOTE_DIR/datasource-request.json"             "$REMOTE_DIR/datasource-plan.json")
+          REMOTE_COMMAND="$REMOTE_COMMAND $(printf "%q" "${P_ACTION}")"
+
+          set +e
+          SSHPASS="$SSH_PASSWORD" sshpass -e ssh "${SSH_OPTS[@]}"             "${P_SSH_USERNAME}@${P_ADMIN_HOST}"             "$REMOTE_COMMAND"
+          RC=$?
+          set -e
+
+          if [[ "$RC" -eq 0 ]]; then
+            SSHPASS="$SSH_PASSWORD" sshpass -e scp "${SCP_OPTS[@]}"               "${P_SSH_USERNAME}@${P_ADMIN_HOST}:$REMOTE_DIR/datasource-plan.json"               "$OUTPUT_DIR/datasource-plan.json"
+          fi
+
+          SSHPASS="$SSH_PASSWORD" sshpass -e ssh "${SSH_OPTS[@]}"             "${P_SSH_USERNAME}@${P_ADMIN_HOST}"             "rm -rf '$REMOTE_DIR'" || true
+
+          rm -f "$LOCAL_REQUEST"
+
+          if [[ "$RC" -ne 0 ]]; then
+            echo "WLST datasource operation failed with exit code $RC"
+            exit "$RC"
+          fi
+
+          python3 -m json.tool "$OUTPUT_DIR/datasource-plan.json" >/dev/null
+          echo "Datasource ${P_ACTION} completed for request ${P_REQUEST_ID}."
+        displayName: 'Run WLST datasource operation'
+        env:
+          LOCAL_REQUEST: '$(Pipeline.Workspace)/datasource-request.json'
+          SSH_PASSWORD: '$(SSH_PASSWORD)'
+          WEBLOGIC_PASSWORD: '$(WEBLOGIC_PASSWORD)'
+          DATASOURCE_PASSWORD_PATTERN: '$(DATASOURCE_PASSWORD_PATTERN)'
+          P_ACTION: '${{ parameters.action }}'
+          P_REQUEST_ID: '${{ parameters.requestId }}'
+          P_APPLICATION: '${{ parameters.application }}'
+          P_ENVIRONMENT: '${{ parameters.environment }}'
+          P_INSTANCE_NAME: '${{ parameters.instanceName }}'
+          P_DOMAIN_NAME: '${{ parameters.domainName }}'
+          P_ADMIN_HOST: '${{ parameters.adminHost }}'
+          P_ADMIN_PORT: '${{ parameters.adminPort }}'
+          P_SSH_PORT: '${{ parameters.sshPort }}'
+          P_WLST_PATH: '${{ parameters.wlstPath }}'
+          P_SSH_USERNAME: '${{ parameters.sshUsername }}'
+          P_WEBLOGIC_USERNAME: '${{ parameters.weblogicUsername }}'
+          P_REFERENCE_ENTITY: '${{ parameters.referenceEntity }}'
+          P_TARGET_ENTITY: '${{ parameters.targetEntity }}'
+          P_DATASOURCE_TYPE: '${{ parameters.datasourceType }}'
+          P_DB_HOST: '${{ parameters.dbHost }}'
+          P_DB_PORT: '${{ parameters.dbPort }}'
+          P_SERVICE_ID: '${{ parameters.serviceId }}'
+          P_ONS_NODES: '${{ parameters.onsNodes }}'
+
+      - task: PublishPipelineArtifact@1
+        displayName: 'Publish datasource plan'
+        inputs:
+          targetPath: '$(Pipeline.Workspace)/datasource-output'
+          artifact: 'datasource-plan'
+          publishLocation: 'pipeline'
