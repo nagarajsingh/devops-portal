@@ -194,6 +194,10 @@ data:
   KUBERNETES_INVENTORY_ARTIFACT_NAME: "cluster-inventory"
   KUBERNETES_INVENTORY_REFRESH_SECONDS: "300"
   KUBERNETES_INVENTORY_FILE: "/data/cluster-inventory.json"
+  DATASOURCE_PIPELINE_ID: "0"
+  DATASOURCE_PIPELINE_TIMEOUT_SECONDS: "900"
+  DATASOURCE_PIPELINE_POLL_SECONDS: "10"
+  DATASOURCE_PREVIEW_ARTIFACT_NAME: "datasource-plan"
   APP_OWNER_EMAILS: >-
     {"H2H":"Nagarajs@mashreq.com","Native-Mobile":"mujahidi@mashreq.com","Collections":"mohanreddy1@mashreq.com","Safenet":"krishnakants@mashreq.com"}
   SMTP_HOST: ""
@@ -213,6 +217,8 @@ metadata:
 type: Opaque
 stringData:
   JWT_SECRET: "replace-with-a-long-random-value"
+  # Generate with: python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+  CREDENTIAL_ENCRYPTION_KEY: "replace-with-fernet-key"
   DEVOPS_USERNAME: "devops"
   DEVOPS_PASSWORD: "change-me"
   DEVELOPER_USERNAME: "developer"
