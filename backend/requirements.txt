@@ -9,3 +9,5 @@ python-docx==1.2.0
 SQLAlchemy==2.0.43
 pyodbc==5.2.0
 bcrypt==4.3.0
+
+cryptography==46.0.2
