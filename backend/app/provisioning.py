@@ -128,18 +128,16 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
     target_repo: dict | None = None
     request_id = item.get("id")
     pending_pipeline_confirmation = False
+    target_cluster = (item.get("target_cluster") or LOCAL_KUBERNETES_TARGET).strip()
+    remote_kubernetes_target = target_cluster != LOCAL_KUBERNETES_TARGET
     logger.info(
-        "Provisioning started request_id=%s repository=%s namespace=%s target_cluster=%s",
+        "Provisioning started request_id=%s repository=%s namespace=%s target_cluster=%s mode=%s",
         request_id,
         item.get("repository_name"),
         item.get("namespace"),
-        item.get("target_cluster") or LOCAL_KUBERNETES_TARGET,
+        target_cluster,
+        "remote-pipeline" if remote_kubernetes_target else "direct",
     )
-
-    # Kubernetes provisioning is intentionally executed first. Repository/build/release
-    # confirmations must never prevent Service or Ingress provisioning on a selected
-    # remote cluster.
-    steps.update(_provision_kubernetes(item, azure_devops_pat))
 
     try:
         existing_repo = get_repository(item["repository_name"], azure_devops_pat)
@@ -248,15 +246,19 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
                     "confirmation_action": "reuse_build_pipeline_for_release",
                     "message": (
                         f"Build pipeline {build_pipeline_result.get('name') or item.get('repository_name')} "
-                        "already exists. Kubernetes provisioning will continue, but DevOps confirmation is "
-                        "required before the release pipeline is created."
+                        "already exists. "
+                        + (
+                            "Remote Kubernetes provisioning will continue before DevOps confirms release-pipeline reuse."
+                            if remote_kubernetes_target
+                            else "DevOps confirmation is required before release-pipeline and direct Kubernetes provisioning continue."
+                        )
                     ),
                 }
                 logger.info(
-                    "Existing build pipeline requires confirmation; continuing Kubernetes provisioning "
-                    "request_id=%s pipeline_id=%s",
+                    "Existing build pipeline requires confirmation request_id=%s pipeline_id=%s remote_kubernetes=%s",
                     request_id,
                     build_pipeline_result.get("id"),
+                    remote_kubernetes_target,
                 )
             else:
                 logger.info(
@@ -320,6 +322,35 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
             "status": "Skipped",
             "message": "Pipeline setup was disabled by DevOps",
         }
+
+    # Keep the normal ordered flow for directly reachable clusters:
+    # repository -> bootstrap -> build/release pipeline -> Kubernetes.
+    #
+    # Remote clusters are the only exception. If an existing build pipeline needs
+    # confirmation, their Azure DevOps Kubernetes provisioning pipeline may still
+    # run so Service/Ingress work is not blocked by release-pipeline confirmation.
+    if pending_pipeline_confirmation and not remote_kubernetes_target:
+        steps["service"] = {
+            "status": "Pending",
+            "message": "Waiting for DevOps build-pipeline confirmation before direct Kubernetes service provisioning.",
+        }
+        steps["ingress"] = {
+            "status": "Pending",
+            "message": "Waiting for DevOps build-pipeline confirmation before direct ingress provisioning.",
+        }
+        logger.info(
+            "Direct Kubernetes provisioning paused for build-pipeline confirmation request_id=%s target_cluster=%s",
+            request_id,
+            target_cluster,
+        )
+    else:
+        if pending_pipeline_confirmation and remote_kubernetes_target:
+            logger.info(
+                "Remote Kubernetes exception enabled; provisioning before build-pipeline confirmation request_id=%s target_cluster=%s",
+                request_id,
+                target_cluster,
+            )
+        steps.update(_provision_kubernetes(item, azure_devops_pat))
 
     statuses = [str(step.get("status") or "") for step in steps.values()]
     requires_confirmation = any(
