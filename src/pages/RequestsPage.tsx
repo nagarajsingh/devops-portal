@@ -11,6 +11,7 @@ import {
   getNamespaces,
   getPipelineRequests,
   getServices,
+  provisionRemoteKubernetes,
   rejectPipelineRequest,
   updatePipelineRequest,
 } from "../services/api";
@@ -128,14 +129,35 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
     const patForRetry = azureDevOpsPat;
 
     if (pendingPipelineConfirmation) {
-      setBusy(true); setError(""); setNotice(""); setOperationStatus("Saving current values before build-pipeline confirmation..."); setOperationStep(1); setOperationTotal(1);
+      setBusy(true); setError(""); setNotice(""); setOperationStep(1); setOperationTotal(remoteKubernetesTarget ? 2 : 1);
       try {
-        const updated = await updatePipelineRequest(selected.id, draft, token);
+        setOperationStatus("Saving current values before build-pipeline confirmation...");
+        let updated = await updatePipelineRequest(selected.id, draft, token);
         setSelected(updated);
+
+        if (remoteKubernetesTarget) {
+          setOperationStep(2);
+          setOperationStatus("Triggering remote Kubernetes provisioning pipeline...");
+          updated = await provisionRemoteKubernetes(selected.id, patForRetry, token);
+          setSelected(updated);
+
+          const serviceStatus = updated.provisioning?.service?.status;
+          const ingressStatus = updated.provisioning?.ingress?.status;
+          if (serviceStatus !== "Completed" || ingressStatus !== "Completed") {
+            const serviceMessage = updated.provisioning?.service?.message || serviceStatus || "Unknown";
+            const ingressMessage = updated.provisioning?.ingress?.message || ingressStatus || "Unknown";
+            setError(`Remote Kubernetes provisioning did not complete. Service: ${serviceMessage}. Ingress: ${ingressMessage}.`);
+            await load();
+            return;
+          }
+          setNotice("Remote Kubernetes Service and Ingress provisioning completed. Confirm the existing build pipeline to continue release-pipeline creation.");
+        }
+
         setAzureDevOpsPat("");
         setConfirmation({ type: "pipeline", pat: patForRetry, pipelineName: updated.provisioning?.pipeline?.name || selected.provisioning?.pipeline?.name });
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "Unable to prepare provisioning continuation");
+        await load();
       } finally {
         setBusy(false); setOperationStatus(""); setOperationStep(0); setOperationTotal(0);
       }
@@ -181,7 +203,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
       <div className="modal-header"><div><span className="request-id">{selected.id}</span><h2>{selected.repository_name}</h2><p>Submitted by {selected.requested_by} on {new Date(selected.created_at).toLocaleString()}</p></div><button className="secondary-button" disabled={busy} onClick={() => setSelected(null)}>Close</button></div>
       {error && <div className="form-error">{error}</div>}{notice && <div className="form-success">{notice}</div>}
       <div className="request-status-row"><span className={`status ${statusClass(selected.status)}`}>{selected.status}</span><span>App owner: {selected.app_owner}</span>{selected.app_owner_decision_by && <span>Decision by {selected.app_owner_decision_by}</span>}</div>
-      {pendingPipelineConfirmation && <div className="provisioning-confirmation-banner"><div><strong>Provisioning paused for build-pipeline confirmation</strong><span>{remoteKubernetesTarget ? "This is a remote cluster, so its Azure DevOps Kubernetes provisioning pipeline can complete Service and Ingress work before release-pipeline confirmation." : "This cluster is directly reachable. Service and Ingress provisioning will continue only after the existing build pipeline is confirmed."}</span></div><div className="provisioning-confirmation-state"><span>Service: <strong>{selected.provisioning?.service?.status || "Pending"}</strong></span><span>Ingress: <strong>{selected.provisioning?.ingress?.status || "Pending"}</strong></span></div></div>}
+      {pendingPipelineConfirmation && <div className="provisioning-confirmation-banner"><div><strong>Provisioning paused for build-pipeline confirmation</strong><span>{remoteKubernetesTarget ? "This is a remote cluster. Click Continue Provisioning to trigger its Azure DevOps Kubernetes provisioning pipeline first; after Service and Ingress complete, you will be asked to confirm reuse of the existing build pipeline." : "This cluster is directly reachable. Service and Ingress provisioning will continue only after the existing build pipeline is confirmed."}</span></div><div className="provisioning-confirmation-state"><span>Service: <strong>{selected.provisioning?.service?.status || "Pending"}</strong></span><span>Ingress: <strong>{selected.provisioning?.ingress?.status || "Pending"}</strong></span></div></div>}
       <div className="form-card two-column review-form">
         <label>Application<input disabled value={draft.application_type}/></label><label>Application Owner<input disabled value={draft.app_owner}/></label>
         <label>Repository Name<input disabled={role !== "devops"} value={draft.repository_name} onChange={(e) => setDraft({...draft, repository_name:e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "")})}/></label><label>Type of Language<input disabled value={draft.pipeline_type ?? "Not selected"}/></label>
