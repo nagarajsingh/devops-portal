@@ -47,6 +47,82 @@ def _previous_remote_kubernetes_result(item: dict) -> dict[str, Any] | None:
     return service
 
 
+def _provision_kubernetes(item: dict, azure_devops_pat: str) -> dict[str, dict[str, Any]]:
+    request_id = item.get("id")
+    target_cluster = (item.get("target_cluster") or LOCAL_KUBERNETES_TARGET).strip()
+    steps: dict[str, dict[str, Any]] = {}
+
+    logger.info(
+        "Starting Kubernetes provisioning phase request_id=%s target_cluster=%s namespace=%s service=%s ingress=%s create_service=%s",
+        request_id,
+        target_cluster,
+        item.get("namespace"),
+        item.get("service_name"),
+        item.get("ingress_name"),
+        bool(item.get("create_service")),
+    )
+
+    if target_cluster == LOCAL_KUBERNETES_TARGET:
+        try:
+            steps["service"] = {"status": ensure_service(item)}
+        except Exception as exc:
+            logger.exception(
+                "Kubernetes service provisioning failed request_id=%s",
+                request_id,
+            )
+            steps["service"] = {"status": "Failed", "message": str(exc)}
+        try:
+            steps["ingress"] = ensure_ingress_path(item)
+        except Exception as exc:
+            logger.exception(
+                "Ingress provisioning failed request_id=%s",
+                request_id,
+            )
+            steps["ingress"] = {"status": "Failed", "message": str(exc)}
+        return steps
+
+    previous_remote = _previous_remote_kubernetes_result(item)
+    if previous_remote:
+        reused = {
+            **previous_remote,
+            "message": "Kubernetes resources were already provisioned successfully; reusing the completed remote pipeline result.",
+        }
+        steps["service"] = reused
+        steps["ingress"] = reused.copy()
+        return steps
+
+    try:
+        logger.info(
+            "Remote Kubernetes provisioning will be queued now request_id=%s target_cluster=%s",
+            request_id,
+            target_cluster,
+        )
+        remote_result = provision_through_pipeline(item, azure_devops_pat)
+        steps["service"] = {
+            **remote_result,
+            "message": "Kubernetes service created or validated successfully",
+        }
+        steps["ingress"] = {
+            **remote_result,
+            "message": "Ingress path created or updated successfully",
+        }
+    except Exception as exc:
+        logger.exception(
+            "Remote Kubernetes provisioning pipeline failed request_id=%s target_cluster=%s",
+            request_id,
+            target_cluster,
+        )
+        failed = {
+            "status": "Failed",
+            "message": str(exc),
+            "target_cluster": target_cluster,
+            "provisioning_signature": _remote_kubernetes_signature(item),
+        }
+        steps["service"] = failed
+        steps["ingress"] = failed.copy()
+    return steps
+
+
 def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
     steps: dict[str, Any] = {}
     target_repo: dict | None = None
@@ -59,6 +135,11 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
         item.get("namespace"),
         item.get("target_cluster") or LOCAL_KUBERNETES_TARGET,
     )
+
+    # Kubernetes provisioning is intentionally executed first. Repository/build/release
+    # confirmations must never prevent Service or Ingress provisioning on a selected
+    # remote cluster.
+    steps.update(_provision_kubernetes(item, azure_devops_pat))
 
     try:
         existing_repo = get_repository(item["repository_name"], azure_devops_pat)
@@ -239,59 +320,6 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
             "status": "Skipped",
             "message": "Pipeline setup was disabled by DevOps",
         }
-
-    target_cluster = (item.get("target_cluster") or LOCAL_KUBERNETES_TARGET).strip()
-    if target_cluster == LOCAL_KUBERNETES_TARGET:
-        try:
-            steps["service"] = {"status": ensure_service(item)}
-        except Exception as exc:
-            logger.exception(
-                "Kubernetes service provisioning failed request_id=%s",
-                request_id,
-            )
-            steps["service"] = {"status": "Failed", "message": str(exc)}
-        try:
-            steps["ingress"] = ensure_ingress_path(item)
-        except Exception as exc:
-            logger.exception(
-                "Ingress provisioning failed request_id=%s",
-                request_id,
-            )
-            steps["ingress"] = {"status": "Failed", "message": str(exc)}
-    else:
-        previous_remote = _previous_remote_kubernetes_result(item)
-        if previous_remote:
-            reused = {
-                **previous_remote,
-                "message": "Kubernetes resources were already provisioned successfully; reusing the completed remote pipeline result.",
-            }
-            steps["service"] = reused
-            steps["ingress"] = reused.copy()
-        else:
-            try:
-                remote_result = provision_through_pipeline(item, azure_devops_pat)
-                steps["service"] = {
-                    **remote_result,
-                    "message": "Kubernetes service created or validated successfully",
-                }
-                steps["ingress"] = {
-                    **remote_result,
-                    "message": "Ingress path created or updated successfully",
-                }
-            except Exception as exc:
-                logger.exception(
-                    "Remote Kubernetes provisioning pipeline failed request_id=%s target_cluster=%s",
-                    request_id,
-                    target_cluster,
-                )
-                failed = {
-                    "status": "Failed",
-                    "message": str(exc),
-                    "target_cluster": target_cluster,
-                    "provisioning_signature": _remote_kubernetes_signature(item),
-                }
-                steps["service"] = failed
-                steps["ingress"] = failed.copy()
 
     statuses = [str(step.get("status") or "") for step in steps.values()]
     requires_confirmation = any(
