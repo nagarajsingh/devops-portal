@@ -20,14 +20,14 @@ export default function ProvisioningConfirmationModal({ open, type, repositoryNa
       <h3 id="provisioning-confirm-title">{repositoryConfirmation ? "Repository already exists" : "Build pipeline already exists"}</h3>
       <p>{repositoryConfirmation
         ? "The repository already contains code. DevOps Portal will not modify any existing branch or application code."
-        : "The build pipeline is already available. Confirm whether the existing pipeline should be reused to create the release pipeline."}</p>
+        : "The build pipeline is already available. Kubernetes service and ingress provisioning can complete independently; confirm whether this existing build pipeline should now be reused to create the release pipeline."}</p>
       <div className="existing-repo-confirm-details">
         <span>Application repository</span><strong>{repositoryName}</strong>
         {repositoryConfirmation ? <><span>Reference</span><strong>{referenceRepository || "—"}:{referenceBranch || "develop"}</strong><span>Action</span><strong>Create isolated pipeline branch and continue</strong></> : <><span>Existing build pipeline</span><strong>{pipelineName || repositoryName}</strong><span>Next action</span><strong>Create / clone the release pipeline using this build pipeline</strong></>}
       </div>
       <div className="existing-repo-confirm-note">{repositoryConfirmation
         ? "No existing branches or code will be overwritten. If develop exists, the onboarding branch is created from it and a PR is raised back to develop."
-        : "Selecting No stops the workflow before release pipeline creation. The existing build pipeline is not modified."}</div>
+        : "Selecting No stops release-pipeline creation. Any Kubernetes service or ingress work that already completed is preserved, and the existing build pipeline is not modified."}</div>
       <div className="existing-repo-confirm-actions">
         <button className="secondary-button" disabled={busy} onClick={onNo}>No</button>
         <button className="primary-button" disabled={busy} onClick={onYes}>{busy ? "Processing..." : "Yes, continue"}</button>
