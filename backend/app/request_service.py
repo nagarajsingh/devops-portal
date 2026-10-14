@@ -9,7 +9,7 @@ from .email_service import decode_approval_token, send_app_owner_approval_email
 from .kubernetes_ops import cluster_namespaces, namespace_ingresses
 from .logging_config import get_logger
 from .models import PipelineRequest, PipelineRequestCreate, ReviewUpdate, UserContext
-from .provisioning import provision
+from .provisioning import provision, provision_remote_kubernetes
 from .storage import find_request, now_iso, read_requests, timeline_event, write_requests
 
 logger = get_logger("requests")
@@ -540,6 +540,99 @@ def confirm_existing_repository_bootstrap(
     current.pop("allow_existing_repo_bootstrap", None)
     _save_provisioning_result(items, index, current, final_status, steps)
     _raise_confirmation_if_needed(current, steps)
+    return PipelineRequest(**current)
+
+
+def provision_remote_kubernetes_request(
+    request_id: str,
+    user: UserContext,
+    azure_devops_pat: str,
+) -> PipelineRequest:
+    items = read_requests()
+    index, current = find_request(items, request_id)
+
+    if current.get("status") not in ("Pending Action", "Partially Completed"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Remote Kubernetes provisioning cannot continue from status {current.get('status')}",
+        )
+    if not azure_devops_pat.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Azure DevOps PAT is required for provisioning",
+        )
+
+    target_cluster = (current.get("target_cluster") or LOCAL_KUBERNETES_TARGET).strip()
+    if target_cluster == LOCAL_KUBERNETES_TARGET:
+        raise HTTPException(
+            status_code=409,
+            detail="The selected Kubernetes target is directly reachable and does not use the remote provisioning pipeline",
+        )
+    if target_cluster not in KUBERNETES_TARGETS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Kubernetes target {target_cluster} is not configured",
+        )
+
+    pipeline_step = (current.get("provisioning") or {}).get("pipeline") or {}
+    if not pipeline_step.get("requires_confirmation"):
+        raise HTTPException(
+            status_code=409,
+            detail="This request is not waiting for existing build-pipeline confirmation",
+        )
+
+    if not current.get("namespace"):
+        raise HTTPException(status_code=400, detail="Namespace is required")
+    if not current.get("ingress_name"):
+        raise HTTPException(status_code=400, detail="Ingress resource is required")
+    if not current.get("service_name"):
+        raise HTTPException(status_code=400, detail="Kubernetes service name is required")
+
+    logger.info(
+        "Resuming remote Kubernetes provisioning request_id=%s actor=%s target_cluster=%s namespace=%s",
+        request_id,
+        user.username,
+        target_cluster,
+        current.get("namespace"),
+    )
+
+    kubernetes_steps = provision_remote_kubernetes(current, azure_devops_pat)
+    provisioning = dict(current.get("provisioning") or {})
+    provisioning.update(kubernetes_steps)
+
+    service_status = (kubernetes_steps.get("service") or {}).get("status")
+    ingress_status = (kubernetes_steps.get("ingress") or {}).get("status")
+    if service_status == "Completed" and ingress_status == "Completed":
+        detail = (
+            f"Remote Kubernetes provisioning completed for {target_cluster}; "
+            "release pipeline is still waiting for build-pipeline confirmation"
+        )
+    else:
+        detail = (
+            f"Remote Kubernetes provisioning did not complete for {target_cluster}; "
+            "review the Service and Ingress provisioning status"
+        )
+
+    current.update(
+        {
+            "provisioning": provisioning,
+            "status": "Pending Action",
+            "updated_at": now_iso(),
+        }
+    )
+    current.setdefault("timeline", []).append(
+        timeline_event("Remote Kubernetes Provisioning", user.username, detail)
+    )
+    items[index] = current
+    write_requests(items)
+
+    logger.info(
+        "Remote Kubernetes provisioning resume finished request_id=%s target_cluster=%s service_status=%s ingress_status=%s",
+        request_id,
+        target_cluster,
+        service_status,
+        ingress_status,
+    )
     return PipelineRequest(**current)
 
 
