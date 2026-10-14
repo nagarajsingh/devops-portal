@@ -46,6 +46,14 @@ class DatasourceEnvironmentPayload(BaseModel):
     is_active: bool = True
 
 
+class DatasourceEntityPayload(BaseModel):
+    service_id: str = Field(min_length=1, max_length=100)
+    db_host: str = Field(min_length=2, max_length=255)
+    db_port: int = Field(ge=1, le=65535)
+    ons_nodes: str = Field(default="", max_length=1000)
+    password_pattern: SecretStr | None = None
+
+
 class DatasourcePreviewPayload(BaseModel):
     environment_instance_id: int
     reference_entity: str = Field(min_length=1, max_length=30)
@@ -98,6 +106,29 @@ def edit_environment(
     _: UserContext = Depends(require_devops_admin),
 ):
     return update_environment(environment_id, _environment_payload(payload))
+
+
+@router.put("/environments/{environment_id}/entities/{entity_code}")
+def save_entity_profile(
+    environment_id: int,
+    entity_code: str,
+    payload: DatasourceEntityPayload,
+    _: UserContext = Depends(require_devops_admin),
+):
+    password_pattern = (
+        payload.password_pattern.get_secret_value()
+        if payload.password_pattern
+        else None
+    )
+    return upsert_entity_profile(
+        environment_id,
+        entity_code,
+        payload.service_id,
+        payload.db_host,
+        payload.db_port,
+        payload.ons_nodes,
+        password_pattern,
+    )
 
 
 @router.get("/operations")
