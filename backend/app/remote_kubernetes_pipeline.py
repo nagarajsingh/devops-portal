@@ -16,6 +16,18 @@ from .logging_config import get_logger
 logger = get_logger("remote-kubernetes")
 
 
+def _provisioning_signature(item: dict, target_cluster: str) -> dict[str, Any]:
+    return {
+        "target_cluster": target_cluster,
+        "namespace": item.get("namespace") or "",
+        "create_service": bool(item.get("create_service")),
+        "service_name": item.get("service_name") or "",
+        "service_port": int(item.get("service_port") or 0),
+        "ingress_name": item.get("ingress_name") or "",
+        "ingress_path": item.get("ingress_path") or "",
+    }
+
+
 def provision_through_pipeline(item: dict, azure_devops_pat: str) -> dict[str, Any]:
     pipeline_id = KUBERNETES_PROVISIONING_PIPELINE_ID
     if pipeline_id <= 0:
@@ -25,6 +37,7 @@ def provision_through_pipeline(item: dict, azure_devops_pat: str) -> dict[str, A
     if not target_cluster:
         raise RuntimeError("Target Kubernetes service connection is required")
 
+    signature = _provisioning_signature(item, target_cluster)
     parameters = {
         "requestId": item.get("id") or "devops-portal-request",
         "kubernetesServiceConnection": target_cluster,
@@ -41,11 +54,14 @@ def provision_through_pipeline(item: dict, azure_devops_pat: str) -> dict[str, A
 
     logger.info(
         "Kubernetes target is not directly reachable; triggering provisioning pipeline "
-        "request_id=%s target_cluster=%s pipeline_id=%s namespace=%s",
+        "request_id=%s target_cluster=%s pipeline_id=%s namespace=%s service=%s ingress=%s create_service=%s",
         item.get("id"),
         target_cluster,
         pipeline_id,
         item.get("namespace"),
+        item.get("service_name"),
+        item.get("ingress_name"),
+        bool(item.get("create_service")),
     )
     code, body = azdo_request(
         "POST",
@@ -54,13 +70,22 @@ def provision_through_pipeline(item: dict, azure_devops_pat: str) -> dict[str, A
         payload,
     )
     if code not in (200, 201):
-        raise RuntimeError(body.get("message", f"Unable to queue Kubernetes provisioning pipeline with HTTP {code}"))
+        raise RuntimeError(
+            body.get(
+                "message",
+                f"Unable to queue Kubernetes provisioning pipeline with HTTP {code}",
+            )
+        )
 
     run_id = body.get("id")
     if not run_id:
-        raise RuntimeError("Azure DevOps did not return a run ID for the Kubernetes provisioning pipeline")
+        raise RuntimeError(
+            "Azure DevOps did not return a run ID for the Kubernetes provisioning pipeline"
+        )
 
-    run_url = f"https://dev.azure.com/{AZDO_ORG}/{AZDO_PROJECT}/_build/results?buildId={run_id}"
+    run_url = (
+        f"https://dev.azure.com/{AZDO_ORG}/{AZDO_PROJECT}/_build/results?buildId={run_id}"
+    )
     logger.info(
         "Kubernetes provisioning pipeline queued request_id=%s target_cluster=%s run_id=%s",
         item.get("id"),
@@ -76,7 +101,12 @@ def provision_through_pipeline(item: dict, azure_devops_pat: str) -> dict[str, A
             azure_devops_pat,
         )
         if status_code != 200:
-            raise RuntimeError(run.get("message", f"Unable to read provisioning pipeline run {run_id}"))
+            raise RuntimeError(
+                run.get(
+                    "message",
+                    f"Unable to read provisioning pipeline run {run_id}",
+                )
+            )
 
         state = str(run.get("state") or "").lower()
         result = str(run.get("result") or "").lower()
@@ -102,8 +132,11 @@ def provision_through_pipeline(item: dict, azure_devops_pat: str) -> dict[str, A
                     "run_id": run_id,
                     "target_cluster": target_cluster,
                     "url": run_url,
+                    "provisioning_signature": signature,
                 }
-            raise RuntimeError(f"Kubernetes provisioning pipeline run {run_id} completed with result {result or 'unknown'}")
+            raise RuntimeError(
+                f"Kubernetes provisioning pipeline run {run_id} completed with result {result or 'unknown'}"
+            )
 
         time.sleep(KUBERNETES_PROVISIONING_POLL_SECONDS)
 
