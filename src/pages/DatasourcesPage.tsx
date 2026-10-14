@@ -7,6 +7,7 @@ import {
   getDatasourceEnvironments,
   getDatasourceOperations,
   previewDatasources,
+  saveDatasourceEntityProfile,
   updateDatasourceEnvironment,
   type WebLogicEnvironmentInput,
 } from "../services/api";
@@ -79,8 +80,18 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
   const [showConfig, setShowConfig] = useState(false);
   const [editingEnvironmentId, setEditingEnvironmentId] = useState<number | null>(null);
   const [environmentForm, setEnvironmentForm] = useState<WebLogicEnvironmentInput>({ ...emptyEnvironment });
+  const [entityCode, setEntityCode] = useState("");
+  const [entityServiceId, setEntityServiceId] = useState("");
+  const [entityDbHost, setEntityDbHost] = useState("");
+  const [entityDbPort, setEntityDbPort] = useState(1531);
+  const [entityOnsNodes, setEntityOnsNodes] = useState("");
+  const [entityPasswordPattern, setEntityPasswordPattern] = useState("");
 
   const selectedEnvironment = environments.find((item) => item.id === environmentId) || null;
+  const editingEntityProfile = useMemo(
+    () => selectedEnvironment?.entities.find((item) => item.entity_code.toUpperCase() === entityCode.trim().toUpperCase()) || null,
+    [selectedEnvironment, entityCode],
+  );
   const existingTargetProfile = useMemo(
     () => selectedEnvironment?.entities.find((item) => item.entity_code.toUpperCase() === targetEntity.trim().toUpperCase()) || null,
     [selectedEnvironment, targetEntity],
@@ -122,6 +133,12 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     setServiceId("");
     setPasswordPattern("");
     setSelectedOperation(null);
+    setEntityCode("");
+    setEntityServiceId("");
+    setEntityDbHost(selectedEnvironment.default_db_host);
+    setEntityDbPort(selectedEnvironment.default_db_port);
+    setEntityOnsNodes(selectedEnvironment.default_ons_nodes || "");
+    setEntityPasswordPattern("");
   }, [environmentId]);
 
   useEffect(() => {
@@ -132,6 +149,55 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     setOnsNodes(existingTargetProfile.ons_nodes || "");
     setPasswordPattern("");
   }, [existingTargetProfile?.id]);
+
+  useEffect(() => {
+    if (!selectedEnvironment) return;
+    if (!editingEntityProfile) {
+      setEntityServiceId("");
+      setEntityDbHost(selectedEnvironment.default_db_host);
+      setEntityDbPort(selectedEnvironment.default_db_port);
+      setEntityOnsNodes(selectedEnvironment.default_ons_nodes || "");
+      setEntityPasswordPattern("");
+      return;
+    }
+    setEntityServiceId(editingEntityProfile.service_id);
+    setEntityDbHost(editingEntityProfile.db_host);
+    setEntityDbPort(editingEntityProfile.db_port);
+    setEntityOnsNodes(editingEntityProfile.ons_nodes || "");
+    setEntityPasswordPattern("");
+  }, [editingEntityProfile?.id, selectedEnvironment?.id]);
+
+  async function saveEntityProfile(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedEnvironment || !entityCode.trim()) return;
+    if (!entityPasswordPattern && !editingEntityProfile?.password_pattern_configured) {
+      setNotice({ variant: "error", message: "Password pattern is required when creating a new entity profile." });
+      return;
+    }
+    setBusy(true);
+    setNotice(null);
+    try {
+      await saveDatasourceEntityProfile(selectedEnvironment.id, entityCode.trim().toUpperCase(), {
+        service_id: entityServiceId,
+        db_host: entityDbHost,
+        db_port: Number(entityDbPort),
+        ons_nodes: entityOnsNodes,
+        password_pattern: entityPasswordPattern || undefined,
+      }, token);
+      setEntityPasswordPattern("");
+      setNotice({
+        variant: "success",
+        message: editingEntityProfile
+          ? `${selectedEnvironment.application} / ${selectedEnvironment.environment.toUpperCase()} / ${entityCode.toUpperCase()} updated in the DevOps Portal database.`
+          : `${selectedEnvironment.application} / ${selectedEnvironment.environment.toUpperCase()} / ${entityCode.toUpperCase()} saved to the DevOps Portal database.`,
+      });
+      await load();
+    } catch (error) {
+      setNotice({ variant: "error", message: error instanceof Error ? error.message : "Unable to save datasource entity profile" });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function preview(event: FormEvent) {
     event.preventDefault();
@@ -315,10 +381,50 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       <label className="datasource-checkbox"><input type="checkbox" checked={environmentForm.is_active} onChange={(e) => setEnvironmentForm({ ...environmentForm, is_active: e.target.checked })}/>Active</label>
 
       <div className="full-width datasource-form-actions">
-        <button className="primary-button" disabled={busy}><Save size={15}/>{busy ? "Saving..." : "Save environment"}</button>
+        <button className="primary-button" disabled={busy}><Save size={15}/>{busy ? "Saving..." : editingEnvironmentId ? "Update Database" : "Save to Database"}</button>
         <button className="secondary-button" type="button" disabled={busy} onClick={() => setShowConfig(false)}>Cancel</button>
       </div>
     </form>}
+
+    {isAdmin && selectedEnvironment && <section className="datasource-config-panel">
+      <div className="datasource-section-title">
+        <div><Database size={21}/><div><h2>Datasource entity profiles</h2><p>Maintain environment-specific service IDs, database endpoints, ONS nodes and encrypted password rules without editing vars.yaml.</p></div></div>
+        <span className="status neutral">{selectedEnvironment.application} · {selectedEnvironment.environment.toUpperCase()} · {selectedEnvironment.instance_name}</span>
+      </div>
+
+      <form className="form-card datasource-entity-form" onSubmit={saveEntityProfile}>
+        <label>Entity
+          <input required value={entityCode} onChange={(e) => setEntityCode(e.target.value.toUpperCase())} placeholder="IN" list="admin-configured-datasource-entities"/>
+          <datalist id="admin-configured-datasource-entities">{selectedEnvironment.entities.map((item) => <option key={item.id} value={item.entity_code}/>)}</datalist>
+        </label>
+        <label>Service ID<input required value={entityServiceId} onChange={(e) => setEntityServiceId(e.target.value)} placeholder="TXPMINS"/></label>
+        <label>Database host<input required value={entityDbHost} onChange={(e) => setEntityDbHost(e.target.value)}/></label>
+        <label>Database port<input type="number" min={1} max={65535} required value={entityDbPort} onChange={(e) => setEntityDbPort(Number(e.target.value))}/></label>
+        <label className="full-width">ONS nodes<input value={entityOnsNodes} onChange={(e) => setEntityOnsNodes(e.target.value)} placeholder="Required only when GridLink uses ONS"/></label>
+        <label className="full-width">Password pattern
+          <input type="password" value={entityPasswordPattern} onChange={(e) => setEntityPasswordPattern(e.target.value)} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder={editingEntityProfile?.password_pattern_configured ? "Leave blank to keep the encrypted saved pattern" : "{username}TXCORE"}/>
+          <small>{editingEntityProfile?.password_pattern_configured ? "An encrypted password pattern is already stored. Enter a value only when changing it." : "The password rule is encrypted before storage and is never returned to the browser."}</small>
+        </label>
+        <div className="full-width datasource-form-actions">
+          <button className="primary-button" disabled={busy || !entityCode.trim() || !entityServiceId.trim() || !entityDbHost.trim()}><Save size={15}/>{busy ? "Saving..." : editingEntityProfile ? "Update Database" : "Save to Database"}</button>
+          {editingEntityProfile && <span className="credential-ok">Existing profile · updated {formatDate(editingEntityProfile.updated_at)}</span>}
+        </div>
+      </form>
+
+      {selectedEnvironment.entities.length > 0 && <div className="table-card datasource-entity-table">
+        <table>
+          <thead><tr><th>Entity</th><th>Service ID</th><th>Database</th><th>ONS Nodes</th><th>Password Rule</th><th>Updated</th></tr></thead>
+          <tbody>{selectedEnvironment.entities.map((item) => <tr key={item.id} onClick={() => setEntityCode(item.entity_code)} className="datasource-history-clickable">
+            <td><strong>{item.entity_code}</strong></td>
+            <td>{item.service_id}</td>
+            <td>{item.db_host}:{item.db_port}</td>
+            <td>{item.ons_nodes || "—"}</td>
+            <td><span className={item.password_pattern_configured ? "credential-ok" : "credential-missing"}>{item.password_pattern_configured ? "Encrypted" : "Missing"}</span></td>
+            <td>{formatDate(item.updated_at)}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>}
+    </section>}
 
     <section className="datasource-workspace">
       <div className="datasource-section-title">
