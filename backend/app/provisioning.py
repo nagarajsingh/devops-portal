@@ -123,6 +123,15 @@ def _provision_kubernetes(item: dict, azure_devops_pat: str) -> dict[str, dict[s
     return steps
 
 
+def provision_remote_kubernetes(item: dict, azure_devops_pat: str) -> dict[str, dict[str, Any]]:
+    target_cluster = (item.get("target_cluster") or LOCAL_KUBERNETES_TARGET).strip()
+    if target_cluster == LOCAL_KUBERNETES_TARGET:
+        raise RuntimeError(
+            "Remote Kubernetes provisioning cannot be used for the directly reachable cluster"
+        )
+    return _provision_kubernetes(item, azure_devops_pat)
+
+
 def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
     steps: dict[str, Any] = {}
     target_repo: dict | None = None
