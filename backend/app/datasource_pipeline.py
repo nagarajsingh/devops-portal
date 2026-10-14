@@ -11,7 +11,7 @@ from typing import Any
 from .azure_devops import azdo_request
 from .config import (
     AZDO_ORG,
-    AZDO_PROJECT,
+    DATASOURCE_AZURE_DEVOPS_PROJECT,
     DATASOURCE_PIPELINE_ID,
     DATASOURCE_PIPELINE_POLL_SECONDS,
     DATASOURCE_PIPELINE_TIMEOUT_SECONDS,
@@ -38,6 +38,7 @@ def _download_plan(run_id: int, pat: str) -> dict[str, Any]:
         "GET",
         f"_apis/build/builds/{run_id}/artifacts?artifactName={DATASOURCE_PREVIEW_ARTIFACT_NAME}&api-version=7.1",
         pat,
+        project=DATASOURCE_AZURE_DEVOPS_PROJECT,
     )
     if code != 200:
         raise RuntimeError(
@@ -124,13 +125,14 @@ def run_datasource_pipeline(
     }
 
     logger.info(
-        "Queueing datasource pipeline action=%s request_id=%s application=%s environment=%s reference_entity=%s target_entity=%s pipeline_id=%s",
+        "Queueing datasource pipeline action=%s request_id=%s application=%s environment=%s reference_entity=%s target_entity=%s project=%s pipeline_id=%s",
         action,
         request_id,
         environment["application"],
         environment["environment"],
         operation["reference_entity"],
         operation["target_entity"],
+        DATASOURCE_AZURE_DEVOPS_PROJECT,
         pipeline_id,
     )
     code, body = azdo_request(
@@ -138,6 +140,7 @@ def run_datasource_pipeline(
         f"_apis/pipelines/{pipeline_id}/runs?api-version=7.1",
         azure_devops_pat,
         {"templateParameters": parameters, "variables": variables},
+        project=DATASOURCE_AZURE_DEVOPS_PROJECT,
     )
     if code not in (200, 201):
         raise RuntimeError(
@@ -152,7 +155,7 @@ def run_datasource_pipeline(
         raise RuntimeError("Azure DevOps did not return a run ID for the datasource pipeline")
 
     run_url = (
-        f"https://dev.azure.com/{AZDO_ORG}/{AZDO_PROJECT}/_build/results?buildId={run_id}"
+        f"https://dev.azure.com/{AZDO_ORG}/{DATASOURCE_AZURE_DEVOPS_PROJECT}/_build/results?buildId={run_id}"
     )
     deadline = time.monotonic() + DATASOURCE_PIPELINE_TIMEOUT_SECONDS
 
@@ -161,6 +164,7 @@ def run_datasource_pipeline(
             "GET",
             f"_apis/pipelines/{pipeline_id}/runs/{run_id}?api-version=7.1",
             azure_devops_pat,
+            project=DATASOURCE_AZURE_DEVOPS_PROJECT,
         )
         if status_code != 200:
             raise RuntimeError(
