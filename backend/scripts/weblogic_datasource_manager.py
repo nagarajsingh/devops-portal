@@ -28,8 +28,12 @@ def text(value):
 def replace_entity(value, reference_entity, target_entity):
     if value is None:
         return value
+    # Entity codes in current datasource naming conventions occur at the end
+    # of a name or immediately before a suffix such as _GTXN / _XA. Restrict
+    # replacement to that position so short codes such as IN or AE do not
+    # modify unrelated text.
     return re.sub(
-        re.escape(reference_entity),
+        re.escape(reference_entity) + r"(?=$|_)",
         target_entity,
         text(value),
         flags=re.IGNORECASE,
@@ -185,16 +189,20 @@ def capture_reference(ds, reference_entity, target_entity, request):
 
 
 def matches_reference(ds, reference_entity):
+    token = re.compile(
+        re.escape(reference_entity) + r"(?=$|_)",
+        flags=re.IGNORECASE,
+    )
     name = text(ds.getName())
-    if reference_entity.upper() in name.upper():
+    if token.search(name):
         return True
     try:
         resource = ds.getJDBCResource()
         for jndi in resource.getJDBCDataSourceParams().getJNDINames() or []:
-            if reference_entity.upper() in text(jndi).upper():
+            if token.search(text(jndi)):
                 return True
         username = read_property(resource.getJDBCDriverParams(), "user")
-        if username and reference_entity.upper() in username.upper():
+        if username and token.search(username):
             return True
     except Exception:
         pass
