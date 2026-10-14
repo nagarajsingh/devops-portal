@@ -6,6 +6,7 @@ import "./feature.css";
 import "./notifications.css";
 import "./deployment-management.css";
 import "./deployment-management-refinements.css";
+import "./datasources.css";
 import "./features/monitoring/monitoring.css";
 import "./features/monitoring/categories.css";
 import "./features/monitoring/details.css";
