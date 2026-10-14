@@ -31,5 +31,6 @@ export const getPipelineRequests=(token:string)=>request<PipelineRequest[]>("/re
 export const updatePipelineRequest=(id:string,payload:ReviewUpdate,token:string)=>request<PipelineRequest>(`/requests/${id}`,{method:"PUT",body:JSON.stringify(payload)},token);
 export const approvePipelineRequest=(id:string,pat:string,token:string)=>request<PipelineRequest>(`/requests/${id}/approve`,{method:"POST",body:JSON.stringify({azure_devops_pat:pat})},token);
 export const confirmExistingRepository=(id:string,pat:string,token:string)=>request<PipelineRequest>(`/requests/${id}/confirm-existing-repository`,{method:"POST",body:JSON.stringify({azure_devops_pat:pat})},token);
+export const confirmExistingBuildPipeline=(id:string,pat:string,token:string)=>request<PipelineRequest>(`/requests/${id}/confirm-existing-build-pipeline`,{method:"POST",body:JSON.stringify({azure_devops_pat:pat})},token);
 export const rejectPipelineRequest=(id:string,reason:string,token:string)=>request<PipelineRequest>(`/requests/${id}/reject`,{method:"POST",body:JSON.stringify({reason})},token);
 export const closePipelineRequest=(id:string,comment:string,token:string)=>request<PipelineRequest>(`/requests/${id}/close`,{method:"POST",body:JSON.stringify({comment})},token);
