@@ -15,14 +15,22 @@ logger = get_logger("azure-devops")
 PIPELINE_FILE_CANDIDATES = ("/azure-pipelines.yml", "/azure-pipelines.yaml")
 
 
-def azdo_request(method: str, path: str, pat: str, payload: dict | None = None) -> tuple[int, dict]:
-    if not AZDO_ORG or not AZDO_PROJECT or not pat.strip():
+def azdo_request(
+    method: str,
+    path: str,
+    pat: str,
+    payload: dict | None = None,
+    *,
+    project: str | None = None,
+) -> tuple[int, dict]:
+    target_project = (project or AZDO_PROJECT).strip()
+    if not AZDO_ORG or not target_project or not pat.strip():
         raise RuntimeError("Azure DevOps organization, project and DevOps PAT are required")
-    url = f"https://dev.azure.com/{urllib.parse.quote(AZDO_ORG)}/{urllib.parse.quote(AZDO_PROJECT)}/{path}"
+    url = f"https://dev.azure.com/{urllib.parse.quote(AZDO_ORG)}/{urllib.parse.quote(target_project)}/{path}"
     token = base64.b64encode(f":{pat.strip()}".encode()).decode()
     data = json.dumps(payload).encode() if payload is not None else None
     request = urllib.request.Request(url, data=data, method=method, headers={"Authorization": f"Basic {token}", "Content-Type": "application/json"})
-    logger.debug("Azure DevOps request method=%s path=%s", method, path)
+    logger.debug("Azure DevOps request method=%s project=%s path=%s", method, target_project, path)
     try:
         with urllib.request.urlopen(request, timeout=45) as response:
             raw = response.read().decode()
@@ -37,7 +45,7 @@ def azdo_request(method: str, path: str, pat: str, payload: dict | None = None) 
             body = json.loads(raw or "{}")
         except json.JSONDecodeError:
             body = {"message": raw or f"Azure DevOps request failed with HTTP {exc.code}"}
-        logger.error("Azure DevOps request failed method=%s path=%s status=%s", method, path, exc.code)
+        logger.error("Azure DevOps request failed method=%s project=%s path=%s status=%s", method, target_project, path, exc.code)
         return exc.code, body
 
 
