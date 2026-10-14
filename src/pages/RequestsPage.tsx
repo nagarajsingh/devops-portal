@@ -4,6 +4,7 @@ import {
   ApiError,
   approvePipelineRequest,
   closePipelineRequest,
+  confirmExistingBuildPipeline,
   confirmExistingRepository,
   getIngresses,
   getKubernetesTargets,
@@ -91,6 +92,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
   const repositoryUrl = selected?.provisioning?.repository?.url;
   const buildPipelineUrl = selected?.provisioning?.pipeline?.url;
   const releasePipelineUrl = selected?.provisioning?.release_pipeline?.url;
+  const pendingPipelineConfirmation = Boolean(selected?.status === "Pending Action" && selected?.provisioning?.pipeline?.requires_confirmation);
   const originalChanges = useMemo(() => !selected?.original_request ? [] : Object.entries(selected.original_request).filter(([key, value]) => selected[key as keyof PipelineRequest] !== value).map(([key, value]) => ({ key, requested: String(value ?? ""), approved: String(selected[key as keyof PipelineRequest] ?? "") })), [selected]);
 
   const openPreview = (request: PipelineRequest) => {
@@ -120,8 +122,25 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
     if (!draft.ingress_name) return setError("Select an ingress resource before approval.");
     if (!draft.service_name.trim()) return setError(draft.create_service ? "Provide the Kubernetes service name." : "Select the existing Kubernetes service name.");
     if (!azureDevOpsPat.trim()) return setError("Provide your Azure DevOps PAT before approval.");
+    const patForRetry = azureDevOpsPat;
+
+    if (pendingPipelineConfirmation) {
+      setBusy(true); setError(""); setNotice(""); setOperationStatus("Saving current values before build-pipeline confirmation..."); setOperationStep(1); setOperationTotal(1);
+      try {
+        const updated = await updatePipelineRequest(selected.id, draft, token);
+        setSelected(updated);
+        setAzureDevOpsPat("");
+        setConfirmation({ type: "pipeline", pat: patForRetry, pipelineName: updated.provisioning?.pipeline?.name || selected.provisioning?.pipeline?.name });
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "Unable to prepare provisioning continuation");
+      } finally {
+        setBusy(false); setOperationStatus(""); setOperationStep(0); setOperationTotal(0);
+      }
+      return;
+    }
+
     const stages = ["Saving approved request values...", "Checking and creating Azure DevOps repository...", draft.reference_repository_name ? "Copying reference repository files..." : "Reference repository not selected; skipping template copy...", draft.setup_pipeline ? "Creating Azure DevOps build pipeline..." : "Pipeline setup disabled; skipping build pipeline creation...", draft.setup_pipeline ? "Cloning and configuring Azure DevOps release pipeline..." : "Pipeline setup disabled; skipping release pipeline creation...", draft.create_service ? "Creating Kubernetes service..." : "Validating existing Kubernetes service...", "Updating ingress path...", "Finalizing provisioning results..."];
-    setBusy(true); setError(""); setNotice(""); setOperationTotal(stages.length); const patForRetry = azureDevOpsPat;
+    setBusy(true); setError(""); setNotice(""); setOperationTotal(stages.length);
     const operation = (async () => { await updatePipelineRequest(selected.id, draft, token); return approvePipelineRequest(selected.id, patForRetry, token); })().then((value) => ({ value, error: null as unknown })).catch((operationError: unknown) => ({ value: null, error: operationError }));
     try {
       for (let index = 0; index < stages.length; index += 1) { setOperationStep(index + 1); setOperationStatus(stages[index]); await wait(1000); }
@@ -136,7 +155,10 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
     if (!selected || !confirmation) return;
     const active = confirmation; setBusy(true); setError(""); setNotice(""); setOperationStatus(active.type === "repository" ? "Creating isolated pipeline branch..." : "Creating release pipeline from existing build pipeline..."); setOperationStep(1); setOperationTotal(1);
     try {
-      const updated = await confirmExistingRepository(selected.id, active.pat, token); setSelected(updated); setConfirmation(null); setNotice(active.type === "repository" ? `Repository preserved. Pipeline branch provisioning finished with status: ${updated.status}.` : `Existing build pipeline approved. Release pipeline provisioning finished with status: ${updated.status}.`); await load();
+      const updated = active.type === "repository"
+        ? await confirmExistingRepository(selected.id, active.pat, token)
+        : await confirmExistingBuildPipeline(selected.id, active.pat, token);
+      setSelected(updated); setConfirmation(null); setNotice(active.type === "repository" ? `Repository preserved. Provisioning continued with status: ${updated.status}.` : `Existing build pipeline approved. Release pipeline provisioning continued with status: ${updated.status}.`); await load();
     } catch (reason) {
       if (reason instanceof ApiError && queueConfirmation(reason, active.pat)) { await load(); return; }
       setConfirmation(null); setError(reason instanceof Error ? reason.message : "Unable to continue provisioning"); await load();
@@ -156,6 +178,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
       <div className="modal-header"><div><span className="request-id">{selected.id}</span><h2>{selected.repository_name}</h2><p>Submitted by {selected.requested_by} on {new Date(selected.created_at).toLocaleString()}</p></div><button className="secondary-button" disabled={busy} onClick={() => setSelected(null)}>Close</button></div>
       {error && <div className="form-error">{error}</div>}{notice && <div className="form-success">{notice}</div>}
       <div className="request-status-row"><span className={`status ${statusClass(selected.status)}`}>{selected.status}</span><span>App owner: {selected.app_owner}</span>{selected.app_owner_decision_by && <span>Decision by {selected.app_owner_decision_by}</span>}</div>
+      {pendingPipelineConfirmation && <div className="provisioning-confirmation-banner"><div><strong>Provisioning paused for build-pipeline confirmation</strong><span>The existing build pipeline needs DevOps approval before the release pipeline can be created. Kubernetes service and ingress provisioning can complete independently.</span></div><div className="provisioning-confirmation-state"><span>Service: <strong>{selected.provisioning?.service?.status || "Pending"}</strong></span><span>Ingress: <strong>{selected.provisioning?.ingress?.status || "Pending"}</strong></span></div></div>}
       <div className="form-card two-column review-form">
         <label>Application<input disabled value={draft.application_type}/></label><label>Application Owner<input disabled value={draft.app_owner}/></label>
         <label>Repository Name<input disabled={role !== "devops"} value={draft.repository_name} onChange={(e) => setDraft({...draft, repository_name:e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "")})}/></label><label>Type of Language<input disabled value={draft.pipeline_type ?? "Not selected"}/></label>
@@ -169,7 +192,7 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
       {originalChanges.length>0&&<div className="change-summary"><h3>Changes made by DevOps</h3>{originalChanges.map((change)=><div key={change.key}><strong>{change.key.replace(/_/g," ")}</strong><span>{change.requested}</span><span>→</span><span>{change.approved}</span></div>)}</div>}
       {selected.provisioning&&Object.keys(selected.provisioning).length>0&&<div className="provision-grid"><h3>Provisioning Status</h3>{Object.entries(selected.provisioning).map(([name,step])=><div className="provision-step" key={name}><strong>{name.replace(/_/g, " ")}</strong><span className={`status ${statusClass(step.status)}`}>{step.status}</span><small>{step.message}</small>{step.url&&<a href={step.url} target="_blank" rel="noreferrer">Open resource</a>}</div>)}</div>}
       {selected.timeline&&selected.timeline.length>0&&<div className="timeline"><h3>Timeline</h3>{selected.timeline.map((event,index)=><div key={`${event.at}-${index}`}><strong>{event.action}</strong><span>{event.actor} · {new Date(event.at).toLocaleString()}</span><small>{event.detail}</small></div>)}</div>}
-      {role==="devops"&&closableStatuses.includes(selected.status)&&!showClosureForm&&!showRejectionForm&&<div className="modal-actions">{editableStatuses.includes(selected.status)&&<><button disabled={busy} className="secondary-button" onClick={saveChanges}>Save Changes</button><button disabled={busy} className="danger-button" onClick={()=>{setError("");setNotice("");setRejectionComment("");setShowRejectionForm(true);}}>Reject</button><button disabled={busy} className="primary-button" onClick={approve}>Approve & Provision</button></>}<button disabled={busy} className="secondary-button close-ticket-button" onClick={()=>{setError("");setNotice("");setClosureComment("");setShowClosureForm(true);}}>Close Ticket</button></div>}
+      {role==="devops"&&closableStatuses.includes(selected.status)&&!showClosureForm&&!showRejectionForm&&<div className="modal-actions">{editableStatuses.includes(selected.status)&&<><button disabled={busy} className="secondary-button" onClick={saveChanges}>Save Changes</button><button disabled={busy} className="danger-button" onClick={()=>{setError("");setNotice("");setRejectionComment("");setShowRejectionForm(true);}}>Reject</button><button disabled={busy} className="primary-button" onClick={approve}>{pendingPipelineConfirmation ? "Continue Provisioning" : "Approve & Provision"}</button></>}<button disabled={busy} className="secondary-button close-ticket-button" onClick={()=>{setError("");setNotice("");setClosureComment("");setShowClosureForm(true);}}>Close Ticket</button></div>}
     </article></div>}
   </section>;
 }
