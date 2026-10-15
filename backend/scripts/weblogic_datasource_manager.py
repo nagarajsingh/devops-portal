@@ -226,7 +226,9 @@ def dsportal_is_gridlink(ds):
 
 def dsportal_matches_reference(ds, reference_entity, datasource_type):
     # Discover entity-specific datasources dynamically from live WebLogic.
-    # Match the exact entity suffix in datasource name, JNDI or schema user.
+    # A datasource is part of the reference entity when its datasource name or
+    # JNDI contains the exact entity suffix. Do not use the JDBC username for
+    # discovery because a shared datasource may still use an entity-like user.
     # The suffix boundary prevents IN from matching INGC.
     if datasource_type == "gridlink" and not dsportal_is_gridlink(ds):
         return False
@@ -245,9 +247,6 @@ def dsportal_matches_reference(ds, reference_entity, datasource_type):
         for jndi in resource.getJDBCDataSourceParams().getJNDINames() or []:
             if token.search(dsportal_text(jndi)):
                 return True
-        username = dsportal_read_property(resource.getJDBCDriverParams(), "user")
-        if username and token.search(username):
-            return True
     except Exception:
         pass
     return False
