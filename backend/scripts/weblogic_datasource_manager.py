@@ -138,17 +138,20 @@ def dsportal_capture_reference(ds, reference_entity, target_entity, request):
     if not source_user:
         dsportal_fail("Reference datasource %s does not expose a JDBC user property" % source_name)
 
-    if request["application"].upper() == "PLATO":
-        target_user = dsportal_replace_entity(
-            source_user,
-            reference_entity,
-            target_entity,
-        ).upper()
-    else:
-        target_user = dsportal_text(request.get("schema_username") or "").strip().upper()
+    # Derive each target schema from the live reference datasource.
+    # This works for both single-schema applications (for example OBPUS ->
+    # OBPIN) and applications with multiple datasource-specific schemas.
+    target_user = dsportal_replace_entity(
+        source_user,
+        reference_entity,
+        target_entity,
+    ).upper()
 
-    if not target_user:
-        dsportal_fail("Target schema username is required")
+    if not target_user or target_user == source_user.upper():
+        dsportal_fail(
+            "Unable to derive target schema user from %s using reference entity %s"
+            % (source_user, reference_entity)
+        )
 
     if request["datasource_type"] == "gridlink":
         target_url = (
@@ -258,97 +261,6 @@ def dsportal_target_mbean(name):
     if value is not None:
         return value
     return getMBean("/MigratableTargets/" + name)
-
-
-def dsportal_apply_obp_us_pattern(items, reference_entity, target_entity):
-    # OBP IN follows the same five-datasource layout as the established US
-    # configuration. Keep live connection/user values from the selected
-    # reference entity, but normalize the datasource shape to that pattern.
-    expected = [
-        {
-            "source": "jdbc/fcjdevDS" + reference_entity,
-            "target": "jdbc/fcjdevDS" + target_entity,
-            "jndi": "jdbc/fcjdevDS" + target_entity,
-            "driver": "oracle.jdbc.OracleDriver",
-            "protocol": "None",
-            "max_capacity": 100,
-            "targets": ["OBPAPP", "OBPGW"],
-        },
-        {
-            "source": "jdbc/fcjdevDS" + reference_entity + "_GTXN",
-            "target": "jdbc/fcjdevDS" + target_entity + "_GTXN",
-            "jndi": "jdbc/fcjdevDS" + target_entity + "_GTXN",
-            "driver": "oracle.jdbc.OracleDriver",
-            "protocol": "LoggingLastResource",
-            "max_capacity": 50,
-            "targets": ["OBPAPP"],
-        },
-        {
-            "source": "jdbc/fcjdevDSSMS" + reference_entity,
-            "target": "jdbc/fcjdevDSSMS" + target_entity,
-            "jndi": "jdbc/fcjdevDSSMS" + target_entity,
-            "driver": "oracle.jdbc.OracleDriver",
-            "protocol": "None",
-            "max_capacity": 50,
-            "targets": ["OBPAPP", "OBPSCH" + target_entity],
-        },
-        {
-            "source": "jdbc/fcjdevDSSMS" + reference_entity + "_XA",
-            "target": "jdbc/fcjdevDSSMS" + target_entity + "_XA",
-            "jndi": "jdbc/fcjdevDSSMS" + target_entity + "_XA",
-            "driver": "oracle.jdbc.xa.client.OracleXADataSource",
-            "protocol": "TwoPhaseCommit",
-            "max_capacity": 50,
-            "targets": ["OBPSCH" + target_entity],
-        },
-        {
-            "source": "jdbc/fcjSchedularDS" + reference_entity,
-            "target": "jdbc/fcjSchedularDS" + target_entity,
-            "jndi": "jdbc/fcjSchedulerDS" + target_entity,
-            "driver": "oracle.jdbc.OracleDriver",
-            "protocol": "None",
-            "max_capacity": 50,
-            "targets": ["OBPSCH" + target_entity],
-        },
-    ]
-
-    by_source = {}
-    for item in items:
-        by_source[item["source_name"].lower()] = item
-
-    normalized = []
-    for rule in expected:
-        key = rule["source"].lower()
-        if key not in by_source:
-            dsportal_fail(
-                "Expected OBP datasource %s was not found for reference entity %s"
-                % (rule["source"], reference_entity)
-            )
-
-        item = by_source[key]
-        item["target_name"] = rule["target"]
-        item["target_jndis"] = [rule["jndi"]]
-        item["driver_name"] = rule["driver"]
-        item["target_targets"] = rule["targets"]
-        item["fan_enabled"] = False
-        item["ons_nodes"] = ""
-
-        attrs = item["datasource_attributes"]
-        attrs["GlobalTransactionsProtocol"] = rule["protocol"]
-
-        pool = item["pool_attributes"]
-        pool["InitialCapacity"] = 1
-        pool["MinCapacity"] = 1
-        pool["MaxCapacity"] = rule["max_capacity"]
-        pool["CapacityIncrement"] = 1
-        pool["TestConnectionsOnReserve"] = True
-        pool["TestFrequencySeconds"] = 120
-        pool["ConnectionReserveTimeoutSeconds"] = 30
-        pool["InactiveConnectionTimeoutSeconds"] = 30
-
-        normalized.append(item)
-
-    return normalized
 
 
 def dsportal_validate_plan(plan):
@@ -495,11 +407,6 @@ def dsportal_main():
 
     reference_entity = request["reference_entity"].upper()
     target_entity = request["target_entity"].upper()
-    application = request["application"].upper()
-
-    if application == "PLATO" and request["datasource_type"] != "gridlink":
-        dsportal_fail("PLATO datasource automation requires datasource type gridlink")
-
     matches = [
         ds
         for ds in (cmo.getJDBCSystemResources() or [])
@@ -521,24 +428,10 @@ def dsportal_main():
         for ds in matches
     ]
 
-    if (
-        request["application"].upper() == "OBP"
-        and reference_entity in ("IN", "US")
-    ):
-        datasource_items = dsportal_apply_obp_us_pattern(
-            datasource_items,
-            reference_entity,
-            target_entity,
-        )
-
-    update_existing = (
-        (
-            request["application"].upper() == "OBP"
-            and reference_entity == "US"
-            and target_entity == "IN"
-        )
-        or request["application"].upper() == "PLATO"
-    )
+    # Existing targets are updates; missing targets are creates.
+    # This behavior is application-agnostic and is determined entirely from
+    # the live WebLogic reference entity and current target state.
+    update_existing = True
 
     plan = {
         "request_id": request["request_id"],
