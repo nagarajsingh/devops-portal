@@ -1,14 +1,4 @@
 {
-  "application": "OBVAM",
-  "environment": "txcsit",
-  "instance_name": "app1",
-  "domain_name": "REPLACE_WITH_DOMAIN",
-  "admin_host": "172.24.178.166",
-  "admin_port": 5001,
-  "ssh_port": 22,
-  "wlst_path": "/REPLACE_WITH_BASE/Oracle/Middleware/Oracle_Home/oracle_common/common/bin/wlst.sh",
-  "ssh_username": "azdevops",
   "ssh_password": "REPLACE_BEFORE_ENCRYPTING",
-  "weblogic_username": "REPLACE_WITH_WEBLOGIC_USER",
   "weblogic_password": "REPLACE_BEFORE_ENCRYPTING"
 }
