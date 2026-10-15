@@ -20,7 +20,7 @@ def dsportal_fail(message):
 def dsportal_text(value):
     if value is None:
         return ""
-    return str(value)
+    return "%s" % value
 
 
 def dsportal_replace_entity(value, reference_entity, target_entity):
