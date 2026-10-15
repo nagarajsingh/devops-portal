@@ -131,6 +131,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     [environments, selectedApplication],
   );
   const selectedEnvironment = environments.find((item) => item.id === environmentId) || null;
+  const isPlato = selectedApplication === "PLATO";
   const existingTargetProfile = useMemo(
     () => selectedEnvironment?.entities.find((item) => item.entity_code.toUpperCase() === targetEntity.trim().toUpperCase()) || null,
     [selectedEnvironment, targetEntity],
@@ -170,6 +171,13 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     const options = environments.filter((item) => item.application === selectedApplication && item.is_active);
     setEnvironmentId((current) => options.some((item) => item.id === current) ? current : options[0]?.id || 0);
   }, [selectedApplication, environments]);
+
+  useEffect(() => {
+    if (isPlato) {
+      setDatasourceType("gridlink");
+      setSchemaUsername("");
+    }
+  }, [isPlato]);
 
   useEffect(() => {
     if (!selectedEnvironment) {
@@ -373,7 +381,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     referenceEntity.trim() &&
     targetEntity.trim() &&
     serviceId.trim() &&
-    schemaUsername.trim() &&
+    (isPlato || schemaUsername.trim()) &&
     dbHost.trim() &&
     pat.trim() &&
     !busy
@@ -517,12 +525,15 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
         <label>Reference entity<input required value={referenceEntity} onChange={(e) => setReferenceEntity(e.target.value.toUpperCase())} placeholder="QA"/></label>
         <label>Target entity<input required value={targetEntity} onChange={(e) => setTargetEntity(e.target.value.toUpperCase())} placeholder="IN" list="configured-datasource-entities"/></label>
         <datalist id="configured-datasource-entities">{selectedEnvironment?.entities.map((item) => <option key={item.id} value={item.entity_code}/>)}</datalist>
-        <label>Datasource type<select value={datasourceType} onChange={(e) => setDatasourceType(e.target.value as "standalone" | "gridlink")}><option value="standalone">Standalone</option><option value="gridlink">GridLink</option></select></label>
+        <label>Datasource type<select value={datasourceType} disabled={isPlato} onChange={(e) => setDatasourceType(e.target.value as "standalone" | "gridlink")}><option value="standalone">Standalone</option><option value="gridlink">GridLink</option></select>{isPlato ? <small>PLATO entity datasources are managed as GridLink.</small> : null}</label>
 
         <label>Database host<input required value={dbHost} onChange={(e) => setDbHost(e.target.value)} placeholder="gtbtxcoreobpmdbsit.uat.mashreqdev.com"/></label>
         <label>Database port<input type="number" min={1} max={65535} required value={dbPort} onChange={(e) => setDbPort(Number(e.target.value))}/></label>
         <label>Service ID<input required value={serviceId} onChange={(e) => setServiceId(e.target.value)} placeholder="TXPMINS"/></label>
-        <label>Schema user<input required value={schemaUsername} onChange={(e) => setSchemaUsername(e.target.value.toUpperCase())} placeholder="OBPIN"/></label>
+        <label>Schema user{isPlato
+          ? <><input readOnly value="Derived from each reference datasource"/><small>Example: CONDUCTORUS → CONDUCTORIN, PLATORULEUS → PLATORULEIN.</small></>
+          : <input required value={schemaUsername} onChange={(e) => setSchemaUsername(e.target.value.toUpperCase())} placeholder="OBPIN"/>}
+        </label>
 
         <label className="full-width">Schema password pattern
           <input type="password" value={passwordPattern} onChange={(e) => setPasswordPattern(e.target.value)} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder={existingTargetProfile?.password_pattern_configured ? "Leave blank to reuse encrypted saved pattern" : "{username}_TXS1T"}/>
@@ -551,7 +562,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
         <div><small>Datasources created</small><strong>{plan.summary?.created_count ?? createdItems.length}</strong></div>
         <div><small>Datasources updated</small><strong>{plan.summary?.updated_count ?? updatedItems.length}</strong></div>
         <div><small>Target entity</small><strong>{selectedOperation.target_entity}</strong></div>
-        <div><small>Schema user</small><strong>{selectedOperation.schema_username}</strong></div>
+        <div><small>Schema user</small><strong>{plan.application === "PLATO" ? "Derived per datasource" : (selectedOperation.schema_username || "—")}</strong></div>
         <div><small>Pipeline run</small><strong>#{selectedOperation.azure_run_id || "—"}</strong></div>
         <div className="full-width"><small>Datasource names</small><strong>{[
           ...(plan.summary?.created_names?.length ? plan.summary.created_names : createdItems.map((item) => item.target_name)),
