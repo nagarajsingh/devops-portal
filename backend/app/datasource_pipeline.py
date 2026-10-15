@@ -3,10 +3,10 @@ from __future__ import annotations
 import base64
 import io
 import json
-import ssl
+import shutil
+import subprocess
+import tempfile
 import time
-import urllib.error
-import urllib.request
 import zipfile
 from typing import Any
 
@@ -25,37 +25,55 @@ logger = get_logger("datasource-pipeline")
 
 
 def _download_bytes(url: str, pat: str) -> bytes:
+    curl = shutil.which("curl")
+    if not curl:
+        raise RuntimeError(
+            "curl is required for Azure DevOps artifact downloads but was not found in the backend container"
+        )
+
     token = base64.b64encode(f":{pat.strip()}".encode()).decode()
-    last_error: Exception | None = None
+    curl_config = (
+        'silent\n'
+        'show-error\n'
+        'fail\n'
+        'location\n'
+        'http1.1\n'
+        'connect-timeout = 30\n'
+        'max-time = 180\n'
+        'retry = 3\n'
+        'retry-delay = 2\n'
+        'retry-all-errors\n'
+        'header = "Authorization: Basic %s"\n'
+        'header = "User-Agent: devops-portal/1.0"\n'
+        'url = "%s"\n'
+    ) % (token, url.replace('"', '\\"'))
 
-    for attempt in range(1, 4):
-        try:
-            request = urllib.request.Request(
-                url,
-                method="GET",
-                headers={
-                    "Authorization": f"Basic {token}",
-                    "Connection": "close",
-                    "User-Agent": "devops-portal/1.0",
-                },
+    with tempfile.NamedTemporaryFile(prefix="datasource-plan-", suffix=".zip") as output:
+        result = subprocess.run(
+            [curl, "--config", "-", "--output", output.name],
+            input=curl_config,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=210,
+            check=False,
+        )
+        if result.returncode != 0:
+            message = (result.stderr or "").strip()
+            logger.error(
+                "Datasource artifact curl download failed returncode=%s error=%s",
+                result.returncode,
+                message,
             )
-            with urllib.request.urlopen(request, timeout=120) as response:
-                return response.read()
-        except urllib.error.HTTPError:
-            raise
-        except (urllib.error.URLError, ssl.SSLError, ConnectionResetError, TimeoutError) as exc:
-            last_error = exc
-            logger.warning(
-                "Transient datasource artifact download error attempt=%s/3 error=%s",
-                attempt,
-                exc,
+            raise RuntimeError(
+                f"Datasource artifact download failed with curl exit code {result.returncode}: {message}"
             )
-            if attempt < 3:
-                time.sleep(attempt * 2)
 
-    raise RuntimeError(
-        f"Datasource artifact download failed after 3 attempts: {last_error}"
-    )
+        output.seek(0)
+        content = output.read()
+        if not content:
+            raise RuntimeError("Datasource artifact download returned an empty file")
+        return content
 
 
 def _download_plan(run_id: int, pat: str) -> dict[str, Any]:
