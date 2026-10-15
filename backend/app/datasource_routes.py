@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import secrets
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field, SecretStr
 
 from .auth import require_devops, require_devops_admin
+from .config import DATASOURCE_PIPELINE_API_TOKEN
 from .datasource_pipeline import run_datasource_pipeline
 from .datasource_store import (
     create_environment,
@@ -11,6 +14,7 @@ from .datasource_store import (
     get_entity_runtime,
     get_environment_runtime,
     get_operation_runtime,
+    get_operation_runtime_by_request_id,
     list_applications,
     list_environments,
     list_operations,
@@ -89,6 +93,53 @@ def _environment_payload(payload: DatasourceEnvironmentPayload) -> dict:
         else None
     )
     return data
+
+
+@router.get("/internal/runtime/{request_id}")
+def datasource_runtime_payload(
+    request_id: str,
+    x_datasource_pipeline_token: str = Header(default="", alias="X-Datasource-Pipeline-Token"),
+):
+    if not DATASOURCE_PIPELINE_API_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="DATASOURCE_PIPELINE_API_TOKEN is not configured on the dashboard backend",
+        )
+    if not secrets.compare_digest(x_datasource_pipeline_token, DATASOURCE_PIPELINE_API_TOKEN):
+        raise HTTPException(status_code=401, detail="Invalid datasource pipeline token")
+
+    operation = get_operation_runtime_by_request_id(request_id)
+    if operation["status"] not in {"Preview Queued", "Apply Running"}:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Datasource runtime payload is not available while request status is {operation['status']}",
+        )
+
+    environment = get_environment_runtime(operation["environment_instance_id"])
+    return {
+        "request_id": operation["request_id"],
+        "application": environment["application"],
+        "environment": environment["environment"],
+        "instance_name": environment["instance_name"],
+        "domain_name": environment["domain_name"],
+        "admin_host": environment["admin_host"],
+        "admin_port": environment["admin_port"],
+        "ssh_port": environment["ssh_port"],
+        "wlst_path": environment["wlst_path"],
+        "ssh_username": environment["ssh_username"],
+        "ssh_password": environment["ssh_password"],
+        "weblogic_username": environment["weblogic_username"],
+        "weblogic_password": environment["weblogic_password"],
+        "reference_entity": operation["reference_entity"],
+        "target_entity": operation["target_entity"],
+        "datasource_type": operation["datasource_type"],
+        "db_host": operation["db_host"],
+        "db_port": operation["db_port"],
+        "service_id": operation["service_id"],
+        "schema_username": operation["schema_username"],
+        "ons_nodes": operation.get("ons_nodes") or "",
+        "password_pattern": operation["password_pattern"],
+    }
 
 
 @router.get("/applications")
