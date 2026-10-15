@@ -37,6 +37,7 @@ const emptyEnvironment: WebLogicEnvironmentInput = {
   application: "OBP",
   environment: "txcsit",
   instance_name: "app1",
+  inventory_hostname: "",
   base_path: "",
   domain_name: "",
   admin_host: "",
@@ -191,6 +192,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       application: environment.application,
       environment: environment.environment,
       instance_name: environment.instance_name,
+      inventory_hostname: environment.inventory_hostname,
       base_path: environment.base_path,
       domain_name: environment.domain_name,
       admin_host: environment.admin_host,
@@ -369,6 +371,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       </label>
       <label>Environment<input required value={environmentForm.environment} onChange={(e) => setEnvironmentForm({ ...environmentForm, environment: e.target.value.toLowerCase() })} placeholder="txcsit"/></label>
       <label>Instance<input required value={environmentForm.instance_name} onChange={(e) => setEnvironmentForm({ ...environmentForm, instance_name: e.target.value.toLowerCase() })} placeholder="app1"/></label>
+      <label>Inventory hostname<input required value={environmentForm.inventory_hostname} onChange={(e) => setEnvironmentForm({ ...environmentForm, inventory_hostname: e.target.value })} placeholder="obp_txcsit_app1"/></label>
       <label>Domain<input required value={environmentForm.domain_name} onChange={(e) => setEnvironmentForm({ ...environmentForm, domain_name: e.target.value })} placeholder="TXOBPSIT"/></label>
 
       <label>BASE<input required value={environmentForm.base_path} onChange={(e) => changeBasePath(e.target.value)} placeholder="/obpay"/></label>
@@ -433,6 +436,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
           <div><small>Application</small><strong>{selectedEnvironment.application}</strong></div>
           <div><small>ENV_NAME</small><strong>{selectedEnvironment.environment}</strong></div>
           <div><small>BASE</small><strong>{selectedEnvironment.base_path}</strong></div>
+          <div><small>Inventory Host</small><strong>{selectedEnvironment.inventory_hostname}</strong></div>
           <div><small>Domain</small><strong>{selectedEnvironment.domain_name}</strong></div>
           <div><small>Admin / Ansible Host</small><strong>{selectedEnvironment.admin_host}</strong></div>
           <div><small>WebLogic Port</small><strong>{selectedEnvironment.admin_port}</strong></div>
