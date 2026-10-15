@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import time
 import zipfile
+import zlib
 from typing import Any
 
 from .azure_devops import azdo_request
@@ -74,6 +75,59 @@ def _download_bytes(url: str, pat: str) -> bytes:
         if not content:
             raise RuntimeError("Datasource artifact download returned an empty file")
         return content
+
+
+PLAN_LOG_PREFIX = "DEVOPS_PORTAL_DATASOURCE_PLAN_ZLIB_B64="
+
+
+def _download_plan_from_logs(run_id: int, pat: str) -> dict[str, Any]:
+    code, body = azdo_request(
+        "GET",
+        f"_apis/build/builds/{run_id}/logs?api-version=7.1",
+        pat,
+        project=DATASOURCE_AZURE_DEVOPS_PROJECT,
+    )
+    if code != 200:
+        raise RuntimeError(
+            body.get("message", f"Unable to list build logs for run {run_id} with HTTP {code}")
+        )
+
+    logs = body.get("value", [])
+    for log in reversed(logs):
+        log_id = log.get("id")
+        if log_id is None:
+            continue
+
+        log_code, log_body = azdo_request(
+            "GET",
+            f"_apis/build/builds/{run_id}/logs/{log_id}?api-version=7.1",
+            pat,
+            project=DATASOURCE_AZURE_DEVOPS_PROJECT,
+        )
+        if log_code != 200:
+            continue
+
+        content = str(log_body.get("content") or "")
+        marker_index = content.rfind(PLAN_LOG_PREFIX)
+        if marker_index < 0:
+            continue
+
+        encoded = content[marker_index + len(PLAN_LOG_PREFIX):].splitlines()[0].strip()
+        if not encoded:
+            continue
+
+        try:
+            compressed = base64.b64decode(encoded)
+            raw = zlib.decompress(compressed).decode("utf-8")
+            return json.loads(raw)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Datasource plan marker in Azure DevOps log {log_id} could not be decoded: {exc}"
+            ) from exc
+
+    raise RuntimeError(
+        f"Datasource plan marker was not found in Azure DevOps logs for run {run_id}"
+    )
 
 
 def _download_plan(run_id: int, pat: str) -> dict[str, Any]:
@@ -210,7 +264,20 @@ def run_datasource_pipeline(
                 raise RuntimeError(
                     f"Datasource pipeline run {run_id} completed with result {result or 'unknown'}"
                 )
-            plan = _download_plan(run_id, azure_devops_pat)
+            try:
+                plan = _download_plan_from_logs(run_id, azure_devops_pat)
+                logger.info(
+                    "Datasource plan loaded from Azure DevOps build logs run_id=%s",
+                    run_id,
+                )
+            except RuntimeError as log_error:
+                logger.warning(
+                    "Unable to load datasource plan from build logs run_id=%s error=%s; falling back to published artifact",
+                    run_id,
+                    log_error,
+                )
+                plan = _download_plan(run_id, azure_devops_pat)
+
             logger.info(
                 "Datasource pipeline completed action=%s request_id=%s run_id=%s result=%s",
                 action,
