@@ -134,10 +134,19 @@ def dsportal_capture_reference(ds, reference_entity, target_entity, request):
         for value in jndis
     ]
     source_user = dsportal_read_property(driver, "user")
-    target_user = dsportal_text(request.get("schema_username") or "").strip().upper()
 
     if not source_user:
         dsportal_fail("Reference datasource %s does not expose a JDBC user property" % source_name)
+
+    if request["application"].upper() == "PLATO":
+        target_user = dsportal_replace_entity(
+            source_user,
+            reference_entity,
+            target_entity,
+        ).upper()
+    else:
+        target_user = dsportal_text(request.get("schema_username") or "").strip().upper()
+
     if not target_user:
         dsportal_fail("Target schema username is required")
 
@@ -224,6 +233,26 @@ def dsportal_matches_reference(ds, reference_entity, datasource_type):
     except Exception:
         pass
     return False
+
+
+def dsportal_matches_plato_reference(ds, reference_entity, datasource_type):
+    # Country/entity-specific PLATO datasource families. Base PLATO,
+    # PLATOBATCH, PLATOSECURITY and PLATOUI are shared resources and are not
+    # cloned per entity.
+    if datasource_type != "gridlink":
+        return False
+    if not dsportal_is_gridlink(ds):
+        return False
+
+    entity = reference_entity.upper()
+    expected_names = [
+        ("PLATO-O" + entity).lower(),
+        ("PLATOALERTS" + entity).lower(),
+        ("PLATOFEED" + entity).lower(),
+        ("PLATOREPORTS" + entity).lower(),
+        ("PLATORULE" + entity).lower(),
+    ]
+    return dsportal_text(ds.getName()).lower() in expected_names
 
 
 def dsportal_target_mbean(name):
@@ -471,11 +500,31 @@ def dsportal_main():
 
     reference_entity = request["reference_entity"].upper()
     target_entity = request["target_entity"].upper()
-    matches = [
-        ds
-        for ds in (cmo.getJDBCSystemResources() or [])
-        if dsportal_matches_reference(ds, reference_entity, request["datasource_type"])
-    ]
+    application = request["application"].upper()
+
+    if application == "PLATO" and request["datasource_type"] != "gridlink":
+        dsportal_fail("PLATO datasource automation requires datasource type gridlink")
+
+    if application == "PLATO":
+        matches = [
+            ds
+            for ds in (cmo.getJDBCSystemResources() or [])
+            if dsportal_matches_plato_reference(
+                ds,
+                reference_entity,
+                request["datasource_type"],
+            )
+        ]
+    else:
+        matches = [
+            ds
+            for ds in (cmo.getJDBCSystemResources() or [])
+            if dsportal_matches_reference(
+                ds,
+                reference_entity,
+                request["datasource_type"],
+            )
+        ]
 
     if not matches:
         dsportal_fail(
@@ -499,9 +548,12 @@ def dsportal_main():
         )
 
     update_existing = (
-        request["application"].upper() == "OBP"
-        and reference_entity == "US"
-        and target_entity == "IN"
+        (
+            request["application"].upper() == "OBP"
+            and reference_entity == "US"
+            and target_entity == "IN"
+        )
+        or request["application"].upper() == "PLATO"
     )
 
     plan = {
