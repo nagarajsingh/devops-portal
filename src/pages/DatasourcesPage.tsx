@@ -276,6 +276,21 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     });
   }
 
+  function switchOperationMode(mode: "create" | "update") {
+    setOperationMode(mode);
+    setSelectedOperation(null);
+    setPasswordPattern("");
+    setDatasourceName("");
+    setTargetTargets("");
+    setReferenceEntity("");
+    setTargetEntity("");
+    setServiceId("");
+    setSchemaUsername("");
+    setDbHost(selectedEnvironment?.default_db_host || "");
+    setDbPort(selectedEnvironment?.default_db_port || 1531);
+    setOnsNodes(mode === "create" ? (selectedEnvironment?.default_ons_nodes || "") : "");
+  }
+
   async function saveEnvironment(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -394,7 +409,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     serviceId.trim() &&
     schemaUsername.trim() &&
     dbHost.trim() &&
-    (datasourceType === "standalone" || onsNodes.trim()) &&
+    (datasourceType === "standalone" || operationMode === "update" || onsNodes.trim()) &&
     pat.trim() &&
     !busy
   );
@@ -490,10 +505,10 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       </div>
 
       <div className="datasource-mode-menu">
-        <button type="button" className={operationMode === "create" ? "active" : ""} onClick={() => { setOperationMode("create"); setSelectedOperation(null); setPasswordPattern(""); }}>
+        <button type="button" className={operationMode === "create" ? "active" : ""} onClick={() => switchOperationMode("create")}>
           <Plus size={18}/><span><strong>Create Datasource</strong><small>New or complete setup from a reference entity</small></span>
         </button>
-        <button type="button" className={operationMode === "update" ? "active" : ""} onClick={() => { setOperationMode("update"); setSelectedOperation(null); setPasswordPattern(""); }}>
+        <button type="button" className={operationMode === "update" ? "active" : ""} onClick={() => switchOperationMode("update")}>
           <Settings size={18}/><span><strong>Update Datasource</strong><small>Update one existing datasource only</small></span>
         </button>
       </div>
@@ -565,7 +580,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
           <small>Use {"{username}"} where the schema user should be inserted. The value is encrypted in the portal and sent to Azure DevOps as a secret run variable.</small>
         </label>
 
-        {datasourceType === "gridlink" && <label className="full-width">ONS nodes<input required value={onsNodes} onChange={(e) => setOnsNodes(e.target.value)} placeholder="host1:6200,host2:6200"/></label>}
+        {datasourceType === "gridlink" && <label className="full-width">ONS nodes<input required={operationMode === "create"} value={onsNodes} onChange={(e) => setOnsNodes(e.target.value)} placeholder="host1:6200,host2:6200"/><small>{operationMode === "update" ? "Leave blank to preserve the datasource's current ONS/FAN settings." : "Required for GridLink datasource creation."}</small></label>}
 
         <label className="full-width">Azure DevOps PAT
           <input type="password" name="datasource-azure-devops-pat" value={pat} onChange={(e) => setPat(e.target.value)} onFocus={() => setPatEditable(true)} readOnly={!patEditable} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" spellCheck={false} placeholder="PAT is kept only for this browser session"/>
