@@ -11,6 +11,7 @@ from .datasource_store import (
     get_entity_runtime,
     get_environment_runtime,
     get_operation_runtime,
+    list_applications,
     list_environments,
     list_operations,
     update_environment,
@@ -34,6 +35,7 @@ class DatasourceEnvironmentPayload(BaseModel):
     admin_port: int = Field(ge=1, le=65535)
     ssh_port: int = Field(default=22, ge=1, le=65535)
     wlst_path: str = Field(min_length=2, max_length=500)
+    artifacts_location: str = Field(default="/azure_artifact", min_length=1, max_length=255)
     agent_pool: str = Field(min_length=2, max_length=100)
     default_db_host: str = Field(min_length=2, max_length=255)
     default_db_port: int = Field(ge=1, le=65535)
@@ -48,6 +50,7 @@ class DatasourceEnvironmentPayload(BaseModel):
 
 class DatasourceEntityPayload(BaseModel):
     service_id: str = Field(min_length=1, max_length=100)
+    schema_username: str = Field(min_length=1, max_length=100)
     db_host: str = Field(min_length=2, max_length=255)
     db_port: int = Field(ge=1, le=65535)
     ons_nodes: str = Field(default="", max_length=1000)
@@ -62,6 +65,7 @@ class DatasourcePreviewPayload(BaseModel):
     db_host: str = Field(min_length=2, max_length=255)
     db_port: int = Field(ge=1, le=65535)
     service_id: str = Field(min_length=1, max_length=100)
+    schema_username: str = Field(min_length=1, max_length=100)
     password_pattern: SecretStr | None = None
     ons_nodes: str = Field(default="", max_length=1000)
     azure_devops_pat: SecretStr = Field(min_length=10)
@@ -84,6 +88,11 @@ def _environment_payload(payload: DatasourceEnvironmentPayload) -> dict:
         else None
     )
     return data
+
+
+@router.get("/applications")
+def applications(_: UserContext = Depends(require_devops)):
+    return list_applications()
 
 
 @router.get("/environments")
@@ -124,6 +133,7 @@ def save_entity_profile(
         environment_id,
         entity_code,
         payload.service_id,
+        payload.schema_username,
         payload.db_host,
         payload.db_port,
         payload.ons_nodes,
@@ -163,6 +173,7 @@ def preview_datasources(
             payload.environment_instance_id,
             target_entity,
             payload.service_id,
+            payload.schema_username,
             payload.db_host,
             payload.db_port,
             payload.ons_nodes,
@@ -180,6 +191,7 @@ def preview_datasources(
         payload.db_host,
         payload.db_port,
         payload.service_id,
+        payload.schema_username,
         payload.ons_nodes,
         password_pattern,
         user.username,
