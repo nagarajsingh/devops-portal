@@ -111,10 +111,12 @@ jobs:
           REMOTE_DIR="/tmp/devops-portal-ds-${P_REQUEST_ID}"
           mkdir -p "$OUTPUT_DIR"
 
-          if [[ -z "${ANSIBLE_VAULT_PASSWORD:-}" || "$ANSIBLE_VAULT_PASSWORD" == '$(ANSIBLE_VAULT_PASSWORD)' ]]; then
-            echo "ANSIBLE_VAULT_PASSWORD is not configured as a secret pipeline variable."
+          if [[ -z "${ANSIBLE_VAULT_PASSWORD:-}" ]]; then
+            echo "ANSIBLE_VAULT_PASSWORD is not configured."
             exit 1
           fi
+
+          echo "ANSIBLE_VAULT_PASSWORD is available."
 
           if [[ ! -f "$CONFIG_FILE" ]]; then
             echo "Datasource config not found: $CONFIG_FILE"
