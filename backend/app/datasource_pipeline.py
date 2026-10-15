@@ -105,8 +105,10 @@ def run_datasource_pipeline(
         "dbPort": str(operation["db_port"]),
         "serviceId": operation["service_id"],
         "schemaUsername": operation["schema_username"],
-        "onsNodes": operation.get("ons_nodes") or "",
     }
+
+    if operation["datasource_type"] == "gridlink":
+        parameters["onsNodes"] = str(operation.get("ons_nodes") or "")
 
     # Passwords are supplied as secret runtime variables rather than template
     # parameters so Azure DevOps masks them in job output.
