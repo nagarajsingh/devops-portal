@@ -34,6 +34,7 @@ def initialize_datasource_database() -> None:
     inspector = inspect(engine)
     migrations = {
         "weblogic_environment_instances": {
+            "inventory_hostname": "VARCHAR(255) NULL",
             "artifacts_location": "VARCHAR(255) NULL",
             "common_artifacts_location": "VARCHAR(500) NULL",
             "cz_config_location": "VARCHAR(500) NULL",
@@ -151,6 +152,7 @@ class WebLogicEnvironment(Base):
     application: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     environment: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     instance_name: Mapped[str] = mapped_column(String(50), nullable=False, default="app1")
+    inventory_hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
     base_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     domain_name: Mapped[str] = mapped_column(String(100), nullable=False)
     admin_host: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -347,6 +349,7 @@ def _environment_view(db, row: WebLogicEnvironment) -> dict[str, Any]:
         "application": row.application,
         "environment": row.environment,
         "instance_name": row.instance_name,
+        "inventory_hostname": row.inventory_hostname or "",
         "base_path": row.base_path or "",
         "domain_name": row.domain_name,
         "admin_host": row.admin_host,
@@ -444,6 +447,7 @@ def create_environment(payload: dict[str, Any]) -> dict[str, Any]:
             application=application,
             environment=environment,
             instance_name=payload["instance_name"].strip().lower(),
+            inventory_hostname=(payload.get("inventory_hostname") or "").strip() or None,
             base_path=(payload.get("base_path") or "").strip() or None,
             domain_name=payload["domain_name"].strip(),
             admin_host=payload["admin_host"].strip(),
@@ -494,6 +498,7 @@ def update_environment(environment_id: int, payload: dict[str, Any]) -> dict[str
         row.application = application
         row.environment = payload["environment"].strip().lower()
         row.instance_name = payload["instance_name"].strip().lower()
+        row.inventory_hostname = (payload.get("inventory_hostname") or "").strip() or None
         row.base_path = (payload.get("base_path") or "").strip() or None
         row.domain_name = payload["domain_name"].strip()
         row.admin_host = payload["admin_host"].strip()
