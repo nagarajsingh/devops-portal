@@ -168,10 +168,12 @@ jobs:
           environment = os.environ['P_ENVIRONMENT'].lower()
           target_entity = os.environ['P_TARGET_ENTITY'].upper()
 
-          if str(config.get('application', '')).upper() != application:
-              raise RuntimeError('Datasource config application does not match pipeline request')
-          if str(config.get('environment', '')).lower() != environment:
-              raise RuntimeError('Datasource config environment does not match pipeline request')
+          ssh_password = str(config.get('ssh_password', '')).strip()
+          weblogic_password = str(config.get('weblogic_password', '')).strip()
+          if not ssh_password:
+              raise RuntimeError('ssh_password is missing from the datasource Ansible Vault file')
+          if not weblogic_password:
+              raise RuntimeError('weblogic_password is missing from the datasource Ansible Vault file')
 
           password_pattern = os.environ.get('P_PASSWORD_PATTERN', '').strip()
           if not password_pattern:
@@ -181,10 +183,10 @@ jobs:
               'request_id': os.environ['P_REQUEST_ID'],
               'application': application,
               'environment': environment,
-              'instance_name': config.get('instance_name', 'app1'),
-              'domain_name': config['domain_name'],
-              'admin_host': config['admin_host'],
-              'admin_port': int(config['admin_port']),
+              'instance_name': os.environ['P_INSTANCE_NAME'],
+              'domain_name': os.environ['P_DOMAIN_NAME'],
+              'admin_host': os.environ['P_ADMIN_HOST'],
+              'admin_port': int(os.environ['P_ADMIN_PORT']),
               'operation_mode': os.environ.get('P_OPERATION_MODE', 'create').lower(),
               'reference_entity': os.environ['P_REFERENCE_ENTITY'].upper(),
               'target_entity': target_entity,
@@ -200,8 +202,8 @@ jobs:
               'service_id': os.environ['P_SERVICE_ID'],
               'schema_username': os.environ['P_SCHEMA_USERNAME'],
               'ons_nodes': os.environ.get('P_ONS_NODES', ''),
-              'weblogic_username': config['weblogic_username'],
-              'weblogic_password': config['weblogic_password'],
+              'weblogic_username': os.environ['P_WEBLOGIC_USERNAME'],
+              'weblogic_password': weblogic_password,
               'password_pattern': password_pattern,
           }
 
@@ -211,10 +213,6 @@ jobs:
 
           chmod 600 "$LOCAL_REQUEST"
           SSH_PASSWORD="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ssh_password"])' "$LOCAL_RUNTIME")"
-          P_SSH_USERNAME="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ssh_username"])' "$LOCAL_RUNTIME")"
-          P_ADMIN_HOST="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["admin_host"])' "$LOCAL_RUNTIME")"
-          P_SSH_PORT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("ssh_port",22))' "$LOCAL_RUNTIME")"
-          P_WLST_PATH="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["wlst_path"])' "$LOCAL_RUNTIME")"
           KNOWN_HOSTS="$(Pipeline.Workspace)/datasource-known-hosts"
           rm -f "$KNOWN_HOSTS"
           ssh-keyscan -p "$P_SSH_PORT" "$P_ADMIN_HOST" > "$KNOWN_HOSTS" 2>/dev/null
@@ -281,6 +279,14 @@ jobs:
           P_REQUEST_ID: '${{ parameters.requestId }}'
           P_APPLICATION: '${{ parameters.application }}'
           P_ENVIRONMENT: '${{ parameters.environment }}'
+          P_INSTANCE_NAME: '${{ parameters.instanceName }}'
+          P_DOMAIN_NAME: '${{ parameters.domainName }}'
+          P_ADMIN_HOST: '${{ parameters.adminHost }}'
+          P_ADMIN_PORT: '${{ parameters.adminPort }}'
+          P_SSH_PORT: '${{ parameters.sshPort }}'
+          P_WLST_PATH: '${{ parameters.wlstPath }}'
+          P_SSH_USERNAME: '${{ parameters.sshUsername }}'
+          P_WEBLOGIC_USERNAME: '${{ parameters.weblogicUsername }}'
           P_OPERATION_MODE: '${{ parameters.operationMode }}'
           P_DATASOURCE_NAME: '${{ parameters.datasourceName }}'
           P_TARGET_TARGETS: '${{ parameters.targetTargets }}'
