@@ -35,6 +35,7 @@ const TXCSIT_HOST_PRESETS: Record<string, EnvironmentPreset> = {
   MOCORE: { inventory_hostname: "moc_txcsit_app1", admin_host: "172.24.178.167" },
 };
 
+const OBMA_APPS = new Set(["OBTFPM", "CMNCORE", "MOCORE", "PLATO", "OBLM", "OBLMIC", "OBVAM", "OBVAMIC"]);
 const TXCSIT_DB_HOST = "gtbtxcoreobpmdbsit.uat.mashreqdev.com";
 const TXCSIT_DB_PORT = 1531;
 const TXCSIT_ONS_NODES = "gtbtxcoreobpmdbsit.uat.mashreqdev.com:6200,gtbtxcoreobpmdbsit.uat.mashreqdev.com:6200";
@@ -114,6 +115,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
   const [serviceId, setServiceId] = useState("");
   const [schemaUsername, setSchemaUsername] = useState("");
   const [passwordPattern, setPasswordPattern] = useState("");
+  const [explicitPassword, setExplicitPassword] = useState("");
   const [onsNodes, setOnsNodes] = useState("");
 
   const [pat, setPat] = useState(readPat);
@@ -191,6 +193,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     setServiceId("");
     setSchemaUsername("");
     setPasswordPattern("");
+    setExplicitPassword("");
     setSelectedOperation(null);
   }, [environmentId]);
 
@@ -202,6 +205,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     setSchemaUsername(existingTargetProfile.schema_username);
     setOnsNodes(existingTargetProfile.ons_nodes || "");
     setPasswordPattern("");
+    setExplicitPassword("");
   }, [existingTargetProfile?.id]);
 
   function beginEnvironment(environment?: WebLogicEnvironment) {
@@ -276,6 +280,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     setOperationMode(mode);
     setSelectedOperation(null);
     setPasswordPattern("");
+    setExplicitPassword("");
     setDatasourceName("");
     setTargetTargets("");
     setReferenceEntity("");
@@ -321,12 +326,10 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
   async function preview(event: FormEvent) {
     event.preventDefault();
     if (!selectedEnvironment) return;
-    if (operationMode === "update" && !passwordPattern) {
-      setNotice({ variant: "error", message: "Schema password pattern is required when updating an existing datasource." });
-      return;
-    }
-    if (operationMode === "create" && !passwordPattern && !existingTargetProfile?.password_pattern_configured) {
-      setNotice({ variant: "error", message: "Schema password pattern is required the first time this entity is configured." });
+    const isObma = OBMA_APPS.has(selectedEnvironment.application.toUpperCase());
+    if (!isObma && !explicitPassword && !passwordPattern &&
+        (operationMode === "update" || !existingTargetProfile?.password_pattern_configured)) {
+      setNotice({ variant: "error", message: "Provide an explicit schema password or password pattern." });
       return;
     }
 
@@ -348,10 +351,12 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
         service_id: serviceId,
         schema_username: schemaUsername,
         password_pattern: passwordPattern || undefined,
+        explicit_password: explicitPassword || undefined,
         ons_nodes: datasourceType === "gridlink" ? onsNodes : "",
         azure_devops_pat: pat,
       }, token);
       setPasswordPattern("");
+    setExplicitPassword("");
       setSelectedOperation(result);
       setNotice({
         variant: "success",
@@ -398,7 +403,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     selectedEnvironment &&
     (operationMode === "create"
       ? referenceEntity.trim() && targetEntity.trim()
-      : datasourceName.trim() && passwordPattern.trim()) &&
+      : datasourceName.trim()) &&
     serviceId.trim() &&
     schemaUsername.trim() &&
     dbHost.trim() &&
@@ -560,9 +565,15 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
         <label>Service ID<input required value={serviceId} onChange={(e) => setServiceId(e.target.value)} placeholder="TXPMINS"/></label>
         <label>Schema user<input required value={schemaUsername} onChange={(e) => setSchemaUsername(e.target.value.toUpperCase())} placeholder="OBPIN"/><small>This target schema user is applied to the datasource(s) being created or updated.</small></label>
 
-        <label className="full-width">Schema password pattern
-          <input type="password" value={passwordPattern} onChange={(e) => setPasswordPattern(e.target.value)} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder={operationMode === "create" && existingTargetProfile?.password_pattern_configured ? "Leave blank to reuse encrypted saved pattern" : "{username}_TXS1T"}/>
-          <small>Use {"{username}"} where the schema user should be inserted. The value is encrypted in the portal and sent to Azure DevOps as a secret run variable.</small>
+        <label className="full-width">Explicit schema password (optional)
+          <input type="password" value={explicitPassword} onChange={(e) => setExplicitPassword(e.target.value)} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder="Leave empty to use the password pattern / OBMA vault convention"/>
+          <small>If entered, this takes precedence over the pattern. Stored encrypted for the datasource operation and never displayed again.</small>
+        </label>
+        <label className="full-width">Schema password pattern (optional for OBMA)
+          <input type="password" value={passwordPattern} onChange={(e) => setPasswordPattern(e.target.value)} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder={OBMA_APPS.has(selectedEnvironment?.application.toUpperCase() || "") ? "Vault: schma_fpwd + {username} + schma_pwd" : "{username}_TXS1T"}/>
+          <small>{OBMA_APPS.has(selectedEnvironment?.application.toUpperCase() || "")
+            ? "Default: schma_fpwd + schema username + schma_pwd, resolved securely from Ansible Vault. A custom pattern overrides this default; {username} is replaced for each datasource."
+            : "Use {username} for the schema user. Specify this or an explicit password; the saved pattern can be reused when creating the same entity."}</small>
         </label>
 
         {datasourceType === "gridlink" && <label className="full-width">ONS nodes<input required={operationMode === "create"} value={onsNodes} onChange={(e) => setOnsNodes(e.target.value)} placeholder="host1:6200,host2:6200"/><small>{operationMode === "update" ? "Leave blank to preserve the datasource's current ONS/FAN settings." : "Required for GridLink datasource creation."}</small></label>}
