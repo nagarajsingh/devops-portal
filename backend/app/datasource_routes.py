@@ -21,6 +21,9 @@ from .datasource_store import (
 from .logging_config import get_logger
 from .models import UserContext
 
+OBMA_APPLICATIONS = {"OBTFPM", "CMNCORE", "MOCORE", "PLATO", "OBLM", "OBLMIC", "OBVAM", "OBVAMIC"}
+OBMA_VAULT_PATTERN = "__OBMA_VAULT_SCHEMA_PASSWORD__"
+
 router = APIRouter(prefix="/datasources", tags=["datasources"])
 logger = get_logger("datasources")
 
@@ -69,6 +72,7 @@ class DatasourcePreviewPayload(BaseModel):
     service_id: str = Field(min_length=1, max_length=100)
     schema_username: str = Field(min_length=1, max_length=100)
     password_pattern: SecretStr | None = None
+    explicit_password: SecretStr | None = None
     ons_nodes: str = Field(default="", max_length=1000)
     azure_devops_pat: SecretStr = Field(min_length=10)
 
@@ -152,6 +156,13 @@ def preview_datasources(
         if payload.password_pattern
         else None
     )
+
+    # Explicit password overrides a custom pattern; OBMA defaults to Vault prefix + schema + suffix.
+    explicit_password = payload.explicit_password.get_secret_value() if payload.explicit_password else None
+    if explicit_password:
+        password_pattern = explicit_password
+    elif not password_pattern and environment["application"].upper() in OBMA_APPLICATIONS:
+        password_pattern = OBMA_VAULT_PATTERN
 
     if operation_mode == "create":
         target_entity = payload.target_entity.strip().upper()
