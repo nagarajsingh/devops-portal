@@ -86,7 +86,7 @@ function readPat() {
 
 function statusClass(status?: string) {
   const value = String(status || "").toLowerCase();
-  if (value.includes("complete") || value.includes("previewed") || value.includes("created") || value === "ready") return "success";
+  if (value.includes("complete") || value.includes("previewed") || value.includes("created") || value.includes("updated") || value === "ready") return "success";
   if (value.includes("fail") || value.includes("invalid") || value.includes("already")) return "danger";
   if (value.includes("running") || value.includes("queued")) return "warning";
   return "neutral";
@@ -553,7 +553,10 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
         <div><small>Target entity</small><strong>{selectedOperation.target_entity}</strong></div>
         <div><small>Schema user</small><strong>{selectedOperation.schema_username}</strong></div>
         <div><small>Pipeline run</small><strong>#{selectedOperation.azure_run_id || "—"}</strong></div>
-        <div className="full-width"><small>Datasource names</small><strong>{(plan.summary?.created_names?.length ? plan.summary.created_names : createdItems.map((item) => item.target_name)).join(", ") || "—"}</strong></div>
+        <div className="full-width"><small>Datasource names</small><strong>{[
+          ...(plan.summary?.created_names?.length ? plan.summary.created_names : createdItems.map((item) => item.target_name)),
+          ...(plan.summary?.updated_names?.length ? plan.summary.updated_names : updatedItems.map((item) => item.target_name)),
+        ].join(", ") || "—"}</strong></div>
       </div>}
 
       <div className="table-card">
