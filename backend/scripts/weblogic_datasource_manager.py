@@ -248,9 +248,9 @@ def dsportal_matches_reference(ds, reference_entity, datasource_type):
 
 
 def dsportal_matches_plato_reference(ds, reference_entity, datasource_type):
-    # Country/entity-specific PLATO datasource families. Base PLATO,
-    # PLATOBATCH, PLATOSECURITY and PLATOUI are shared resources and are not
-    # cloned per entity.
+    # Country/entity-specific PLATO datasource families. CMNCORE and SMS are
+    # also entity-specific. Base PLATO, PLATOBATCH, PLATOSECURITY and PLATOUI
+    # are shared resources and are not cloned per entity.
     if datasource_type != "gridlink":
         return False
     if not dsportal_is_gridlink(ds):
@@ -258,11 +258,13 @@ def dsportal_matches_plato_reference(ds, reference_entity, datasource_type):
 
     entity = reference_entity.upper()
     expected_names = [
+        ("CMNCORE" + entity).lower(),
         ("PLATO-O" + entity).lower(),
         ("PLATOALERTS" + entity).lower(),
         ("PLATOFEED" + entity).lower(),
         ("PLATOREPORTS" + entity).lower(),
         ("PLATORULE" + entity).lower(),
+        ("SMS" + entity).lower(),
     ]
     return dsportal_text(ds.getName()).lower() in expected_names
 
