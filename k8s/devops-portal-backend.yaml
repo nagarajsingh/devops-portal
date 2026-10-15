@@ -220,6 +220,8 @@ stringData:
   JWT_SECRET: "replace-with-a-long-random-value"
   # Generate with: python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
   CREDENTIAL_ENCRYPTION_KEY: "replace-with-fernet-key"
+  # Shared service token used only by the datasource Azure pipeline to fetch runtime credentials.
+  DATASOURCE_PIPELINE_API_TOKEN: "replace-with-a-long-random-value"
   DEVOPS_USERNAME: "devops"
   DEVOPS_PASSWORD: "change-me"
   DEVELOPER_USERNAME: "developer"
