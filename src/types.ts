@@ -16,10 +16,18 @@ export interface PipelineRequest extends PipelineRequestInput{id:string;requeste
 export interface ReviewUpdate extends PipelineRequestInput{review_comments?:string;}
 
 
+export interface DatasourceApplication {
+  id:number;
+  code:string;
+  display_name:string;
+  is_active:boolean;
+}
+
 export interface DatasourceEntityProfile {
   id:number;
   entity_code:string;
   service_id:string;
+  schema_username:string;
   db_host:string;
   db_port:number;
   ons_nodes:string;
@@ -38,6 +46,10 @@ export interface WebLogicEnvironment {
   admin_port:number;
   ssh_port:number;
   wlst_path:string;
+  artifacts_location:string;
+  common_artifacts_location:string;
+  cz_config_location:string;
+  ear_path:string;
   agent_pool:string;
   default_db_host:string;
   default_db_port:number;
@@ -71,6 +83,13 @@ export interface DatasourcePlanItem {
   missing_targets?:string[];
 }
 
+export interface DatasourcePlanSummary {
+  total:number;
+  created_count:number;
+  created_names:string[];
+  ready_count:number;
+}
+
 export interface DatasourcePlan {
   request_id:string;
   application:string;
@@ -81,6 +100,7 @@ export interface DatasourcePlan {
   reference_entity:string;
   target_entity:string;
   datasources:DatasourcePlanItem[];
+  summary?:DatasourcePlanSummary;
 }
 
 export interface DatasourceOperation {
@@ -93,6 +113,7 @@ export interface DatasourceOperation {
   db_host:string;
   db_port:number;
   service_id:string;
+  schema_username:string;
   ons_nodes:string;
   status:string;
   requested_by:string;
