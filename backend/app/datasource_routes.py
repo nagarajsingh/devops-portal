@@ -168,20 +168,18 @@ def preview_datasources(
         if payload.password_pattern
         else None
     )
-    if password_pattern:
-        upsert_entity_profile(
-            payload.environment_instance_id,
-            target_entity,
-            payload.service_id,
-            payload.schema_username,
-            payload.db_host,
-            payload.db_port,
-            payload.ons_nodes,
-            password_pattern,
-        )
-    else:
-        existing = get_entity_runtime(payload.environment_instance_id, target_entity)
-        password_pattern = existing["password_pattern"]
+    upsert_entity_profile(
+        payload.environment_instance_id,
+        target_entity,
+        payload.service_id,
+        payload.schema_username,
+        payload.db_host,
+        payload.db_port,
+        payload.ons_nodes,
+        password_pattern,
+    )
+    existing = get_entity_runtime(payload.environment_instance_id, target_entity)
+    password_pattern = existing["password_pattern"]
 
     operation = create_operation(
         payload.environment_instance_id,
