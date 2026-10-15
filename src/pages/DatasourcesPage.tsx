@@ -349,8 +349,12 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     try {
       const result = await applyDatasourceOperation(selectedOperation.id, pat, token);
       setSelectedOperation(result);
-      const count = result.preview?.summary?.created_count ?? result.preview?.datasources.filter((item) => item.status === "Created").length ?? 0;
-      setNotice({ variant: "success", message: `${result.request_id} completed successfully. ${count} datasource(s) created.` });
+      const created = result.preview?.summary?.created_count ?? result.preview?.datasources.filter((item) => item.status === "Created").length ?? 0;
+      const updated = result.preview?.summary?.updated_count ?? result.preview?.datasources.filter((item) => item.status === "Updated").length ?? 0;
+      const detail = updated > 0
+        ? `${updated} datasource(s) updated${created > 0 ? ` and ${created} created` : ""}.`
+        : `${created} datasource(s) created.`;
+      setNotice({ variant: "success", message: `${result.request_id} completed successfully. ${detail}` });
       await load();
     } catch (error) {
       setNotice({ variant: "error", message: error instanceof Error ? error.message : "Unable to create datasource changes" });
@@ -362,6 +366,8 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
   const artifactPreview = derivedArtifactPaths(environmentForm.environment, environmentForm.artifacts_location);
   const plan = selectedOperation?.preview;
   const createdItems = plan?.datasources.filter((item) => item.status === "Created") || [];
+  const updatedItems = plan?.datasources.filter((item) => item.status === "Updated") || [];
+  const hasUpdates = Boolean(plan?.datasources.some((item) => item.change_type === "Update"));
   const canPreview = Boolean(
     selectedEnvironment &&
     referenceEntity.trim() &&
@@ -543,6 +549,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
 
       {selectedOperation.status === "Completed" && <div className="datasource-created-summary">
         <div><small>Datasources created</small><strong>{plan.summary?.created_count ?? createdItems.length}</strong></div>
+        <div><small>Datasources updated</small><strong>{plan.summary?.updated_count ?? updatedItems.length}</strong></div>
         <div><small>Target entity</small><strong>{selectedOperation.target_entity}</strong></div>
         <div><small>Schema user</small><strong>{selectedOperation.schema_username}</strong></div>
         <div><small>Pipeline run</small><strong>#{selectedOperation.azure_run_id || "—"}</strong></div>
@@ -560,14 +567,14 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
             <td><small>{item.target_url}</small></td>
             <td>{item.source_targets?.join(", ") || "—"}<small>→ {item.target_targets?.join(", ") || "—"}</small></td>
             <td>{item.driver_name?.includes("XA") ? "XA" : "Generic"}</td>
-            <td><span className={`status ${statusClass(item.status)}`}>{item.status}</span>{item.missing_targets?.length ? <small>Missing: {item.missing_targets.join(", ")}</small> : null}</td>
+            <td><span className={`status ${statusClass(item.status)}`}>{item.status}</span>{item.change_type ? <small>{item.change_type}</small> : null}{item.missing_targets?.length ? <small>Missing: {item.missing_targets.join(", ")}</small> : null}</td>
           </tr>)}</tbody>
         </table>
       </div>
 
       <div className="datasource-plan-actions">
         {selectedOperation.azure_run_url && <a href={selectedOperation.azure_run_url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Open Azure DevOps run</a>}
-        {selectedOperation.status === "Previewed" && <button className="primary-button" disabled={busy || plan.datasources.some((item) => item.status !== "Ready")} onClick={() => setConfirmApply(true)}>Create Datasources</button>}
+        {selectedOperation.status === "Previewed" && <button className="primary-button" disabled={busy || plan.datasources.some((item) => item.status !== "Ready")} onClick={() => setConfirmApply(true)}>{hasUpdates ? "Apply Datasource Updates" : "Create Datasources"}</button>}
       </div>
     </section>}
 
@@ -594,8 +601,8 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       open={confirmApply}
       variant="warning"
       eyebrow="WEBLOGIC CHANGE"
-      title="Create these datasources?"
-      message="This will trigger the datasource pipeline and apply the previewed changes to the selected WebLogic environment through WLST."
+      title={hasUpdates ? "Apply these datasource updates?" : "Create these datasources?"}
+      message={hasUpdates ? "This will update the existing target datasources in WebLogic through WLST using the previewed US-based configuration." : "This will trigger the datasource pipeline and apply the previewed changes to the selected WebLogic environment through WLST."}
       details={[
         { label: "Request", value: selectedOperation?.request_id || "" },
         { label: "Environment", value: selectedEnvironment ? `${selectedEnvironment.application} / ${selectedEnvironment.environment.toUpperCase()}` : "" },
@@ -603,7 +610,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
         { label: "Schema", value: selectedOperation?.schema_username || "" },
         { label: "Datasources", value: String(selectedOperation?.preview?.datasources?.length || 0) },
       ]}
-      primaryLabel="Create Datasources"
+      primaryLabel={hasUpdates ? "Apply Updates" : "Create Datasources"}
       secondaryLabel="Keep preview only"
       busy={busy}
       onPrimary={() => void apply()}
