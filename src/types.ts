@@ -40,6 +40,7 @@ export interface WebLogicEnvironment {
   application:string;
   environment:string;
   instance_name:string;
+  inventory_hostname:string;
   base_path:string;
   domain_name:string;
   admin_host:string;
