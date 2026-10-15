@@ -52,6 +52,21 @@ parameters:
   - name: weblogicUsername
     type: string
 
+  - name: operationMode
+    type: string
+    default: 'create'
+    values:
+      - create
+      - update
+
+  - name: datasourceName
+    type: string
+    default: ''
+
+  - name: targetTargets
+    type: string
+    default: ''
+
   - name: referenceEntity
     type: string
 
@@ -158,9 +173,9 @@ jobs:
           if str(config.get('environment', '')).lower() != environment:
               raise RuntimeError('Datasource config environment does not match pipeline request')
 
-          password_pattern = config.get('password_pattern')
+          password_pattern = os.environ.get('P_PASSWORD_PATTERN', '').strip()
           if not password_pattern:
-              raise RuntimeError('password_pattern is missing from datasource environment configuration')
+              raise RuntimeError('Datasource password pattern was not supplied as a secret run variable')
 
           payload = {
               'request_id': os.environ['P_REQUEST_ID'],
@@ -170,8 +185,15 @@ jobs:
               'domain_name': config['domain_name'],
               'admin_host': config['admin_host'],
               'admin_port': int(config['admin_port']),
+              'operation_mode': os.environ.get('P_OPERATION_MODE', 'create').lower(),
               'reference_entity': os.environ['P_REFERENCE_ENTITY'].upper(),
               'target_entity': target_entity,
+              'datasource_name': os.environ.get('P_DATASOURCE_NAME', '').strip(),
+              'target_targets': [
+                  value.strip()
+                  for value in os.environ.get('P_TARGET_TARGETS', '').split(',')
+                  if value.strip()
+              ],
               'datasource_type': os.environ['P_DATASOURCE_TYPE'].lower(),
               'db_host': os.environ['P_DB_HOST'],
               'db_port': int(os.environ['P_DB_PORT']),
@@ -259,6 +281,10 @@ jobs:
           P_REQUEST_ID: '${{ parameters.requestId }}'
           P_APPLICATION: '${{ parameters.application }}'
           P_ENVIRONMENT: '${{ parameters.environment }}'
+          P_OPERATION_MODE: '${{ parameters.operationMode }}'
+          P_DATASOURCE_NAME: '${{ parameters.datasourceName }}'
+          P_TARGET_TARGETS: '${{ parameters.targetTargets }}'
+          P_PASSWORD_PATTERN: '$(DS_PASSWORD_PATTERN)'
           P_REFERENCE_ENTITY: '${{ parameters.referenceEntity }}'
           P_TARGET_ENTITY: '${{ parameters.targetEntity }}'
           P_DATASOURCE_TYPE: '${{ parameters.datasourceType }}'
