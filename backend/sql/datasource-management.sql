@@ -97,6 +97,31 @@ BEGIN
 END;
 GO
 
+-- Migrate legacy datasource usernames to the environment table, then remove
+-- the old encrypted server-password rows. Server passwords are now sourced
+-- exclusively from datasource-config/<environment>/<application>.json.vault.
+UPDATE env
+SET env.weblogic_username = cred.username
+FROM weblogic_environment_instances env
+JOIN weblogic_credentials cred
+  ON cred.environment_instance_id = env.id
+ AND cred.credential_type = 'WEBLOGIC_ADMIN'
+WHERE NULLIF(LTRIM(RTRIM(env.weblogic_username)), '') IS NULL;
+GO
+
+UPDATE env
+SET env.ssh_username = cred.username
+FROM weblogic_environment_instances env
+JOIN weblogic_credentials cred
+  ON cred.environment_instance_id = env.id
+ AND cred.credential_type = 'SSH'
+WHERE NULLIF(LTRIM(RTRIM(env.ssh_username)), '') IS NULL;
+GO
+
+DELETE FROM weblogic_credentials
+WHERE credential_type IN ('WEBLOGIC_ADMIN', 'SSH');
+GO
+
 IF OBJECT_ID('datasource_entity_profiles', 'U') IS NULL
 BEGIN
     CREATE TABLE datasource_entity_profiles (
