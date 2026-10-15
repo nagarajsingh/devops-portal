@@ -16,6 +16,7 @@ from .config import (
     DATASOURCE_PIPELINE_POLL_SECONDS,
     DATASOURCE_PIPELINE_TIMEOUT_SECONDS,
     DATASOURCE_PREVIEW_ARTIFACT_NAME,
+    DATASOURCE_RUNTIME_API_URL,
 )
 from .logging_config import get_logger
 
@@ -105,27 +106,11 @@ def run_datasource_pipeline(
         "dbPort": str(operation["db_port"]),
         "serviceId": operation["service_id"],
         "schemaUsername": operation["schema_username"],
+        "runtimeApiUrl": DATASOURCE_RUNTIME_API_URL,
     }
 
     if operation["datasource_type"] == "gridlink":
         parameters["onsNodes"] = str(operation.get("ons_nodes") or "")
-
-    # Passwords are supplied as secret runtime variables rather than template
-    # parameters so Azure DevOps masks them in job output.
-    variables = {
-        "SSH_PASSWORD": {
-            "value": environment["ssh_password"],
-            "isSecret": True,
-        },
-        "WEBLOGIC_PASSWORD": {
-            "value": environment["weblogic_password"],
-            "isSecret": True,
-        },
-        "DATASOURCE_PASSWORD_PATTERN": {
-            "value": operation["password_pattern"],
-            "isSecret": True,
-        },
-    }
 
     logger.info(
         "Queueing datasource pipeline action=%s request_id=%s application=%s environment=%s reference_entity=%s target_entity=%s project=%s pipeline_id=%s",
@@ -142,7 +127,7 @@ def run_datasource_pipeline(
         "POST",
         f"_apis/pipelines/{pipeline_id}/runs?api-version=7.1",
         azure_devops_pat,
-        {"templateParameters": parameters, "variables": variables},
+        {"templateParameters": parameters},
         project=DATASOURCE_AZURE_DEVOPS_PROJECT,
     )
     if code not in (200, 201):
