@@ -197,6 +197,7 @@ def dsportal_capture_reference(ds, reference_entity, target_entity, request):
         "target_url": target_url,
         "driver_name": dsportal_text(driver.getDriverName()),
         "datasource_type": request["datasource_type"],
+        "operation_mode": "create",
         "datasource_attributes": dsportal_capture_attributes(params, DATASOURCE_ATTRIBUTES),
         "pool_attributes": dsportal_capture_attributes(pool, POOL_ATTRIBUTES),
         "driver_properties": properties,
@@ -237,7 +238,8 @@ def dsportal_capture_existing(ds, request):
         for value in requested_targets
         if dsportal_text(value).strip()
     ]
-    if not target_targets:
+    replace_targets = len(target_targets) > 0
+    if not replace_targets:
         target_targets = source_targets
 
     properties = {}
@@ -260,6 +262,8 @@ def dsportal_capture_existing(ds, request):
         "target_url": dsportal_target_url(request),
         "driver_name": dsportal_text(driver.getDriverName()),
         "datasource_type": request["datasource_type"],
+        "operation_mode": "update",
+        "replace_targets": replace_targets,
         "datasource_attributes": dsportal_capture_attributes(params, DATASOURCE_ATTRIBUTES),
         "pool_attributes": dsportal_capture_attributes(pool, POOL_ATTRIBUTES),
         "driver_properties": properties,
@@ -397,18 +401,21 @@ def dsportal_configure_datasource(ds, item, password_pattern, replace_targets):
     # existing values during updates and avoids unnecessary activation changes.
     if item.get("datasource_type") == "gridlink":
         ons_nodes = dsportal_text(item.get("ons_nodes") or "").strip()
-        if not ons_nodes:
+        if not ons_nodes and item.get("operation_mode") != "update":
             dsportal_fail("ONS nodes are required for GridLink datasource %s" % name)
 
-        oracle = resource.getJDBCOracleParams()
-        try:
-            oracle.setFanEnabled(True)
-        except:
-            pass
-        try:
-            oracle.setOnsNodeList(ons_nodes)
-        except:
-            pass
+        # For a single-datasource update, blank ONS means preserve the current
+        # GridLink ONS/FAN settings. Create mode still requires explicit ONS.
+        if ons_nodes:
+            oracle = resource.getJDBCOracleParams()
+            try:
+                oracle.setFanEnabled(True)
+            except:
+                pass
+            try:
+                oracle.setOnsNodeList(ons_nodes)
+            except:
+                pass
 
     if replace_targets:
         for current_target in (ds.getTargets() or []):
@@ -434,7 +441,12 @@ def dsportal_update_datasource(item, password_pattern):
     ds = dsportal_find_datasource(item["target_name"])
     if ds is None:
         dsportal_fail("Existing datasource %s was not found for update" % item["target_name"])
-    dsportal_configure_datasource(ds, item, password_pattern, True)
+    dsportal_configure_datasource(
+        ds,
+        item,
+        password_pattern,
+        item.get("replace_targets", True),
+    )
 
 
 def dsportal_create_datasource(item, password_pattern):
