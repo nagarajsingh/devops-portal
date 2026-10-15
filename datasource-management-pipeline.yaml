@@ -178,6 +178,15 @@ jobs:
           password_pattern = os.environ.get('P_PASSWORD_PATTERN', '').strip()
           if not password_pattern:
               raise RuntimeError('Datasource password pattern was not supplied as a secret run variable')
+          if password_pattern == '__OBMA_VAULT_SCHEMA_PASSWORD__':
+              if application not in {'OBTFPM', 'CMNCORE', 'MOCORE', 'PLATO', 'OBLM', 'OBLMIC', 'OBVAM', 'OBVAMIC'}:
+                  raise RuntimeError('Vault schema password convention is supported only for OBMA applications')
+              prefix = config.get('schma_fpwd')
+              suffix = config.get('schma_pwd')
+              if prefix is None or suffix is None:
+                  raise RuntimeError('Ansible Vault must provide schma_fpwd and schma_pwd for OBMA datasource passwords')
+              # WLST expands {username} to the actual datasource schema (per datasource).
+              password_pattern = str(prefix) + '{username}' + str(suffix)
 
           payload = {
               'request_id': os.environ['P_REQUEST_ID'],
