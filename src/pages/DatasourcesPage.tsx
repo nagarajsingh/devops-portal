@@ -105,6 +105,9 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
 
   const [selectedApplication, setSelectedApplication] = useState("");
   const [environmentId, setEnvironmentId] = useState<number>(0);
+  const [operationMode, setOperationMode] = useState<"create" | "update">("create");
+  const [datasourceName, setDatasourceName] = useState("");
+  const [targetTargets, setTargetTargets] = useState("");
   const [referenceEntity, setReferenceEntity] = useState("");
   const [targetEntity, setTargetEntity] = useState("");
   const [datasourceType, setDatasourceType] = useState<"standalone" | "gridlink">("standalone");
@@ -132,8 +135,10 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
   );
   const selectedEnvironment = environments.find((item) => item.id === environmentId) || null;
   const existingTargetProfile = useMemo(
-    () => selectedEnvironment?.entities.find((item) => item.entity_code.toUpperCase() === targetEntity.trim().toUpperCase()) || null,
-    [selectedEnvironment, targetEntity],
+    () => operationMode === "create"
+      ? selectedEnvironment?.entities.find((item) => item.entity_code.toUpperCase() === targetEntity.trim().toUpperCase()) || null
+      : null,
+    [selectedEnvironment, targetEntity, operationMode],
   );
 
   async function load() {
@@ -183,6 +188,8 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     setOnsNodes(selectedEnvironment.default_ons_nodes || "");
     setTargetEntity("");
     setReferenceEntity("");
+    setDatasourceName("");
+    setTargetTargets("");
     setServiceId("");
     setSchemaUsername("");
     setPasswordPattern("");
@@ -306,7 +313,11 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
   async function preview(event: FormEvent) {
     event.preventDefault();
     if (!selectedEnvironment) return;
-    if (!passwordPattern && !existingTargetProfile?.password_pattern_configured) {
+    if (operationMode === "update" && !passwordPattern) {
+      setNotice({ variant: "error", message: "Schema password pattern is required when updating an existing datasource." });
+      return;
+    }
+    if (operationMode === "create" && !passwordPattern && !existingTargetProfile?.password_pattern_configured) {
       setNotice({ variant: "error", message: "Schema password pattern is required the first time this entity is configured." });
       return;
     }
@@ -316,8 +327,13 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     try {
       const result = await previewDatasources({
         environment_instance_id: selectedEnvironment.id,
-        reference_entity: referenceEntity,
-        target_entity: targetEntity,
+        operation_mode: operationMode,
+        reference_entity: operationMode === "create" ? referenceEntity : "",
+        target_entity: operationMode === "create" ? targetEntity : "",
+        datasource_name: operationMode === "update" ? datasourceName.trim() : "",
+        target_targets: operationMode === "update"
+          ? targetTargets.split(",").map((value) => value.trim()).filter(Boolean)
+          : [],
         datasource_type: datasourceType,
         db_host: dbHost,
         db_port: Number(dbPort),
@@ -331,7 +347,9 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       setSelectedOperation(result);
       setNotice({
         variant: "success",
-        message: `Preview ${result.request_id} completed from live WebLogic. Review the proposed datasource names and targets before creation.`,
+        message: operationMode === "update"
+          ? `Preview ${result.request_id} completed for ${datasourceName}. Review the exact changes before applying.`
+          : `Preview ${result.request_id} completed from live WebLogic. Review the proposed datasource names and targets before creation.`,
       });
       await load();
     } catch (error) {
@@ -370,11 +388,13 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
   const hasUpdates = Boolean(plan?.datasources.some((item) => item.change_type === "Update"));
   const canPreview = Boolean(
     selectedEnvironment &&
-    referenceEntity.trim() &&
-    targetEntity.trim() &&
+    (operationMode === "create"
+      ? referenceEntity.trim() && targetEntity.trim()
+      : datasourceName.trim() && passwordPattern.trim()) &&
     serviceId.trim() &&
     schemaUsername.trim() &&
     dbHost.trim() &&
+    (datasourceType === "standalone" || onsNodes.trim()) &&
     pat.trim() &&
     !busy
   );
@@ -384,7 +404,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       <div>
         <span className="eyebrow">WEBLOGIC AUTOMATION</span>
         <h1>Datasources</h1>
-        <p>Maintain WebLogic server details in the portal database, clone datasource configuration from a live reference entity and create the new entity through WLST.</p>
+        <p>Create complete datasource sets from a live reference entity or update one existing WebLogic datasource through the same WLST automation.</p>
       </div>
       <Database size={46} />
     </section>
@@ -465,8 +485,17 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
 
     <section className="datasource-workspace">
       <div className="datasource-section-title">
-        <div><Eye size={21}/><div><h2>Create datasources for an entity</h2><p>Select the application and environment first. The stored WebLogic configuration is shown before datasource-specific input is accepted.</p></div></div>
+        <div><Eye size={21}/><div><h2>Datasource operations</h2><p>Choose a complete/new datasource setup or update exactly one existing datasource.</p></div></div>
         <button className="secondary-button" type="button" onClick={() => void load()}><RefreshCw size={15}/>Refresh</button>
+      </div>
+
+      <div className="datasource-mode-menu">
+        <button type="button" className={operationMode === "create" ? "active" : ""} onClick={() => { setOperationMode("create"); setSelectedOperation(null); setPasswordPattern(""); }}>
+          <Plus size={18}/><span><strong>Create Datasource</strong><small>New or complete setup from a reference entity</small></span>
+        </button>
+        <button type="button" className={operationMode === "update" ? "active" : ""} onClick={() => { setOperationMode("update"); setSelectedOperation(null); setPasswordPattern(""); }}>
+          <Settings size={18}/><span><strong>Update Datasource</strong><small>Update one existing datasource only</small></span>
+        </button>
       </div>
 
       <form className="form-card datasource-operation-form" onSubmit={preview}>
@@ -510,14 +539,21 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
         </div>}
 
         <div className="full-width datasource-subheading">
-          <strong>Datasource details</strong>
-          <span>These values are specific to the entity you are creating.</span>
+          <strong>{operationMode === "create" ? "Create datasource details" : "Update datasource details"}</strong>
+          <span>{operationMode === "create"
+            ? "The reference entity supplies the datasource structure; these values are applied to the target entity."
+            : "Only the exact datasource named below will be updated. Connection values come from this form."}</span>
         </div>
 
-        <label>Reference entity<input required value={referenceEntity} onChange={(e) => setReferenceEntity(e.target.value.toUpperCase())} placeholder="QA"/></label>
-        <label>Target entity<input required value={targetEntity} onChange={(e) => setTargetEntity(e.target.value.toUpperCase())} placeholder="IN" list="configured-datasource-entities"/></label>
-        <datalist id="configured-datasource-entities">{selectedEnvironment?.entities.map((item) => <option key={item.id} value={item.entity_code}/>)}</datalist>
-        <label>Datasource type<select value={datasourceType} onChange={(e) => setDatasourceType(e.target.value as "standalone" | "gridlink")}><option value="standalone">Standalone</option><option value="gridlink">GridLink</option></select><small>Used only to filter the live WebLogic reference datasources.</small></label>
+        {operationMode === "create" ? <>
+          <label>Reference entity<input required value={referenceEntity} onChange={(e) => setReferenceEntity(e.target.value.toUpperCase())} placeholder="QA"/></label>
+          <label>Target entity<input required value={targetEntity} onChange={(e) => setTargetEntity(e.target.value.toUpperCase())} placeholder="IN" list="configured-datasource-entities"/></label>
+          <datalist id="configured-datasource-entities">{selectedEnvironment?.entities.map((item) => <option key={item.id} value={item.entity_code}/>)}</datalist>
+        </> : <>
+          <label className="full-width">Existing datasource name<input required value={datasourceName} onChange={(e) => setDatasourceName(e.target.value)} placeholder="jdbc/fcjdevDSIN"/><small>The name must exactly match the datasource in WebLogic. Preview validates it before Apply.</small></label>
+          <label className="full-width">Targets<input value={targetTargets} onChange={(e) => setTargetTargets(e.target.value)} placeholder="OBPAPP, OBPGW"/><small>Comma-separated. Leave blank to keep the datasource's current targets.</small></label>
+        </>}
+        <label>Datasource type<select value={datasourceType} onChange={(e) => setDatasourceType(e.target.value as "standalone" | "gridlink")}><option value="standalone">Standalone</option><option value="gridlink">GridLink</option></select><small>{operationMode === "create" ? "Filters the live reference datasource set." : "Must match the existing datasource type."}</small></label>
 
         <label>Database host<input required value={dbHost} onChange={(e) => setDbHost(e.target.value)} placeholder="gtbtxcoreobpmdbsit.uat.mashreqdev.com"/></label>
         <label>Database port<input type="number" min={1} max={65535} required value={dbPort} onChange={(e) => setDbPort(Number(e.target.value))}/></label>
@@ -525,8 +561,8 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
         <label>Schema user<input required value={schemaUsername} onChange={(e) => setSchemaUsername(e.target.value.toUpperCase())} placeholder="OBPIN"/><small>This target schema user is applied to the datasource(s) being created or updated.</small></label>
 
         <label className="full-width">Schema password pattern
-          <input type="password" value={passwordPattern} onChange={(e) => setPasswordPattern(e.target.value)} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder={existingTargetProfile?.password_pattern_configured ? "Leave blank to reuse encrypted saved pattern" : "{username}_TXS1T"}/>
-          <small>Use {"{username}"} where the schema user should be inserted. The value is encrypted before it is stored.</small>
+          <input type="password" value={passwordPattern} onChange={(e) => setPasswordPattern(e.target.value)} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder={operationMode === "create" && existingTargetProfile?.password_pattern_configured ? "Leave blank to reuse encrypted saved pattern" : "{username}_TXS1T"}/>
+          <small>Use {"{username}"} where the schema user should be inserted. The value is encrypted in the portal and sent to Azure DevOps as a secret run variable.</small>
         </label>
 
         {datasourceType === "gridlink" && <label className="full-width">ONS nodes<input required value={onsNodes} onChange={(e) => setOnsNodes(e.target.value)} placeholder="host1:6200,host2:6200"/></label>}
@@ -543,14 +579,14 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
 
     {plan && selectedOperation && <section className="datasource-plan">
       <div className="datasource-section-title">
-        <div><Database size={21}/><div><h2>{selectedOperation.status === "Completed" ? "Creation overview" : `Preview · ${selectedOperation.request_id}`}</h2><p>{plan.application} / {plan.environment.toUpperCase()} · {plan.reference_entity} → {plan.target_entity}</p></div></div>
+        <div><Database size={21}/><div><h2>{selectedOperation.status === "Completed" ? (selectedOperation.operation_mode === "update" ? "Update overview" : "Creation overview") : `Preview · ${selectedOperation.request_id}`}</h2><p>{plan.application} / {plan.environment.toUpperCase()} · {selectedOperation.operation_mode === "update" ? selectedOperation.datasource_name : `${plan.reference_entity} → ${plan.target_entity}`}</p></div></div>
         <span className={`status ${statusClass(selectedOperation.status)}`}>{selectedOperation.status}</span>
       </div>
 
       {selectedOperation.status === "Completed" && <div className="datasource-created-summary">
         <div><small>Datasources created</small><strong>{plan.summary?.created_count ?? createdItems.length}</strong></div>
         <div><small>Datasources updated</small><strong>{plan.summary?.updated_count ?? updatedItems.length}</strong></div>
-        <div><small>Target entity</small><strong>{selectedOperation.target_entity}</strong></div>
+        <div><small>{selectedOperation.operation_mode === "update" ? "Datasource" : "Target entity"}</small><strong>{selectedOperation.operation_mode === "update" ? selectedOperation.datasource_name : selectedOperation.target_entity}</strong></div>
         <div><small>Schema user</small><strong>{selectedOperation.schema_username || "—"}</strong></div>
         <div><small>Pipeline run</small><strong>#{selectedOperation.azure_run_id || "—"}</strong></div>
         <div className="full-width"><small>Datasource names</small><strong>{[
@@ -583,13 +619,14 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     </section>}
 
     <section className="datasource-history">
-      <div className="datasource-section-title"><div><Database size={21}/><div><h2>Recent datasource operations</h2><p>Preview and creation history. Passwords and password patterns are never returned in this view.</p></div></div></div>
+      <div className="datasource-section-title"><div><Database size={21}/><div><h2>Recent datasource operations</h2><p>Create and update history. Passwords and password patterns are never returned in this view.</p></div></div></div>
       <div className="table-card">
         <table>
-          <thead><tr><th>Request</th><th>Reference → Target</th><th>Schema</th><th>Type</th><th>Requested by</th><th>Status</th><th>Updated</th><th>Run</th></tr></thead>
+          <thead><tr><th>Request</th><th>Operation</th><th>Datasource / Entity</th><th>Schema</th><th>Type</th><th>Requested by</th><th>Status</th><th>Updated</th><th>Run</th></tr></thead>
           <tbody>{operations.map((item) => <tr key={item.id} onClick={() => item.preview && setSelectedOperation(item)} className={item.preview ? "datasource-history-clickable" : ""}>
             <td><strong>{item.request_id}</strong></td>
-            <td>{item.reference_entity} → <strong>{item.target_entity}</strong></td>
+            <td>{item.operation_mode === "update" ? "Update" : "Create"}</td>
+            <td>{item.operation_mode === "update" ? <strong>{item.datasource_name}</strong> : <>{item.reference_entity} → <strong>{item.target_entity}</strong></>}</td>
             <td>{item.schema_username || "—"}</td>
             <td>{item.datasource_type}</td>
             <td>{item.requested_by}</td>
@@ -606,11 +643,11 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       variant="warning"
       eyebrow="WEBLOGIC CHANGE"
       title={hasUpdates ? "Apply these datasource updates?" : "Create these datasources?"}
-      message={hasUpdates ? "This will update the existing target datasources in WebLogic through WLST using the previewed US-based configuration." : "This will trigger the datasource pipeline and apply the previewed changes to the selected WebLogic environment through WLST."}
+      message={hasUpdates ? "This will update the previewed existing datasource configuration in WebLogic through WLST and activate the changes." : "This will trigger the datasource pipeline and apply the previewed changes to the selected WebLogic environment through WLST."}
       details={[
         { label: "Request", value: selectedOperation?.request_id || "" },
         { label: "Environment", value: selectedEnvironment ? `${selectedEnvironment.application} / ${selectedEnvironment.environment.toUpperCase()}` : "" },
-        { label: "Entity", value: selectedOperation ? `${selectedOperation.reference_entity} → ${selectedOperation.target_entity}` : "" },
+        { label: selectedOperation?.operation_mode === "update" ? "Datasource" : "Entity", value: selectedOperation?.operation_mode === "update" ? (selectedOperation.datasource_name || "") : (selectedOperation ? `${selectedOperation.reference_entity} → ${selectedOperation.target_entity}` : "") },
         { label: "Schema", value: selectedOperation?.schema_username || "" },
         { label: "Datasources", value: String(selectedOperation?.preview?.datasources?.length || 0) },
       ]}
