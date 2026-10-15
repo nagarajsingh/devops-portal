@@ -38,6 +38,8 @@ BEGIN
         admin_host VARCHAR(255) NOT NULL,
         admin_port INT NOT NULL,
         ssh_port INT NOT NULL CONSTRAINT df_weblogic_ssh_port DEFAULT 22,
+        weblogic_username VARCHAR(255) NULL,
+        ssh_username VARCHAR(255) NULL,
         wlst_path VARCHAR(500) NOT NULL,
         artifacts_location VARCHAR(255) NULL,
         common_artifacts_location VARCHAR(500) NULL,
@@ -58,6 +60,12 @@ GO
 
 IF COL_LENGTH('weblogic_environment_instances', 'inventory_hostname') IS NULL
     ALTER TABLE weblogic_environment_instances ADD inventory_hostname VARCHAR(255) NULL;
+GO
+IF COL_LENGTH('weblogic_environment_instances', 'weblogic_username') IS NULL
+    ALTER TABLE weblogic_environment_instances ADD weblogic_username VARCHAR(255) NULL;
+GO
+IF COL_LENGTH('weblogic_environment_instances', 'ssh_username') IS NULL
+    ALTER TABLE weblogic_environment_instances ADD ssh_username VARCHAR(255) NULL;
 GO
 IF COL_LENGTH('weblogic_environment_instances', 'artifacts_location') IS NULL
     ALTER TABLE weblogic_environment_instances ADD artifacts_location VARCHAR(255) NULL;
