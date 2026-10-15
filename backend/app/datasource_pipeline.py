@@ -104,6 +104,7 @@ def run_datasource_pipeline(
         "dbHost": operation["db_host"],
         "dbPort": str(operation["db_port"]),
         "serviceId": operation["service_id"],
+        "schemaUsername": operation["schema_username"],
         "onsNodes": operation.get("ons_nodes") or "",
     }
 
