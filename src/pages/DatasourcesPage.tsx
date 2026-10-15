@@ -356,7 +356,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
         azure_devops_pat: pat,
       }, token);
       setPasswordPattern("");
-    setExplicitPassword("");
+      setExplicitPassword("");
       setSelectedOperation(result);
       setNotice({
         variant: "success",
