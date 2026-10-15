@@ -57,6 +57,9 @@ def initialize_datasource_database() -> None:
         },
         "datasource_operations": {
             "schema_username": "VARCHAR(100) NULL",
+            "operation_mode": "VARCHAR(20) NULL",
+            "datasource_name": "VARCHAR(255) NULL",
+            "target_targets": "VARCHAR(2000) NULL",
         },
     }
     with engine.begin() as connection:
@@ -242,6 +245,9 @@ class DatasourceOperation(Base):
     )
     reference_entity: Mapped[str] = mapped_column(String(30), nullable=False)
     target_entity: Mapped[str] = mapped_column(String(30), nullable=False)
+    operation_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    datasource_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target_targets: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     datasource_type: Mapped[str] = mapped_column(String(30), nullable=False)
     db_host: Mapped[str] = mapped_column(String(255), nullable=False)
     db_port: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -640,6 +646,9 @@ def create_operation(
     environment_id: int,
     reference_entity: str,
     target_entity: str,
+    operation_mode: str,
+    datasource_name: str,
+    target_targets: list[str],
     datasource_type: str,
     db_host: str,
     db_port: int,
@@ -655,6 +664,9 @@ def create_operation(
             environment_instance_id=environment_id,
             reference_entity=reference_entity.strip().upper(),
             target_entity=target_entity.strip().upper(),
+            operation_mode=operation_mode.strip().lower(),
+            datasource_name=datasource_name.strip() or None,
+            target_targets=",".join([value.strip() for value in target_targets if value.strip()]) or None,
             datasource_type=datasource_type.strip().lower(),
             db_host=db_host.strip(),
             db_port=int(db_port),
@@ -686,6 +698,9 @@ def operation_view(row: DatasourceOperation) -> dict[str, Any]:
         "environment_instance_id": row.environment_instance_id,
         "reference_entity": row.reference_entity,
         "target_entity": row.target_entity,
+        "operation_mode": row.operation_mode or "create",
+        "datasource_name": row.datasource_name or "",
+        "target_targets": [value.strip() for value in (row.target_targets or "").split(",") if value.strip()],
         "datasource_type": row.datasource_type,
         "db_host": row.db_host,
         "db_port": row.db_port,
