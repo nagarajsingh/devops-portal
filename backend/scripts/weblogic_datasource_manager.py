@@ -1,6 +1,4 @@
 # WLST/Jython script. Keep Python 2.7-compatible syntax for WebLogic installations.
-from __future__ import print_function
-
 import json
 import os
 import re
