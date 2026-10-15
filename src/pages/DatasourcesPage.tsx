@@ -561,7 +561,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
 
       <div className="table-card">
         <table>
-          <thead><tr><th>Reference</th><th>Datasource</th><th>JNDI</th><th>Schema</th><th>Database</th><th>Targets</th><th>Type</th><th>Status</th></tr></thead>
+          <thead><tr><th>Reference</th><th>Datasource</th><th>JNDI</th><th>Schema</th><th>Database</th><th>Targets</th><th>Resource Type</th><th>Driver Type</th><th>Status</th></tr></thead>
           <tbody>{plan.datasources.map((item) => <tr key={item.target_name}>
             <td><strong>{item.source_name}</strong><small>{item.source_jndis?.join(", ") || "—"}</small></td>
             <td><strong>{item.target_name}</strong></td>
@@ -569,7 +569,8 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
             <td>{item.source_user} → <strong>{item.target_user}</strong></td>
             <td><small>{item.target_url}</small></td>
             <td>{item.source_targets?.join(", ") || "—"}<small>→ {item.target_targets?.join(", ") || "—"}</small></td>
-            <td>{item.driver_name?.includes("XA") ? "XA" : "Generic"}</td>
+            <td>Generic</td>
+            <td>{item.driver_name?.toUpperCase().includes("XA") ? "XA" : "Generic"}<small>{item.driver_name || "—"}</small></td>
             <td><span className={`status ${statusClass(item.status)}`}>{item.status}</span>{item.change_type ? <small>{item.change_type}</small> : null}{item.missing_targets?.length ? <small>Missing: {item.missing_targets.join(", ")}</small> : null}</td>
           </tr>)}</tbody>
         </table>
