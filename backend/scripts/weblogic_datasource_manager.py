@@ -177,6 +177,7 @@ def dsportal_capture_reference(ds, reference_entity, target_entity, request):
         "source_url": dsportal_text(driver.getUrl()),
         "target_url": target_url,
         "driver_name": dsportal_text(driver.getDriverName()),
+        "datasource_type": request["datasource_type"],
         "datasource_attributes": dsportal_capture_attributes(params, DATASOURCE_ATTRIBUTES),
         "pool_attributes": dsportal_capture_attributes(pool, POOL_ATTRIBUTES),
         "driver_properties": properties,
@@ -397,26 +398,21 @@ def dsportal_configure_datasource(ds, item, password_pattern, replace_targets):
             prop = props.createProperty(prop_name)
         prop.setValue(item["driver_properties"][prop_name])
 
-    oracle = resource.getJDBCOracleParams()
-    if item.get("fan_enabled") or item.get("ons_nodes"):
+    # FAN and ONS are GridLink-only settings. For standalone
+    # datasources do not touch JDBCOracleParams at all; this preserves any
+    # existing values during updates and avoids unnecessary activation changes.
+    if item.get("datasource_type") == "gridlink":
+        ons_nodes = dsportal_text(item.get("ons_nodes") or "").strip()
+        if not ons_nodes:
+            dsportal_fail("ONS nodes are required for GridLink datasource %s" % name)
+
+        oracle = resource.getJDBCOracleParams()
         try:
             oracle.setFanEnabled(True)
         except:
             pass
-    else:
         try:
-            oracle.setFanEnabled(False)
-        except:
-            pass
-
-    if item.get("ons_nodes"):
-        try:
-            oracle.setOnsNodeList(item["ons_nodes"])
-        except:
-            pass
-    else:
-        try:
-            oracle.setOnsNodeList("")
+            oracle.setOnsNodeList(ons_nodes)
         except:
             pass
 
