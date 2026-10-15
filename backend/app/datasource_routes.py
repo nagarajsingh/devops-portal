@@ -37,8 +37,8 @@ class DatasourceEnvironmentPayload(BaseModel):
     wlst_path: str = Field(min_length=2, max_length=500)
     artifacts_location: str = Field(default="/azure_artifact", min_length=1, max_length=255)
     agent_pool: str = Field(min_length=2, max_length=100)
-    default_db_host: str = Field(min_length=2, max_length=255)
-    default_db_port: int = Field(ge=1, le=65535)
+    default_db_host: str = Field(default="", max_length=255)
+    default_db_port: int = Field(default=1531, ge=1, le=65535)
     default_ons_nodes: str = Field(default="", max_length=1000)
     weblogic_username: str = Field(default="", max_length=255)
     weblogic_password: SecretStr | None = None
