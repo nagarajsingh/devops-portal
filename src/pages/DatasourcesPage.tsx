@@ -17,6 +17,28 @@ const PAT_SESSION_KEY = "devops-portal-azure-pat";
 
 type Notice = { variant: "success" | "warning" | "error" | "info"; message: string };
 
+type EnvironmentPreset = {
+  inventory_hostname: string;
+  admin_host: string;
+};
+
+const TXCSIT_HOST_PRESETS: Record<string, EnvironmentPreset> = {
+  OBP: { inventory_hostname: "obp_txcsit_app1", admin_host: "172.24.178.164" },
+  OBTF: { inventory_hostname: "obtf_txcsit_app1", admin_host: "172.24.178.168" },
+  OBTFPM: { inventory_hostname: "obtfpm_txcsit_app1", admin_host: "172.24.178.167" },
+  OBLM: { inventory_hostname: "oblm_txcsit_app1", admin_host: "172.24.178.165" },
+  OBLMIC: { inventory_hostname: "oblmic_txcsit_app1", admin_host: "172.24.178.165" },
+  OBVAM: { inventory_hostname: "obvam_txcsit_app1", admin_host: "172.24.178.166" },
+  OBVAMIC: { inventory_hostname: "obvamic_txcsit_app1", admin_host: "172.24.178.166" },
+  PLATO: { inventory_hostname: "plato_txcsit_app1", admin_host: "172.24.178.169" },
+  CMNCORE: { inventory_hostname: "cmncore_txcsit_app1", admin_host: "172.24.178.169" },
+  MOCORE: { inventory_hostname: "moc_txcsit_app1", admin_host: "172.24.178.167" },
+};
+
+const TXCSIT_DB_HOST = "gtbtxcoreobpmdbsit.uat.mashreqdev.com";
+const TXCSIT_DB_PORT = 1531;
+const TXCSIT_ONS_NODES = "gtbtxcoreobpmdbsit.uat.mashreqdev.com:6200,gtbtxcoreobpmdbsit.uat.mashreqdev.com:6200";
+
 function wlstForBase(basePath: string) {
   const base = basePath.trim().replace(/\/$/, "");
   return base ? `${base}/Oracle/Middleware/Oracle_Home/oracle_common/common/bin/wlst.sh` : "";
@@ -213,6 +235,28 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     });
   }
 
+  function applyTxcsitPreset(application = environmentForm.application) {
+    const preset = TXCSIT_HOST_PRESETS[application];
+    if (!preset) {
+      setNotice({ variant: "warning", message: `No TXCSIT host preset is defined for ${application}.` });
+      return;
+    }
+    setEnvironmentForm((current) => ({
+      ...current,
+      application,
+      environment: "txcsit",
+      instance_name: "app1",
+      inventory_hostname: preset.inventory_hostname,
+      admin_host: preset.admin_host,
+      admin_port: current.admin_port || 5001,
+      artifacts_location: "/azure_artifact",
+      default_db_host: TXCSIT_DB_HOST,
+      default_db_port: TXCSIT_DB_PORT,
+      default_ons_nodes: TXCSIT_ONS_NODES,
+    }));
+    setNotice({ variant: "info", message: `Loaded TXCSIT host and database defaults for ${application}. Add/verify BASE, domain, users and passwords before saving.` });
+  }
+
   function changeBasePath(value: string) {
     setEnvironmentForm((current) => {
       const oldSuggested = wlstForBase(current.base_path);
@@ -365,7 +409,10 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       </div>
 
       <label>Application
-        <select required value={environmentForm.application} onChange={(e) => setEnvironmentForm({ ...environmentForm, application: e.target.value })}>
+        <select required value={environmentForm.application} onChange={(e) => {
+          const application = e.target.value;
+          setEnvironmentForm({ ...environmentForm, application });
+        }}>
           {applications.map((item) => <option key={item.id} value={item.code}>{item.display_name}</option>)}
         </select>
       </label>
@@ -403,8 +450,9 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       <label className="datasource-checkbox"><input type="checkbox" checked={environmentForm.is_production} onChange={(e) => setEnvironmentForm({ ...environmentForm, is_production: e.target.checked })}/>Production environment</label>
       <label className="datasource-checkbox"><input type="checkbox" checked={environmentForm.is_active} onChange={(e) => setEnvironmentForm({ ...environmentForm, is_active: e.target.checked })}/>Active</label>
 
-      <div className="full-width datasource-form-actions">
+      <div className="full-width datasource-form-actions datasource-admin-actions">
         <button className="primary-button" disabled={busy}><Save size={15}/>{busy ? "Saving..." : editingEnvironmentId ? "Update Database" : "Save to Database"}</button>
+        <button className="secondary-button" type="button" disabled={busy} onClick={() => applyTxcsitPreset()}>Load TXCSIT Defaults</button>
         <button className="secondary-button" type="button" disabled={busy} onClick={() => setShowConfig(false)}>Cancel</button>
       </div>
     </form>}
@@ -450,6 +498,9 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
           <div><small>WebLogic Password</small><strong>{selectedEnvironment.weblogic_password_configured ? "••••••••" : "Not configured"}</strong></div>
           <div><small>Ansible / SSH User</small><strong>{selectedEnvironment.ssh_username || "Not configured"}</strong></div>
           <div><small>Ansible / SSH Password</small><strong>{selectedEnvironment.ssh_password_configured ? "••••••••" : "Not configured"}</strong></div>
+          <div><small>Default DB Host</small><strong>{selectedEnvironment.default_db_host || "Not configured"}</strong></div>
+          <div><small>Default DB Port</small><strong>{selectedEnvironment.default_db_port || "Not configured"}</strong></div>
+          <div><small>Default ONS Nodes</small><strong>{selectedEnvironment.default_ons_nodes || "Not configured"}</strong></div>
         </div>}
 
         <div className="full-width datasource-subheading">
