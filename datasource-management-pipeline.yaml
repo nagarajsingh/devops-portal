@@ -96,6 +96,7 @@ jobs:
       - bash: |
           set -euo pipefail
           command -v sshpass >/dev/null
+          command -v ssh-keyscan >/dev/null
           command -v python3 >/dev/null
           test -f backend/scripts/weblogic_datasource_manager.py
         displayName: 'Validate execution agent'
@@ -137,8 +138,18 @@ jobs:
           P_SSH_PORT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ssh_port"])' "$LOCAL_RUNTIME")"
           P_WLST_PATH="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["wlst_path"])' "$LOCAL_RUNTIME")"
 
-          SSH_OPTS=(-p "$P_SSH_PORT" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$(Pipeline.Workspace)/datasource-known-hosts")
-          SCP_OPTS=(-P "$P_SSH_PORT" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$(Pipeline.Workspace)/datasource-known-hosts")
+          KNOWN_HOSTS="$(Pipeline.Workspace)/datasource-known-hosts"
+          rm -f "$KNOWN_HOSTS"
+          ssh-keyscan -p "$P_SSH_PORT" "$P_ADMIN_HOST" > "$KNOWN_HOSTS" 2>/dev/null
+          chmod 600 "$KNOWN_HOSTS"
+
+          if [[ ! -s "$KNOWN_HOSTS" ]]; then
+            echo "Unable to retrieve SSH host key for $P_ADMIN_HOST:$P_SSH_PORT"
+            exit 1
+          fi
+
+          SSH_OPTS=(-p "$P_SSH_PORT" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS")
+          SCP_OPTS=(-P "$P_SSH_PORT" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS")
 
           SSHPASS="$SSH_PASSWORD" sshpass -e ssh "${SSH_OPTS[@]}" "$P_SSH_USERNAME@$P_ADMIN_HOST" "mkdir -p '$REMOTE_DIR' && chmod 700 '$REMOTE_DIR'"
           SSHPASS="$SSH_PASSWORD" sshpass -e scp "${SCP_OPTS[@]}" "$LOCAL_REQUEST" backend/scripts/weblogic_datasource_manager.py "$P_SSH_USERNAME@$P_ADMIN_HOST:$REMOTE_DIR/"
