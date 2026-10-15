@@ -47,14 +47,18 @@ def read_property(driver_params, name):
 
 
 def bean_value(bean, name, default=None):
+    # WLST exposes some Java proxy attributes through getX() and boolean
+    # attributes through isX(). On some Jython/WebLogic combinations a missing
+    # proxy method raises a Java-backed AttributeError that does not reliably
+    # match "except Exception", so use bare except for this compatibility shim.
     try:
         getter = getattr(bean, "get" + name)
         return getter()
-    except Exception:
+    except:
         try:
             getter = getattr(bean, "is" + name)
             return getter()
-        except Exception:
+        except:
             return default
 
 
