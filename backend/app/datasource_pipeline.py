@@ -16,7 +16,6 @@ from .config import (
     DATASOURCE_PIPELINE_POLL_SECONDS,
     DATASOURCE_PIPELINE_TIMEOUT_SECONDS,
     DATASOURCE_PREVIEW_ARTIFACT_NAME,
-    DATASOURCE_RUNTIME_API_URL,
 )
 from .logging_config import get_logger
 
@@ -106,7 +105,6 @@ def run_datasource_pipeline(
         "dbPort": str(operation["db_port"]),
         "serviceId": operation["service_id"],
         "schemaUsername": operation["schema_username"],
-        "runtimeApiUrl": DATASOURCE_RUNTIME_API_URL,
     }
 
     if operation["datasource_type"] == "gridlink":
