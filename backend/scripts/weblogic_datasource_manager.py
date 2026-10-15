@@ -222,6 +222,9 @@ def dsportal_is_gridlink(ds):
 
 
 def dsportal_matches_reference(ds, reference_entity, datasource_type):
+    # Discover entity-specific datasources dynamically from live WebLogic.
+    # Match the exact entity suffix in datasource name, JNDI or schema user.
+    # The suffix boundary prevents IN from matching INGC.
     if datasource_type == "gridlink" and not dsportal_is_gridlink(ds):
         return False
     if datasource_type == "standalone" and dsportal_is_gridlink(ds):
@@ -245,28 +248,6 @@ def dsportal_matches_reference(ds, reference_entity, datasource_type):
     except Exception:
         pass
     return False
-
-
-def dsportal_matches_plato_reference(ds, reference_entity, datasource_type):
-    # Country/entity-specific PLATO datasource families. CMNCORE and SMS are
-    # also entity-specific. Base PLATO, PLATOBATCH, PLATOSECURITY and PLATOUI
-    # are shared resources and are not cloned per entity.
-    if datasource_type != "gridlink":
-        return False
-    if not dsportal_is_gridlink(ds):
-        return False
-
-    entity = reference_entity.upper()
-    expected_names = [
-        ("CMNCORE" + entity).lower(),
-        ("PLATO-O" + entity).lower(),
-        ("PLATOALERTS" + entity).lower(),
-        ("PLATOFEED" + entity).lower(),
-        ("PLATOREPORTS" + entity).lower(),
-        ("PLATORULE" + entity).lower(),
-        ("SMS" + entity).lower(),
-    ]
-    return dsportal_text(ds.getName()).lower() in expected_names
 
 
 def dsportal_target_mbean(name):
@@ -519,26 +500,15 @@ def dsportal_main():
     if application == "PLATO" and request["datasource_type"] != "gridlink":
         dsportal_fail("PLATO datasource automation requires datasource type gridlink")
 
-    if application == "PLATO":
-        matches = [
-            ds
-            for ds in (cmo.getJDBCSystemResources() or [])
-            if dsportal_matches_plato_reference(
-                ds,
-                reference_entity,
-                request["datasource_type"],
-            )
-        ]
-    else:
-        matches = [
-            ds
-            for ds in (cmo.getJDBCSystemResources() or [])
-            if dsportal_matches_reference(
-                ds,
-                reference_entity,
-                request["datasource_type"],
-            )
-        ]
+    matches = [
+        ds
+        for ds in (cmo.getJDBCSystemResources() or [])
+        if dsportal_matches_reference(
+            ds,
+            reference_entity,
+            request["datasource_type"],
+        )
+    ]
 
     if not matches:
         dsportal_fail(
