@@ -13,40 +13,40 @@ except Exception:
     String = None
 
 
-def fail(message):
+def dsportal_fail(message):
     raise RuntimeError(message)
 
 
-def text(value):
+def dsportal_text(value):
     if value is None:
         return ""
     return str(value)
 
 
-def replace_entity(value, reference_entity, target_entity):
+def dsportal_replace_entity(value, reference_entity, target_entity):
     if value is None:
         return value
     # Entity codes in current datasource naming conventions occur at the end
     # of a name or immediately before a suffix such as _GTXN / _XA. Restrict
     # replacement to that position so short codes such as IN or AE do not
-    # modify unrelated text.
+    # modify unrelated dsportal_text.
     return re.sub(
         re.escape(reference_entity) + r"(?=$|_)",
         target_entity,
-        text(value),
+        dsportal_text(value),
         flags=re.IGNORECASE,
     )
 
 
-def read_property(driver_params, name):
+def dsportal_read_property(driver_params, name):
     try:
         prop = driver_params.getProperties().lookupProperty(name)
-        return text(prop.getValue()) if prop else ""
+        return dsportal_text(prop.getValue()) if prop else ""
     except Exception:
         return ""
 
 
-def bean_value(bean, name, default=None):
+def dsportal_bean_value(bean, name, default=None):
     # WLST exposes some Java proxy attributes through getX() and boolean
     # attributes through isX(). On some Jython/WebLogic combinations a missing
     # proxy method raises a Java-backed AttributeError that does not reliably
@@ -62,16 +62,16 @@ def bean_value(bean, name, default=None):
             return default
 
 
-def capture_attributes(bean, names):
+def dsportal_capture_attributes(bean, names):
     values = {}
     for name in names:
-        value = bean_value(bean, name, None)
+        value = dsportal_bean_value(bean, name, None)
         if value is not None:
             values[name] = value
     return values
 
 
-def apply_attributes(bean, values):
+def dsportal_apply_attributes(bean, values):
     for name in values:
         try:
             setter = getattr(bean, "set" + name)
@@ -113,33 +113,33 @@ DATASOURCE_ATTRIBUTES = [
 ]
 
 
-def java_string_array(values):
+def dsportal_java_string_array(values):
     if jarray is None:
         return values
-    return jarray.array([String(text(value)) for value in values], String)
+    return jarray.array([String(dsportal_text(value)) for value in values], String)
 
 
-def capture_reference(ds, reference_entity, target_entity, request):
+def dsportal_capture_reference(ds, reference_entity, target_entity, request):
     resource = ds.getJDBCResource()
     params = resource.getJDBCDataSourceParams()
     driver = resource.getJDBCDriverParams()
     pool = resource.getJDBCConnectionPoolParams()
     oracle = resource.getJDBCOracleParams()
 
-    source_name = text(ds.getName())
-    target_name = replace_entity(source_name, reference_entity, target_entity)
-    jndis = [text(value) for value in (params.getJNDINames() or [])]
+    source_name = dsportal_text(ds.getName())
+    target_name = dsportal_replace_entity(source_name, reference_entity, target_entity)
+    jndis = [dsportal_text(value) for value in (params.getJNDINames() or [])]
     target_jndis = [
-        replace_entity(value, reference_entity, target_entity)
+        dsportal_replace_entity(value, reference_entity, target_entity)
         for value in jndis
     ]
-    source_user = read_property(driver, "user")
-    target_user = text(request.get("schema_username") or "").strip().upper()
+    source_user = dsportal_read_property(driver, "user")
+    target_user = dsportal_text(request.get("schema_username") or "").strip().upper()
 
     if not source_user:
-        fail("Reference datasource %s does not expose a JDBC user property" % source_name)
+        dsportal_fail("Reference datasource %s does not expose a JDBC user property" % source_name)
     if not target_user:
-        fail("Target schema username is required")
+        dsportal_fail("Target schema username is required")
 
     target_url = "jdbc:oracle:thin:@//%s:%s/%s" % (
         request["db_host"],
@@ -147,25 +147,25 @@ def capture_reference(ds, reference_entity, target_entity, request):
         request["service_id"],
     )
 
-    source_targets = [text(target.getName()) for target in (ds.getTargets() or [])]
+    source_targets = [dsportal_text(target.getName()) for target in (ds.getTargets() or [])]
     target_targets = [
-        replace_entity(value, reference_entity, target_entity)
+        dsportal_replace_entity(value, reference_entity, target_entity)
         for value in source_targets
     ]
 
     properties = {}
     try:
         for prop in driver.getProperties().getProperties():
-            prop_name = text(prop.getName())
+            prop_name = dsportal_text(prop.getName())
             if prop_name.lower() != "user":
-                properties[prop_name] = text(prop.getValue())
+                properties[prop_name] = dsportal_text(prop.getValue())
     except Exception:
         pass
 
-    ons_nodes = text(request.get("ons_nodes") or "")
-    source_ons = text(bean_value(oracle, "OnsNodeList", "") or "")
-    fan_value = bean_value(oracle, "FanEnabled", False)
-    fan_enabled = text(fan_value).strip().lower() in ("true", "1", "yes")
+    ons_nodes = dsportal_text(request.get("ons_nodes") or "")
+    source_ons = dsportal_text(dsportal_bean_value(oracle, "OnsNodeList", "") or "")
+    fan_value = dsportal_bean_value(oracle, "FanEnabled", False)
+    fan_enabled = dsportal_text(fan_value).strip().lower() in ("true", "1", "yes")
 
     return {
         "source_name": source_name,
@@ -174,11 +174,11 @@ def capture_reference(ds, reference_entity, target_entity, request):
         "target_jndis": target_jndis,
         "source_user": source_user,
         "target_user": target_user,
-        "source_url": text(driver.getUrl()),
+        "source_url": dsportal_text(driver.getUrl()),
         "target_url": target_url,
-        "driver_name": text(driver.getDriverName()),
-        "datasource_attributes": capture_attributes(params, DATASOURCE_ATTRIBUTES),
-        "pool_attributes": capture_attributes(pool, POOL_ATTRIBUTES),
+        "driver_name": dsportal_text(driver.getDriverName()),
+        "datasource_attributes": dsportal_capture_attributes(params, DATASOURCE_ATTRIBUTES),
+        "pool_attributes": dsportal_capture_attributes(pool, POOL_ATTRIBUTES),
         "driver_properties": properties,
         "source_targets": source_targets,
         "target_targets": target_targets,
@@ -188,36 +188,36 @@ def capture_reference(ds, reference_entity, target_entity, request):
     }
 
 
-def is_gridlink(ds):
+def dsportal_is_gridlink(ds):
     try:
         oracle = ds.getJDBCResource().getJDBCOracleParams()
-        fan_value = bean_value(oracle, "FanEnabled", False)
-        fan_enabled = text(fan_value).strip().lower() in ("true", "1", "yes")
-        ons_nodes = text(bean_value(oracle, "OnsNodeList", "") or "").strip()
+        fan_value = dsportal_bean_value(oracle, "FanEnabled", False)
+        fan_enabled = dsportal_text(fan_value).strip().lower() in ("true", "1", "yes")
+        ons_nodes = dsportal_text(dsportal_bean_value(oracle, "OnsNodeList", "") or "").strip()
         return fan_enabled or ons_nodes != ""
     except:
         return False
 
 
-def matches_reference(ds, reference_entity, datasource_type):
-    if datasource_type == "gridlink" and not is_gridlink(ds):
+def dsportal_matches_reference(ds, reference_entity, datasource_type):
+    if datasource_type == "gridlink" and not dsportal_is_gridlink(ds):
         return False
-    if datasource_type == "standalone" and is_gridlink(ds):
+    if datasource_type == "standalone" and dsportal_is_gridlink(ds):
         return False
 
     token = re.compile(
         re.escape(reference_entity) + r"(?=$|_)",
         flags=re.IGNORECASE,
     )
-    name = text(ds.getName())
+    name = dsportal_text(ds.getName())
     if token.search(name):
         return True
     try:
         resource = ds.getJDBCResource()
         for jndi in resource.getJDBCDataSourceParams().getJNDINames() or []:
-            if token.search(text(jndi)):
+            if token.search(dsportal_text(jndi)):
                 return True
-        username = read_property(resource.getJDBCDriverParams(), "user")
+        username = dsportal_read_property(resource.getJDBCDriverParams(), "user")
         if username and token.search(username):
             return True
     except Exception:
@@ -225,7 +225,7 @@ def matches_reference(ds, reference_entity, datasource_type):
     return False
 
 
-def target_mbean(name):
+def dsportal_target_mbean(name):
     value = getMBean("/Clusters/" + name)
     if value is not None:
         return value
@@ -235,34 +235,34 @@ def target_mbean(name):
     return getMBean("/MigratableTargets/" + name)
 
 
-def validate_plan(plan):
+def dsportal_validate_plan(plan):
     existing_names = set(
-        [text(ds.getName()).lower() for ds in (cmo.getJDBCSystemResources() or [])]
+        [dsportal_text(ds.getName()).lower() for ds in (cmo.getJDBCSystemResources() or [])]
     )
     for item in plan["datasources"]:
         if item["target_name"].lower() in existing_names:
             item["status"] = "Already Exists"
         missing_targets = []
         for target_name in item["target_targets"]:
-            if target_mbean(target_name) is None:
+            if dsportal_target_mbean(target_name) is None:
                 missing_targets.append(target_name)
         if missing_targets:
             item["status"] = "Invalid Target"
             item["missing_targets"] = missing_targets
 
 
-def create_datasource(item, password_pattern):
+def dsportal_create_datasource(item, password_pattern):
     name = item["target_name"]
     ds = cmo.createJDBCSystemResource(name)
     resource = ds.getJDBCResource()
     resource.setName(name)
 
     params = resource.getJDBCDataSourceParams()
-    params.setJNDINames(java_string_array(item["target_jndis"]))
-    apply_attributes(params, item["datasource_attributes"])
+    params.setJNDINames(dsportal_java_string_array(item["target_jndis"]))
+    dsportal_apply_attributes(params, item["datasource_attributes"])
 
     pool = resource.getJDBCConnectionPoolParams()
-    apply_attributes(pool, item["pool_attributes"])
+    dsportal_apply_attributes(pool, item["pool_attributes"])
 
     driver = resource.getJDBCDriverParams()
     driver.setDriverName(item["driver_name"])
@@ -296,15 +296,15 @@ def create_datasource(item, password_pattern):
             pass
 
     for target_name in item["target_targets"]:
-        target = target_mbean(target_name)
+        target = dsportal_target_mbean(target_name)
         if target is None:
-            fail("Target %s was not found while creating %s" % (target_name, name))
+            dsportal_fail("Target %s was not found while creating %s" % (target_name, name))
         ds.addTarget(target)
 
 
-def main():
+def dsportal_main():
     if len(sys.argv) != 4:
-        fail(
+        dsportal_fail(
             "Usage: weblogic_datasource_manager.py <request.json> <plan.json> <action>"
         )
 
@@ -316,7 +316,7 @@ def main():
         request = json.load(handle)
 
     if action not in ("preview", "apply"):
-        fail("Action must be preview or apply")
+        dsportal_fail("Action must be preview or apply")
 
     admin_url = "t3://%s:%s" % (request["admin_host"], request["admin_port"])
     connect(request["weblogic_username"], request["weblogic_password"], admin_url)
@@ -327,11 +327,11 @@ def main():
     matches = [
         ds
         for ds in (cmo.getJDBCSystemResources() or [])
-        if matches_reference(ds, reference_entity, request["datasource_type"])
+        if dsportal_matches_reference(ds, reference_entity, request["datasource_type"])
     ]
 
     if not matches:
-        fail(
+        dsportal_fail(
             "No WebLogic datasources were found for reference entity %s"
             % reference_entity
         )
@@ -346,12 +346,12 @@ def main():
         "reference_entity": reference_entity,
         "target_entity": target_entity,
         "datasources": [
-            capture_reference(ds, reference_entity, target_entity, request)
+            dsportal_capture_reference(ds, reference_entity, target_entity, request)
             for ds in matches
         ],
     }
 
-    validate_plan(plan)
+    dsportal_validate_plan(plan)
 
     if action == "apply":
         blocked = [
@@ -360,7 +360,7 @@ def main():
             if item["status"] != "Ready"
         ]
         if blocked:
-            fail(
+            dsportal_fail(
                 "Apply blocked because one or more target datasources already exist or reference invalid targets"
             )
 
@@ -369,7 +369,7 @@ def main():
         try:
             cd("/")
             for item in plan["datasources"]:
-                create_datasource(item, request["password_pattern"])
+                dsportal_create_datasource(item, request["password_pattern"])
                 item["status"] = "Created"
             save()
             activate(block="true")
@@ -415,7 +415,7 @@ def main():
 
 
 try:
-    main()
+    dsportal_main()
 except Exception:
     traceback.print_exc()
     try:
