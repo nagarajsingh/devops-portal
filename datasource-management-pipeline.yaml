@@ -97,6 +97,7 @@ jobs:
           set -euo pipefail
           command -v sshpass >/dev/null
           command -v ssh-keyscan >/dev/null
+          command -v curl >/dev/null
           command -v python3 >/dev/null
           test -f backend/scripts/weblogic_datasource_manager.py
         displayName: 'Validate execution agent'
@@ -111,20 +112,24 @@ jobs:
           REMOTE_DIR="/tmp/devops-portal-ds-${P_REQUEST_ID}"
           mkdir -p "$OUTPUT_DIR"
 
+          curl --fail --silent --show-error \
+            --connect-timeout 30 \
+            --max-time 60 \
+            -H "X-Datasource-Pipeline-Token: $DATASOURCE_PIPELINE_API_TOKEN" \
+            -H "Accept: application/json" \
+            "$P_RUNTIME_API_URL/datasources/internal/runtime/$P_REQUEST_ID" \
+            -o "$LOCAL_RUNTIME"
+
           python3 - <<'PY'
-          import json, os, urllib.request
-          base = os.environ['P_RUNTIME_API_URL'].rstrip('/')
+          import json, os
+
           request_id = os.environ['P_REQUEST_ID']
-          req = urllib.request.Request(
-              '%s/datasources/internal/runtime/%s' % (base, request_id),
-              headers={'X-Datasource-Pipeline-Token': os.environ['DATASOURCE_PIPELINE_API_TOKEN'], 'Accept': 'application/json'},
-          )
-          with urllib.request.urlopen(req, timeout=60) as response:
-              payload = json.loads(response.read().decode('utf-8'))
+          with open(os.environ['LOCAL_RUNTIME']) as handle:
+              payload = json.load(handle)
+
           if payload.get('request_id') != request_id:
               raise RuntimeError('Datasource runtime response request ID did not match')
-          with open(os.environ['LOCAL_RUNTIME'], 'w') as handle:
-              json.dump(payload, handle)
+
           remote_payload = dict(payload)
           remote_payload.pop('ssh_password', None)
           with open(os.environ['LOCAL_REQUEST'], 'w') as handle:
