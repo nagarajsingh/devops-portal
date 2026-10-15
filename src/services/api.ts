@@ -1,4 +1,4 @@
-import type { ApplicationType, AuthSession, DatasourceOperation, DevOpsTask, DevOpsTaskPriority, DevOpsTaskStatus, KubernetesService, KubernetesTarget, PipelineRequest, PipelineRequestInput, PortalUser, ReviewUpdate, Role, WebLogicEnvironment } from "../types";
+import type { ApplicationType, AuthSession, DatasourceApplication, DatasourceOperation, DevOpsTask, DevOpsTaskPriority, DevOpsTaskStatus, KubernetesService, KubernetesTarget, PipelineRequest, PipelineRequestInput, PortalUser, ReviewUpdate, Role, WebLogicEnvironment } from "../types";
 const API_BASE="/devops-portal/api";
 export class ApiError extends Error{code?:string;status?:number;payload?:unknown;constructor(message:string,options:{code?:string;status?:number;payload?:unknown}={}){super(message);this.name="ApiError";Object.assign(this,options);}}
 async function request<T>(path:string,options:RequestInit={},token?:string):Promise<T>{const response=await fetch(`${API_BASE}${path}`,{...options,headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{}) ,...options.headers}});if(!response.ok){const body=await response.json().catch(()=>({detail:"Request failed"}));const d=body?.detail;throw new ApiError(typeof d==="string"?d:d?.message??"Request failed",{code:typeof d==="object"&&d?d.code:undefined,status:response.status,payload:d});}if(response.status===204)return undefined as T;return response.json() as Promise<T>;}
@@ -47,6 +47,7 @@ export type WebLogicEnvironmentInput={
   admin_port:number;
   ssh_port:number;
   wlst_path:string;
+  artifacts_location:string;
   agent_pool:string;
   default_db_host:string;
   default_db_port:number;
@@ -61,6 +62,7 @@ export type WebLogicEnvironmentInput={
 
 export type DatasourceEntityInput={
   service_id:string;
+  schema_username:string;
   db_host:string;
   db_port:number;
   ons_nodes:string;
@@ -75,11 +77,13 @@ export type DatasourcePreviewInput={
   db_host:string;
   db_port:number;
   service_id:string;
+  schema_username:string;
   password_pattern?:string;
   ons_nodes:string;
   azure_devops_pat:string;
 };
 
+export const getDatasourceApplications=(token:string)=>request<DatasourceApplication[]>("/datasources/applications",{},token);
 export const getDatasourceEnvironments=(token:string)=>request<WebLogicEnvironment[]>("/datasources/environments",{},token);
 export const createDatasourceEnvironment=(payload:WebLogicEnvironmentInput,token:string)=>request<WebLogicEnvironment>("/datasources/environments",{method:"POST",body:JSON.stringify(payload)},token);
 export const updateDatasourceEnvironment=(id:number,payload:WebLogicEnvironmentInput,token:string)=>request<WebLogicEnvironment>(`/datasources/environments/${id}`,{method:"PUT",body:JSON.stringify(payload)},token);
