@@ -106,10 +106,24 @@ jobs:
           OUTPUT_DIR="$(Pipeline.Workspace)/datasource-output"
           LOCAL_RUNTIME="$(Pipeline.Workspace)/datasource-runtime.json"
           LOCAL_REQUEST="$(Pipeline.Workspace)/datasource-request.json"
+          LOCAL_WLST_SCRIPT="$(Pipeline.Workspace)/weblogic_datasource_manager.py"
           VAULT_PASSWORD_FILE="$(Pipeline.Workspace)/datasource-vault-password"
           CONFIG_FILE="$(Build.SourcesDirectory)/datasource-config/${P_ENVIRONMENT,,}/${P_APPLICATION,,}.json.vault"
           REMOTE_DIR="/tmp/devops-portal-ds-${P_REQUEST_ID}"
           mkdir -p "$OUTPUT_DIR"
+
+          echo "Pipeline source commit: $(git rev-parse HEAD 2>/dev/null || echo unknown)"
+          sed '/^from __future__ import print_function$/d'             backend/scripts/weblogic_datasource_manager.py > "$LOCAL_WLST_SCRIPT"
+          chmod 600 "$LOCAL_WLST_SCRIPT"
+
+          echo "WLST script verification:"
+          grep -n "from __future__ import print_function" "$LOCAL_WLST_SCRIPT" && {
+            echo "Unexpected print_function future import still present."
+            exit 1
+          } || true
+          grep -n 'connect(request\["weblogic_username"\]' "$LOCAL_WLST_SCRIPT" || true
+          grep -n 'main()' "$LOCAL_WLST_SCRIPT" | tail -3 || true
+          command -v sha256sum >/dev/null && sha256sum "$LOCAL_WLST_SCRIPT" || true
 
           if [[ -z "${ANSIBLE_VAULT_PASSWORD:-}" ]]; then
             echo "ANSIBLE_VAULT_PASSWORD is not configured."
@@ -193,7 +207,7 @@ jobs:
           SCP_OPTS=(-P "$P_SSH_PORT" -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS")
 
           SSHPASS="$SSH_PASSWORD" sshpass -e ssh "${SSH_OPTS[@]}" "$P_SSH_USERNAME@$P_ADMIN_HOST" "mkdir -p '$REMOTE_DIR' && chmod 700 '$REMOTE_DIR'"
-          SSHPASS="$SSH_PASSWORD" sshpass -e scp "${SCP_OPTS[@]}" "$LOCAL_REQUEST" backend/scripts/weblogic_datasource_manager.py "$P_SSH_USERNAME@$P_ADMIN_HOST:$REMOTE_DIR/"
+          SSHPASS="$SSH_PASSWORD" sshpass -e scp "${SCP_OPTS[@]}" "$LOCAL_REQUEST" "$LOCAL_WLST_SCRIPT" "$P_SSH_USERNAME@$P_ADMIN_HOST:$REMOTE_DIR/"
 
           REMOTE_COMMAND=$(printf "%q %q %q %q" "$P_WLST_PATH" "$REMOTE_DIR/weblogic_datasource_manager.py" "$REMOTE_DIR/datasource-request.json" "$REMOTE_DIR/datasource-plan.json")
           REMOTE_COMMAND="$REMOTE_COMMAND $(printf "%q" "$P_ACTION")"
@@ -209,7 +223,7 @@ jobs:
 
           SSHPASS="$SSH_PASSWORD" sshpass -e ssh "${SSH_OPTS[@]}" "$P_SSH_USERNAME@$P_ADMIN_HOST" "rm -rf '$REMOTE_DIR'" || true
           unset SSH_PASSWORD
-          rm -f "$LOCAL_RUNTIME" "$LOCAL_REQUEST" "$VAULT_PASSWORD_FILE"
+          rm -f "$LOCAL_RUNTIME" "$LOCAL_REQUEST" "$LOCAL_WLST_SCRIPT" "$VAULT_PASSWORD_FILE"
 
           if [[ "$RC" -ne 0 ]]; then
             echo "WLST datasource operation failed with exit code $RC"
