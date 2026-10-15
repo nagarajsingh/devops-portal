@@ -4,18 +4,34 @@ import PremiumDeploymentModal from "../components/PremiumDeploymentModal";
 import {
   applyDatasourceOperation,
   createDatasourceEnvironment,
+  getDatasourceApplications,
   getDatasourceEnvironments,
   getDatasourceOperations,
   previewDatasources,
-  saveDatasourceEntityProfile,
   updateDatasourceEnvironment,
   type WebLogicEnvironmentInput,
 } from "../services/api";
-import type { DatasourceOperation, WebLogicEnvironment } from "../types";
+import type { DatasourceApplication, DatasourceOperation, WebLogicEnvironment } from "../types";
 
 const PAT_SESSION_KEY = "devops-portal-azure-pat";
 
 type Notice = { variant: "success" | "warning" | "error" | "info"; message: string };
+
+function wlstForBase(basePath: string) {
+  const base = basePath.trim().replace(/\/$/, "");
+  return base ? `${base}/Oracle/Middleware/Oracle_Home/oracle_common/common/bin/wlst.sh` : "";
+}
+
+function derivedArtifactPaths(environment: string, root = "/azure_artifact") {
+  const cleanRoot = root.trim().replace(/\/$/, "") || "/azure_artifact";
+  const env = environment.trim().toLowerCase();
+  const common = env ? `${cleanRoot}/${env}` : cleanRoot;
+  return {
+    common,
+    channel: `${common}/channel`,
+    ear: `${common}/consulting/deploy/`,
+  };
+}
 
 const emptyEnvironment: WebLogicEnvironmentInput = {
   application: "OBP",
@@ -27,6 +43,7 @@ const emptyEnvironment: WebLogicEnvironmentInput = {
   admin_port: 5001,
   ssh_port: 22,
   wlst_path: "",
+  artifacts_location: "/azure_artifact",
   agent_pool: "TitanNonProd-Release",
   default_db_host: "",
   default_db_port: 1531,
@@ -59,8 +76,11 @@ function formatDate(value?: string) {
 }
 
 export default function DatasourcesPage({ token, isAdmin }: { token: string; isAdmin: boolean }) {
+  const [applications, setApplications] = useState<DatasourceApplication[]>([]);
   const [environments, setEnvironments] = useState<WebLogicEnvironment[]>([]);
   const [operations, setOperations] = useState<DatasourceOperation[]>([]);
+
+  const [selectedApplication, setSelectedApplication] = useState("");
   const [environmentId, setEnvironmentId] = useState<number>(0);
   const [referenceEntity, setReferenceEntity] = useState("");
   const [targetEntity, setTargetEntity] = useState("");
@@ -68,8 +88,10 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
   const [dbHost, setDbHost] = useState("");
   const [dbPort, setDbPort] = useState(1531);
   const [serviceId, setServiceId] = useState("");
+  const [schemaUsername, setSchemaUsername] = useState("");
   const [passwordPattern, setPasswordPattern] = useState("");
   const [onsNodes, setOnsNodes] = useState("");
+
   const [pat, setPat] = useState(readPat);
   const [patEditable, setPatEditable] = useState(false);
   const [selectedOperation, setSelectedOperation] = useState<DatasourceOperation | null>(null);
@@ -80,18 +102,12 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
   const [showConfig, setShowConfig] = useState(false);
   const [editingEnvironmentId, setEditingEnvironmentId] = useState<number | null>(null);
   const [environmentForm, setEnvironmentForm] = useState<WebLogicEnvironmentInput>({ ...emptyEnvironment });
-  const [entityCode, setEntityCode] = useState("");
-  const [entityServiceId, setEntityServiceId] = useState("");
-  const [entityDbHost, setEntityDbHost] = useState("");
-  const [entityDbPort, setEntityDbPort] = useState(1531);
-  const [entityOnsNodes, setEntityOnsNodes] = useState("");
-  const [entityPasswordPattern, setEntityPasswordPattern] = useState("");
 
-  const selectedEnvironment = environments.find((item) => item.id === environmentId) || null;
-  const editingEntityProfile = useMemo(
-    () => selectedEnvironment?.entities.find((item) => item.entity_code.toUpperCase() === entityCode.trim().toUpperCase()) || null,
-    [selectedEnvironment, entityCode],
+  const applicationEnvironments = useMemo(
+    () => environments.filter((item) => item.application === selectedApplication && item.is_active),
+    [environments, selectedApplication],
   );
+  const selectedEnvironment = environments.find((item) => item.id === environmentId) || null;
   const existingTargetProfile = useMemo(
     () => selectedEnvironment?.entities.find((item) => item.entity_code.toUpperCase() === targetEntity.trim().toUpperCase()) || null,
     [selectedEnvironment, targetEntity],
@@ -99,15 +115,18 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
 
   async function load() {
     try {
-      const [envRows, operationRows] = await Promise.all([
+      const [appRows, envRows, operationRows] = await Promise.all([
+        getDatasourceApplications(token),
         getDatasourceEnvironments(token),
         getDatasourceOperations(token),
       ]);
+      setApplications(appRows);
       setEnvironments(envRows);
       setOperations(operationRows);
-      setEnvironmentId((current) => {
-        if (current && envRows.some((item) => item.id === current)) return current;
-        return envRows.find((item) => item.is_active)?.id || envRows[0]?.id || 0;
+
+      setSelectedApplication((current) => {
+        if (current && appRows.some((item) => item.code === current)) return current;
+        return appRows[0]?.code || "";
       });
     } catch (error) {
       setNotice({ variant: "error", message: error instanceof Error ? error.message : "Unable to load datasource configuration" });
@@ -124,21 +143,27 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
   }, [pat]);
 
   useEffect(() => {
-    if (!selectedEnvironment) return;
-    setDbHost(selectedEnvironment.default_db_host);
-    setDbPort(selectedEnvironment.default_db_port);
+    if (!selectedApplication) return;
+    const options = environments.filter((item) => item.application === selectedApplication && item.is_active);
+    setEnvironmentId((current) => options.some((item) => item.id === current) ? current : options[0]?.id || 0);
+  }, [selectedApplication, environments]);
+
+  useEffect(() => {
+    if (!selectedEnvironment) {
+      setDbHost("");
+      setDbPort(1531);
+      setOnsNodes("");
+      return;
+    }
+    setDbHost(selectedEnvironment.default_db_host || "");
+    setDbPort(selectedEnvironment.default_db_port || 1531);
     setOnsNodes(selectedEnvironment.default_ons_nodes || "");
     setTargetEntity("");
     setReferenceEntity("");
     setServiceId("");
+    setSchemaUsername("");
     setPasswordPattern("");
     setSelectedOperation(null);
-    setEntityCode("");
-    setEntityServiceId("");
-    setEntityDbHost(selectedEnvironment.default_db_host);
-    setEntityDbPort(selectedEnvironment.default_db_port);
-    setEntityOnsNodes(selectedEnvironment.default_ons_nodes || "");
-    setEntityPasswordPattern("");
   }, [environmentId]);
 
   useEffect(() => {
@@ -146,54 +171,87 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     setDbHost(existingTargetProfile.db_host);
     setDbPort(existingTargetProfile.db_port);
     setServiceId(existingTargetProfile.service_id);
+    setSchemaUsername(existingTargetProfile.schema_username);
     setOnsNodes(existingTargetProfile.ons_nodes || "");
     setPasswordPattern("");
   }, [existingTargetProfile?.id]);
 
-  useEffect(() => {
-    if (!selectedEnvironment) return;
-    if (!editingEntityProfile) {
-      setEntityServiceId("");
-      setEntityDbHost(selectedEnvironment.default_db_host);
-      setEntityDbPort(selectedEnvironment.default_db_port);
-      setEntityOnsNodes(selectedEnvironment.default_ons_nodes || "");
-      setEntityPasswordPattern("");
+  function beginEnvironment(environment?: WebLogicEnvironment) {
+    setShowConfig(true);
+    setNotice(null);
+    if (!environment) {
+      setEditingEnvironmentId(null);
+      const app = applications[0]?.code || "OBP";
+      setEnvironmentForm({ ...emptyEnvironment, application: app });
       return;
     }
-    setEntityServiceId(editingEntityProfile.service_id);
-    setEntityDbHost(editingEntityProfile.db_host);
-    setEntityDbPort(editingEntityProfile.db_port);
-    setEntityOnsNodes(editingEntityProfile.ons_nodes || "");
-    setEntityPasswordPattern("");
-  }, [editingEntityProfile?.id, selectedEnvironment?.id]);
 
-  async function saveEntityProfile(event: FormEvent) {
+    setEditingEnvironmentId(environment.id);
+    setEnvironmentForm({
+      application: environment.application,
+      environment: environment.environment,
+      instance_name: environment.instance_name,
+      base_path: environment.base_path,
+      domain_name: environment.domain_name,
+      admin_host: environment.admin_host,
+      admin_port: environment.admin_port,
+      ssh_port: environment.ssh_port,
+      wlst_path: environment.wlst_path,
+      artifacts_location: environment.artifacts_location || "/azure_artifact",
+      agent_pool: environment.agent_pool,
+      default_db_host: environment.default_db_host || "",
+      default_db_port: environment.default_db_port || 1531,
+      default_ons_nodes: environment.default_ons_nodes || "",
+      weblogic_username: environment.weblogic_username,
+      weblogic_password: "",
+      ssh_username: environment.ssh_username,
+      ssh_password: "",
+      is_production: environment.is_production,
+      is_active: environment.is_active,
+    });
+  }
+
+  function changeBasePath(value: string) {
+    setEnvironmentForm((current) => {
+      const oldSuggested = wlstForBase(current.base_path);
+      const shouldReplace = !current.wlst_path || current.wlst_path === oldSuggested;
+      return {
+        ...current,
+        base_path: value,
+        wlst_path: shouldReplace ? wlstForBase(value) : current.wlst_path,
+      };
+    });
+  }
+
+  async function saveEnvironment(event: FormEvent) {
     event.preventDefault();
-    if (!selectedEnvironment || !entityCode.trim()) return;
-    if (!entityPasswordPattern && !editingEntityProfile?.password_pattern_configured) {
-      setNotice({ variant: "error", message: "Password pattern is required when creating a new entity profile." });
-      return;
-    }
     setBusy(true);
     setNotice(null);
     try {
-      await saveDatasourceEntityProfile(selectedEnvironment.id, entityCode.trim().toUpperCase(), {
-        service_id: entityServiceId,
-        db_host: entityDbHost,
-        db_port: Number(entityDbPort),
-        ons_nodes: entityOnsNodes,
-        password_pattern: entityPasswordPattern || undefined,
-      }, token);
-      setEntityPasswordPattern("");
+      const payload = {
+        ...environmentForm,
+        weblogic_password: environmentForm.weblogic_password || undefined,
+        ssh_password: environmentForm.ssh_password || undefined,
+        admin_port: Number(environmentForm.admin_port),
+        ssh_port: Number(environmentForm.ssh_port),
+        default_db_port: Number(environmentForm.default_db_port || 1531),
+      };
+
+      const saved = editingEnvironmentId
+        ? await updateDatasourceEnvironment(editingEnvironmentId, payload, token)
+        : await createDatasourceEnvironment(payload, token);
+
+      setEnvironmentForm((current) => ({ ...current, weblogic_password: "", ssh_password: "" }));
       setNotice({
         variant: "success",
-        message: editingEntityProfile
-          ? `${selectedEnvironment.application} / ${selectedEnvironment.environment.toUpperCase()} / ${entityCode.toUpperCase()} updated in the DevOps Portal database.`
-          : `${selectedEnvironment.application} / ${selectedEnvironment.environment.toUpperCase()} / ${entityCode.toUpperCase()} saved to the DevOps Portal database.`,
+        message: editingEnvironmentId
+          ? `${saved.application} / ${saved.environment.toUpperCase()} server configuration updated in the database.`
+          : `${saved.application} / ${saved.environment.toUpperCase()} server configuration saved to the database.`,
       });
+      setShowConfig(false);
       await load();
     } catch (error) {
-      setNotice({ variant: "error", message: error instanceof Error ? error.message : "Unable to save datasource entity profile" });
+      setNotice({ variant: "error", message: error instanceof Error ? error.message : "Unable to save WebLogic environment" });
     } finally {
       setBusy(false);
     }
@@ -203,9 +261,10 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     event.preventDefault();
     if (!selectedEnvironment) return;
     if (!passwordPattern && !existingTargetProfile?.password_pattern_configured) {
-      setNotice({ variant: "error", message: "Password pattern is required the first time an entity is configured." });
+      setNotice({ variant: "error", message: "Schema password pattern is required the first time this entity is configured." });
       return;
     }
+
     setBusy(true);
     setNotice(null);
     try {
@@ -217,6 +276,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
         db_host: dbHost,
         db_port: Number(dbPort),
         service_id: serviceId,
+        schema_username: schemaUsername,
         password_pattern: passwordPattern || undefined,
         ons_nodes: datasourceType === "gridlink" ? onsNodes : "",
         azure_devops_pat: pat,
@@ -225,7 +285,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       setSelectedOperation(result);
       setNotice({
         variant: "success",
-        message: `Preview ${result.request_id} completed from the live WebLogic configuration. Review the datasource plan before applying.`,
+        message: `Preview ${result.request_id} completed from live WebLogic. Review the proposed datasource names and targets before creation.`,
       });
       await load();
     } catch (error) {
@@ -243,82 +303,25 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     try {
       const result = await applyDatasourceOperation(selectedOperation.id, pat, token);
       setSelectedOperation(result);
-      setNotice({ variant: "success", message: `${result.request_id} completed. WebLogic datasource changes were applied through WLST.` });
+      const count = result.preview?.summary?.created_count ?? result.preview?.datasources.filter((item) => item.status === "Created").length ?? 0;
+      setNotice({ variant: "success", message: `${result.request_id} completed successfully. ${count} datasource(s) created.` });
       await load();
     } catch (error) {
-      setNotice({ variant: "error", message: error instanceof Error ? error.message : "Unable to apply datasource changes" });
+      setNotice({ variant: "error", message: error instanceof Error ? error.message : "Unable to create datasource changes" });
     } finally {
       setBusy(false);
     }
   }
 
-  function beginEnvironment(environment?: WebLogicEnvironment) {
-    setShowConfig(true);
-    setNotice(null);
-    if (!environment) {
-      setEditingEnvironmentId(null);
-      setEnvironmentForm({ ...emptyEnvironment });
-      return;
-    }
-    setEditingEnvironmentId(environment.id);
-    setEnvironmentForm({
-      application: environment.application,
-      environment: environment.environment,
-      instance_name: environment.instance_name,
-      base_path: environment.base_path,
-      domain_name: environment.domain_name,
-      admin_host: environment.admin_host,
-      admin_port: environment.admin_port,
-      ssh_port: environment.ssh_port,
-      wlst_path: environment.wlst_path,
-      agent_pool: environment.agent_pool,
-      default_db_host: environment.default_db_host,
-      default_db_port: environment.default_db_port,
-      default_ons_nodes: environment.default_ons_nodes,
-      weblogic_username: environment.weblogic_username,
-      weblogic_password: "",
-      ssh_username: environment.ssh_username,
-      ssh_password: "",
-      is_production: environment.is_production,
-      is_active: environment.is_active,
-    });
-  }
-
-  async function saveEnvironment(event: FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setNotice(null);
-    try {
-      const payload = {
-        ...environmentForm,
-        weblogic_password: environmentForm.weblogic_password || undefined,
-        ssh_password: environmentForm.ssh_password || undefined,
-        admin_port: Number(environmentForm.admin_port),
-        ssh_port: Number(environmentForm.ssh_port),
-        default_db_port: Number(environmentForm.default_db_port),
-      };
-      if (editingEnvironmentId) {
-        await updateDatasourceEnvironment(editingEnvironmentId, payload, token);
-      } else {
-        await createDatasourceEnvironment(payload, token);
-      }
-      setEnvironmentForm((current) => ({ ...current, weblogic_password: "", ssh_password: "" }));
-      setNotice({ variant: "success", message: editingEnvironmentId ? "WebLogic environment updated." : "WebLogic environment created." });
-      setShowConfig(false);
-      await load();
-    } catch (error) {
-      setNotice({ variant: "error", message: error instanceof Error ? error.message : "Unable to save WebLogic environment" });
-    } finally {
-      setBusy(false);
-    }
-  }
-
+  const artifactPreview = derivedArtifactPaths(environmentForm.environment, environmentForm.artifacts_location);
   const plan = selectedOperation?.preview;
+  const createdItems = plan?.datasources.filter((item) => item.status === "Created") || [];
   const canPreview = Boolean(
     selectedEnvironment &&
     referenceEntity.trim() &&
     targetEntity.trim() &&
     serviceId.trim() &&
+    schemaUsername.trim() &&
     dbHost.trim() &&
     pat.trim() &&
     !busy
@@ -329,7 +332,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       <div>
         <span className="eyebrow">WEBLOGIC AUTOMATION</span>
         <h1>Datasources</h1>
-        <p>Clone live WebLogic datasource configuration from a reference entity, preview the exact changes, then apply them through WLST.</p>
+        <p>Maintain WebLogic server details in the portal database, clone datasource configuration from a live reference entity and create the new entity through WLST.</p>
       </div>
       <Database size={46} />
     </section>
@@ -338,44 +341,61 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
 
     {isAdmin && <section className="datasource-config-panel">
       <div className="datasource-section-title">
-        <div><Settings size={21}/><div><h2>Application environments</h2><p>Database-backed replacement for per-application vars.yaml files.</p></div></div>
+        <div><Settings size={21}/><div><h2>Application & environment configuration</h2><p>DevOps Admin maintains the server data that previously lived in inventory and vars files.</p></div></div>
         <button className="secondary-button" type="button" onClick={() => beginEnvironment()}><Plus size={15}/>Add environment</button>
       </div>
+
       <div className="datasource-environment-list">
         {environments.map((item) => <button type="button" key={item.id} onClick={() => beginEnvironment(item)}>
-          <span><strong>{item.application}</strong><small>{item.environment} · {item.instance_name}</small></span>
-          <span><strong>{item.domain_name}</strong><small>{item.admin_host}:{item.admin_port}</small></span>
+          <span><strong>{item.application}</strong><small>{item.environment.toUpperCase()} · {item.instance_name}</small></span>
+          <span><strong>{item.admin_host}:{item.admin_port}</strong><small>{item.domain_name}</small></span>
           <span className={item.weblogic_password_configured && item.ssh_password_configured ? "credential-ok" : "credential-missing"}>
             {item.weblogic_password_configured && item.ssh_password_configured ? "Credentials configured" : "Credentials incomplete"}
           </span>
         </button>)}
-        {environments.length === 0 && <div className="datasource-empty">No WebLogic environments configured yet.</div>}
+        {environments.length === 0 && <div className="datasource-empty">No application environments configured yet. Add the first environment from this page.</div>}
       </div>
     </section>}
 
     {isAdmin && showConfig && <form className="datasource-config-form form-card" onSubmit={saveEnvironment}>
       <div className="full-width datasource-section-title">
-        <div><Server size={21}/><div><h2>{editingEnvironmentId ? "Edit WebLogic environment" : "Add WebLogic environment"}</h2><p>Each application/environment/instance keeps its own connection, DB defaults, credentials and execution agent.</p></div></div>
+        <div><Server size={21}/><div><h2>{editingEnvironmentId ? "Update application environment" : "Add application environment"}</h2><p>Passwords are encrypted in the database and are never shown back in the dashboard.</p></div></div>
       </div>
 
-      <label>Application<input required value={environmentForm.application} onChange={(e) => setEnvironmentForm({ ...environmentForm, application: e.target.value.toUpperCase() })} placeholder="OBP"/></label>
+      <label>Application
+        <select required value={environmentForm.application} onChange={(e) => setEnvironmentForm({ ...environmentForm, application: e.target.value })}>
+          {applications.map((item) => <option key={item.id} value={item.code}>{item.display_name}</option>)}
+        </select>
+      </label>
       <label>Environment<input required value={environmentForm.environment} onChange={(e) => setEnvironmentForm({ ...environmentForm, environment: e.target.value.toLowerCase() })} placeholder="txcsit"/></label>
-      <label>Instance<input required value={environmentForm.instance_name} onChange={(e) => setEnvironmentForm({ ...environmentForm, instance_name: e.target.value })} placeholder="app1"/></label>
+      <label>Instance<input required value={environmentForm.instance_name} onChange={(e) => setEnvironmentForm({ ...environmentForm, instance_name: e.target.value.toLowerCase() })} placeholder="app1"/></label>
       <label>Domain<input required value={environmentForm.domain_name} onChange={(e) => setEnvironmentForm({ ...environmentForm, domain_name: e.target.value })} placeholder="TXOBPSIT"/></label>
-      <label>Admin / SSH host<input required value={environmentForm.admin_host} onChange={(e) => setEnvironmentForm({ ...environmentForm, admin_host: e.target.value })}/></label>
-      <label>WebLogic Admin port<input type="number" min={1} max={65535} required value={environmentForm.admin_port} onChange={(e) => setEnvironmentForm({ ...environmentForm, admin_port: Number(e.target.value) })}/></label>
-      <label>SSH port<input type="number" min={1} max={65535} required value={environmentForm.ssh_port} onChange={(e) => setEnvironmentForm({ ...environmentForm, ssh_port: Number(e.target.value) })}/></label>
-      <label>Base path<input value={environmentForm.base_path} onChange={(e) => setEnvironmentForm({ ...environmentForm, base_path: e.target.value })} placeholder="/obpay"/></label>
-      <label className="full-width">WLST path<input required value={environmentForm.wlst_path} onChange={(e) => setEnvironmentForm({ ...environmentForm, wlst_path: e.target.value })} placeholder="/obpay/Oracle/Middleware/.../wlst.sh"/></label>
-      <label>Azure agent pool<input required value={environmentForm.agent_pool} onChange={(e) => setEnvironmentForm({ ...environmentForm, agent_pool: e.target.value })}/></label>
-      <label>Default DB host<input required value={environmentForm.default_db_host} onChange={(e) => setEnvironmentForm({ ...environmentForm, default_db_host: e.target.value })}/></label>
-      <label>Default DB port<input type="number" min={1} max={65535} required value={environmentForm.default_db_port} onChange={(e) => setEnvironmentForm({ ...environmentForm, default_db_port: Number(e.target.value) })}/></label>
-      <label>Default ONS nodes<input value={environmentForm.default_ons_nodes} onChange={(e) => setEnvironmentForm({ ...environmentForm, default_ons_nodes: e.target.value })} placeholder="host1:6200,host2:6200"/></label>
 
-      <label>WebLogic username<input required value={environmentForm.weblogic_username} onChange={(e) => setEnvironmentForm({ ...environmentForm, weblogic_username: e.target.value })}/></label>
-      <label>WebLogic password<input type="password" value={environmentForm.weblogic_password || ""} onChange={(e) => setEnvironmentForm({ ...environmentForm, weblogic_password: e.target.value })} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder={editingEnvironmentId ? "Leave blank to keep existing" : "Required before execution"}/></label>
-      <label>SSH username<input required value={environmentForm.ssh_username} onChange={(e) => setEnvironmentForm({ ...environmentForm, ssh_username: e.target.value })}/></label>
-      <label>SSH password<input type="password" value={environmentForm.ssh_password || ""} onChange={(e) => setEnvironmentForm({ ...environmentForm, ssh_password: e.target.value })} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder={editingEnvironmentId ? "Leave blank to keep existing" : "Required before execution"}/></label>
+      <label>BASE<input required value={environmentForm.base_path} onChange={(e) => changeBasePath(e.target.value)} placeholder="/obpay"/></label>
+      <label>Admin / Ansible host<input required value={environmentForm.admin_host} onChange={(e) => setEnvironmentForm({ ...environmentForm, admin_host: e.target.value })} placeholder="172.24.x.x"/></label>
+      <label>WebLogic port<input type="number" min={1} max={65535} required value={environmentForm.admin_port} onChange={(e) => setEnvironmentForm({ ...environmentForm, admin_port: Number(e.target.value) })}/></label>
+      <label>SSH port<input type="number" min={1} max={65535} required value={environmentForm.ssh_port} onChange={(e) => setEnvironmentForm({ ...environmentForm, ssh_port: Number(e.target.value) })}/></label>
+
+      <label className="full-width">WLST executable
+        <input required value={environmentForm.wlst_path} onChange={(e) => setEnvironmentForm({ ...environmentForm, wlst_path: e.target.value })} placeholder="/obpay/Oracle/Middleware/Oracle_Home/oracle_common/common/bin/wlst.sh"/>
+        <small>The full executable path is stored, not only the common/bin directory.</small>
+      </label>
+
+      <label>Artifacts root<input required value={environmentForm.artifacts_location} onChange={(e) => setEnvironmentForm({ ...environmentForm, artifacts_location: e.target.value })} placeholder="/azure_artifact"/></label>
+      <label>ENV_NAME<input readOnly value={environmentForm.environment}/></label>
+      <label>COMMON_ARTIFACTS_LOCATION<input readOnly value={artifactPreview.common}/></label>
+      <label>CZ_CONFIG_LOCATION<input readOnly value={artifactPreview.channel}/></label>
+      <label className="full-width">EAR_PATH<input readOnly value={artifactPreview.ear}/></label>
+
+      <label>Azure agent pool<input required value={environmentForm.agent_pool} onChange={(e) => setEnvironmentForm({ ...environmentForm, agent_pool: e.target.value })}/></label>
+      <label>WebLogic user<input required value={environmentForm.weblogic_username} onChange={(e) => setEnvironmentForm({ ...environmentForm, weblogic_username: e.target.value })}/></label>
+      <label>WebLogic password
+        <input type="password" value={environmentForm.weblogic_password || ""} onChange={(e) => setEnvironmentForm({ ...environmentForm, weblogic_password: e.target.value })} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder={editingEnvironmentId ? "••••••••  Leave blank to keep current" : "Required before execution"}/>
+      </label>
+      <label>Ansible / SSH user<input required value={environmentForm.ssh_username} onChange={(e) => setEnvironmentForm({ ...environmentForm, ssh_username: e.target.value })}/></label>
+      <label>Ansible / SSH password
+        <input type="password" value={environmentForm.ssh_password || ""} onChange={(e) => setEnvironmentForm({ ...environmentForm, ssh_password: e.target.value })} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder={editingEnvironmentId ? "••••••••  Leave blank to keep current" : "Required before execution"}/>
+      </label>
 
       <label className="datasource-checkbox"><input type="checkbox" checked={environmentForm.is_production} onChange={(e) => setEnvironmentForm({ ...environmentForm, is_production: e.target.checked })}/>Production environment</label>
       <label className="datasource-checkbox"><input type="checkbox" checked={environmentForm.is_active} onChange={(e) => setEnvironmentForm({ ...environmentForm, is_active: e.target.checked })}/>Active</label>
@@ -386,81 +406,66 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       </div>
     </form>}
 
-    {isAdmin && selectedEnvironment && <section className="datasource-config-panel">
-      <div className="datasource-section-title">
-        <div><Database size={21}/><div><h2>Datasource entity profiles</h2><p>Maintain environment-specific service IDs, database endpoints, ONS nodes and encrypted password rules without editing vars.yaml.</p></div></div>
-        <span className="status neutral">{selectedEnvironment.application} · {selectedEnvironment.environment.toUpperCase()} · {selectedEnvironment.instance_name}</span>
-      </div>
-
-      <form className="form-card datasource-entity-form" onSubmit={saveEntityProfile}>
-        <label>Entity
-          <input required value={entityCode} onChange={(e) => setEntityCode(e.target.value.toUpperCase())} placeholder="IN" list="admin-configured-datasource-entities"/>
-          <datalist id="admin-configured-datasource-entities">{selectedEnvironment.entities.map((item) => <option key={item.id} value={item.entity_code}/>)}</datalist>
-        </label>
-        <label>Service ID<input required value={entityServiceId} onChange={(e) => setEntityServiceId(e.target.value)} placeholder="TXPMINS"/></label>
-        <label>Database host<input required value={entityDbHost} onChange={(e) => setEntityDbHost(e.target.value)}/></label>
-        <label>Database port<input type="number" min={1} max={65535} required value={entityDbPort} onChange={(e) => setEntityDbPort(Number(e.target.value))}/></label>
-        <label className="full-width">ONS nodes<input value={entityOnsNodes} onChange={(e) => setEntityOnsNodes(e.target.value)} placeholder="Required only when GridLink uses ONS"/></label>
-        <label className="full-width">Password pattern
-          <input type="password" value={entityPasswordPattern} onChange={(e) => setEntityPasswordPattern(e.target.value)} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder={editingEntityProfile?.password_pattern_configured ? "Leave blank to keep the encrypted saved pattern" : "{username}TXCORE"}/>
-          <small>{editingEntityProfile?.password_pattern_configured ? "An encrypted password pattern is already stored. Enter a value only when changing it." : "The password rule is encrypted before storage and is never returned to the browser."}</small>
-        </label>
-        <div className="full-width datasource-form-actions">
-          <button className="primary-button" disabled={busy || !entityCode.trim() || !entityServiceId.trim() || !entityDbHost.trim()}><Save size={15}/>{busy ? "Saving..." : editingEntityProfile ? "Update Database" : "Save to Database"}</button>
-          {editingEntityProfile && <span className="credential-ok">Existing profile · updated {formatDate(editingEntityProfile.updated_at)}</span>}
-        </div>
-      </form>
-
-      {selectedEnvironment.entities.length > 0 && <div className="table-card datasource-entity-table">
-        <table>
-          <thead><tr><th>Entity</th><th>Service ID</th><th>Database</th><th>ONS Nodes</th><th>Password Rule</th><th>Updated</th></tr></thead>
-          <tbody>{selectedEnvironment.entities.map((item) => <tr key={item.id} onClick={() => setEntityCode(item.entity_code)} className="datasource-history-clickable">
-            <td><strong>{item.entity_code}</strong></td>
-            <td>{item.service_id}</td>
-            <td>{item.db_host}:{item.db_port}</td>
-            <td>{item.ons_nodes || "—"}</td>
-            <td><span className={item.password_pattern_configured ? "credential-ok" : "credential-missing"}>{item.password_pattern_configured ? "Encrypted" : "Missing"}</span></td>
-            <td>{formatDate(item.updated_at)}</td>
-          </tr>)}</tbody>
-        </table>
-      </div>}
-    </section>}
-
     <section className="datasource-workspace">
       <div className="datasource-section-title">
-        <div><Eye size={21}/><div><h2>Clone datasource entity</h2><p>Only entity-specific values are supplied here. Pool settings, driver, transaction protocol and targets are read live from the reference datasource.</p></div></div>
+        <div><Eye size={21}/><div><h2>Create datasources for an entity</h2><p>Select the application and environment first. The stored WebLogic configuration is shown before datasource-specific input is accepted.</p></div></div>
         <button className="secondary-button" type="button" onClick={() => void load()}><RefreshCw size={15}/>Refresh</button>
       </div>
 
-      {environments.length === 0 ? <div className="datasource-empty">A DevOps administrator must configure at least one WebLogic application environment first.</div> :
       <form className="form-card datasource-operation-form" onSubmit={preview}>
-        <label className="full-width">Application / Environment
-          <select value={environmentId} onChange={(e) => setEnvironmentId(Number(e.target.value))}>
-            {environments.map((item) => <option key={item.id} value={item.id}>
-              {item.application} · {item.environment.toUpperCase()} · {item.instance_name}{item.is_active ? "" : " (inactive)"}
-            </option>)}
+        <label>Application
+          <select required value={selectedApplication} onChange={(e) => setSelectedApplication(e.target.value)}>
+            <option value="">Select application</option>
+            {applications.map((item) => <option key={item.id} value={item.code}>{item.display_name}</option>)}
           </select>
         </label>
 
-        {selectedEnvironment && <div className="full-width datasource-environment-summary">
-          <span><small>Domain</small><strong>{selectedEnvironment.domain_name}</strong></span>
-          <span><small>AdminServer</small><strong>{selectedEnvironment.admin_host}:{selectedEnvironment.admin_port}</strong></span>
-          <span><small>Agent pool</small><strong>{selectedEnvironment.agent_pool}</strong></span>
-          <span><small>Credentials</small><strong>{selectedEnvironment.weblogic_password_configured && selectedEnvironment.ssh_password_configured ? "Configured" : "Incomplete"}</strong></span>
+        <label>Environment
+          <select required value={environmentId || ""} onChange={(e) => setEnvironmentId(Number(e.target.value))}>
+            <option value="">Select environment</option>
+            {applicationEnvironments.map((item) => <option key={item.id} value={item.id}>{item.environment.toUpperCase()} · {item.instance_name}</option>)}
+          </select>
+        </label>
+
+        {!applicationEnvironments.length && selectedApplication && <div className="full-width datasource-empty">No active environment has been configured for {selectedApplication}. A DevOps Admin must add it first.</div>}
+
+        {selectedEnvironment && <div className="full-width datasource-runtime-config">
+          <div><small>Application</small><strong>{selectedEnvironment.application}</strong></div>
+          <div><small>ENV_NAME</small><strong>{selectedEnvironment.environment}</strong></div>
+          <div><small>BASE</small><strong>{selectedEnvironment.base_path}</strong></div>
+          <div><small>Domain</small><strong>{selectedEnvironment.domain_name}</strong></div>
+          <div><small>Admin / Ansible Host</small><strong>{selectedEnvironment.admin_host}</strong></div>
+          <div><small>WebLogic Port</small><strong>{selectedEnvironment.admin_port}</strong></div>
+          <div><small>WLST</small><strong>{selectedEnvironment.wlst_path}</strong></div>
+          <div><small>Agent Pool</small><strong>{selectedEnvironment.agent_pool}</strong></div>
+          <div><small>ARTIFACTS_LOCATION</small><strong>{selectedEnvironment.artifacts_location}</strong></div>
+          <div><small>COMMON_ARTIFACTS_LOCATION</small><strong>{selectedEnvironment.common_artifacts_location}</strong></div>
+          <div><small>CZ_CONFIG_LOCATION</small><strong>{selectedEnvironment.cz_config_location}</strong></div>
+          <div><small>EAR_PATH</small><strong>{selectedEnvironment.ear_path}</strong></div>
+          <div><small>WebLogic User</small><strong>{selectedEnvironment.weblogic_username || "Not configured"}</strong></div>
+          <div><small>WebLogic Password</small><strong>{selectedEnvironment.weblogic_password_configured ? "••••••••" : "Not configured"}</strong></div>
+          <div><small>Ansible / SSH User</small><strong>{selectedEnvironment.ssh_username || "Not configured"}</strong></div>
+          <div><small>Ansible / SSH Password</small><strong>{selectedEnvironment.ssh_password_configured ? "••••••••" : "Not configured"}</strong></div>
         </div>}
+
+        <div className="full-width datasource-subheading">
+          <strong>Datasource details</strong>
+          <span>These values are specific to the entity you are creating.</span>
+        </div>
 
         <label>Reference entity<input required value={referenceEntity} onChange={(e) => setReferenceEntity(e.target.value.toUpperCase())} placeholder="QA"/></label>
         <label>Target entity<input required value={targetEntity} onChange={(e) => setTargetEntity(e.target.value.toUpperCase())} placeholder="IN" list="configured-datasource-entities"/></label>
         <datalist id="configured-datasource-entities">{selectedEnvironment?.entities.map((item) => <option key={item.id} value={item.entity_code}/>)}</datalist>
-
         <label>Datasource type<select value={datasourceType} onChange={(e) => setDatasourceType(e.target.value as "standalone" | "gridlink")}><option value="standalone">Standalone</option><option value="gridlink">GridLink</option></select></label>
-        <label>Service ID<input required value={serviceId} onChange={(e) => setServiceId(e.target.value)} placeholder="TXPMINS"/></label>
-        <label>Database host<input required value={dbHost} onChange={(e) => setDbHost(e.target.value)}/></label>
-        <label>Database port<input type="number" min={1} max={65535} required value={dbPort} onChange={(e) => setDbPort(Number(e.target.value))}/></label>
 
-        <label className="full-width">Password pattern
-          <input type="password" value={passwordPattern} onChange={(e) => setPasswordPattern(e.target.value)} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder={existingTargetProfile?.password_pattern_configured ? "Leave blank to reuse the encrypted saved pattern" : "{username}TXCORE"}/>
-          <small>{existingTargetProfile?.password_pattern_configured ? "An encrypted pattern is already stored for this target entity." : "Use {username} where the derived target schema username should be inserted. The pattern is encrypted before it is stored."}</small>
+        <label>Database host<input required value={dbHost} onChange={(e) => setDbHost(e.target.value)} placeholder="gtbtxcoreobpmdbsit.uat.mashreqdev.com"/></label>
+        <label>Database port<input type="number" min={1} max={65535} required value={dbPort} onChange={(e) => setDbPort(Number(e.target.value))}/></label>
+        <label>Service ID<input required value={serviceId} onChange={(e) => setServiceId(e.target.value)} placeholder="TXPMINS"/></label>
+        <label>Schema user<input required value={schemaUsername} onChange={(e) => setSchemaUsername(e.target.value.toUpperCase())} placeholder="OBPIN"/></label>
+
+        <label className="full-width">Schema password pattern
+          <input type="password" value={passwordPattern} onChange={(e) => setPasswordPattern(e.target.value)} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder={existingTargetProfile?.password_pattern_configured ? "Leave blank to reuse encrypted saved pattern" : "{username}_TXS1T"}/>
+          <small>Use {"{username}"} where the schema user should be inserted. The value is encrypted before it is stored.</small>
         </label>
 
         {datasourceType === "gridlink" && <label className="full-width">ONS nodes<input required value={onsNodes} onChange={(e) => setOnsNodes(e.target.value)} placeholder="host1:6200,host2:6200"/></label>}
@@ -470,20 +475,28 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
         </label>
 
         <div className="full-width datasource-form-actions">
-          <button className="primary-button" disabled={!canPreview}><Eye size={15}/>{busy ? "Running preview..." : "Preview from WebLogic"}</button>
+          <button className="primary-button" disabled={!canPreview}><Eye size={15}/>{busy ? "Running pipeline..." : "Preview from WebLogic"}</button>
         </div>
-      </form>}
+      </form>
     </section>
 
     {plan && selectedOperation && <section className="datasource-plan">
       <div className="datasource-section-title">
-        <div><Database size={21}/><div><h2>Preview · {selectedOperation.request_id}</h2><p>{plan.application} / {plan.environment.toUpperCase()} · {plan.reference_entity} → {plan.target_entity}</p></div></div>
+        <div><Database size={21}/><div><h2>{selectedOperation.status === "Completed" ? "Creation overview" : `Preview · ${selectedOperation.request_id}`}</h2><p>{plan.application} / {plan.environment.toUpperCase()} · {plan.reference_entity} → {plan.target_entity}</p></div></div>
         <span className={`status ${statusClass(selectedOperation.status)}`}>{selectedOperation.status}</span>
       </div>
 
+      {selectedOperation.status === "Completed" && <div className="datasource-created-summary">
+        <div><small>Datasources created</small><strong>{plan.summary?.created_count ?? createdItems.length}</strong></div>
+        <div><small>Target entity</small><strong>{selectedOperation.target_entity}</strong></div>
+        <div><small>Schema user</small><strong>{selectedOperation.schema_username}</strong></div>
+        <div><small>Pipeline run</small><strong>#{selectedOperation.azure_run_id || "—"}</strong></div>
+        <div className="full-width"><small>Datasource names</small><strong>{(plan.summary?.created_names?.length ? plan.summary.created_names : createdItems.map((item) => item.target_name)).join(", ") || "—"}</strong></div>
+      </div>}
+
       <div className="table-card">
         <table>
-          <thead><tr><th>Reference</th><th>New datasource</th><th>JNDI</th><th>Schema</th><th>Database</th><th>Targets</th><th>Type</th><th>Status</th></tr></thead>
+          <thead><tr><th>Reference</th><th>Datasource</th><th>JNDI</th><th>Schema</th><th>Database</th><th>Targets</th><th>Type</th><th>Status</th></tr></thead>
           <tbody>{plan.datasources.map((item) => <tr key={item.target_name}>
             <td><strong>{item.source_name}</strong><small>{item.source_jndis?.join(", ") || "—"}</small></td>
             <td><strong>{item.target_name}</strong></td>
@@ -498,19 +511,20 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       </div>
 
       <div className="datasource-plan-actions">
-        {selectedOperation.azure_run_url && <a href={selectedOperation.azure_run_url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Open preview run</a>}
+        {selectedOperation.azure_run_url && <a href={selectedOperation.azure_run_url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Open Azure DevOps run</a>}
         {selectedOperation.status === "Previewed" && <button className="primary-button" disabled={busy || plan.datasources.some((item) => item.status !== "Ready")} onClick={() => setConfirmApply(true)}>Create Datasources</button>}
       </div>
     </section>}
 
     <section className="datasource-history">
-      <div className="datasource-section-title"><div><Database size={21}/><div><h2>Recent datasource operations</h2><p>Preview and apply audit history. Secrets are never returned in this view.</p></div></div></div>
+      <div className="datasource-section-title"><div><Database size={21}/><div><h2>Recent datasource operations</h2><p>Preview and creation history. Passwords and password patterns are never returned in this view.</p></div></div></div>
       <div className="table-card">
         <table>
-          <thead><tr><th>Request</th><th>Reference → Target</th><th>Type</th><th>Requested by</th><th>Status</th><th>Updated</th><th>Run</th></tr></thead>
+          <thead><tr><th>Request</th><th>Reference → Target</th><th>Schema</th><th>Type</th><th>Requested by</th><th>Status</th><th>Updated</th><th>Run</th></tr></thead>
           <tbody>{operations.map((item) => <tr key={item.id} onClick={() => item.preview && setSelectedOperation(item)} className={item.preview ? "datasource-history-clickable" : ""}>
             <td><strong>{item.request_id}</strong></td>
             <td>{item.reference_entity} → <strong>{item.target_entity}</strong></td>
+            <td>{item.schema_username || "—"}</td>
             <td>{item.datasource_type}</td>
             <td>{item.requested_by}</td>
             <td><span className={`status ${statusClass(item.status)}`}>{item.status}</span></td>
@@ -526,11 +540,12 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       variant="warning"
       eyebrow="WEBLOGIC CHANGE"
       title="Create these datasources?"
-      message="This action will connect to the configured WebLogic AdminServer and apply the previewed datasource plan through WLST."
+      message="This will trigger the datasource pipeline and apply the previewed changes to the selected WebLogic environment through WLST."
       details={[
         { label: "Request", value: selectedOperation?.request_id || "" },
         { label: "Environment", value: selectedEnvironment ? `${selectedEnvironment.application} / ${selectedEnvironment.environment.toUpperCase()}` : "" },
         { label: "Entity", value: selectedOperation ? `${selectedOperation.reference_entity} → ${selectedOperation.target_entity}` : "" },
+        { label: "Schema", value: selectedOperation?.schema_username || "" },
         { label: "Datasources", value: String(selectedOperation?.preview?.datasources?.length || 0) },
       ]}
       primaryLabel="Create Datasources"
