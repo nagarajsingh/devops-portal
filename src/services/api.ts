@@ -72,8 +72,11 @@ export type DatasourceEntityInput={
 
 export type DatasourcePreviewInput={
   environment_instance_id:number;
+  operation_mode:"create"|"update";
   reference_entity:string;
   target_entity:string;
+  datasource_name:string;
+  target_targets:string[];
   datasource_type:"standalone"|"gridlink";
   db_host:string;
   db_port:number;
