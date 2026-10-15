@@ -119,6 +119,25 @@ def dsportal_java_string_array(values):
     return jarray.array([String(dsportal_text(value)) for value in values], String)
 
 
+def dsportal_target_url(request):
+    if request["datasource_type"] == "gridlink":
+        return (
+            "jdbc:oracle:thin:@(DESCRIPTION="
+            "(ADDRESS_LIST=(ADDRESS=(PROTOCOL=TCP)(HOST=%s)(PORT=%s)))"
+            "(CONNECT_DATA=(SERVICE_NAME=%s)))"
+            % (
+                request["db_host"],
+                request["db_port"],
+                request["service_id"],
+            )
+        )
+    return "jdbc:oracle:thin:@//%s:%s/%s" % (
+        request["db_host"],
+        request["db_port"],
+        request["service_id"],
+    )
+
+
 def dsportal_capture_reference(ds, reference_entity, target_entity, request):
     resource = ds.getJDBCResource()
     params = resource.getJDBCDataSourceParams()
@@ -145,23 +164,7 @@ def dsportal_capture_reference(ds, reference_entity, target_entity, request):
     if not target_user:
         dsportal_fail("Target schema username is required")
 
-    if request["datasource_type"] == "gridlink":
-        target_url = (
-            "jdbc:oracle:thin:@(DESCRIPTION="
-            "(ADDRESS_LIST=(ADDRESS=(PROTOCOL=TCP)(HOST=%s)(PORT=%s)))"
-            "(CONNECT_DATA=(SERVICE_NAME=%s)))"
-            % (
-                request["db_host"],
-                request["db_port"],
-                request["service_id"],
-            )
-        )
-    else:
-        target_url = "jdbc:oracle:thin:@//%s:%s/%s" % (
-            request["db_host"],
-            request["db_port"],
-            request["service_id"],
-        )
+    target_url = dsportal_target_url(request)
 
     source_targets = [dsportal_text(target.getName()) for target in (ds.getTargets() or [])]
     target_targets = [
@@ -202,6 +205,70 @@ def dsportal_capture_reference(ds, reference_entity, target_entity, request):
         "fan_enabled": fan_enabled,
         "ons_nodes": ons_nodes,
         "status": "Ready",
+    }
+
+
+def dsportal_capture_existing(ds, request):
+    resource = ds.getJDBCResource()
+    params = resource.getJDBCDataSourceParams()
+    driver = resource.getJDBCDriverParams()
+    pool = resource.getJDBCConnectionPoolParams()
+
+    name = dsportal_text(ds.getName())
+    jndis = [dsportal_text(value) for value in (params.getJNDINames() or [])]
+    source_user = dsportal_read_property(driver, "user")
+    if not source_user:
+        dsportal_fail("Datasource %s does not expose a JDBC user property" % name)
+
+    actual_type = "gridlink" if dsportal_is_gridlink(ds) else "standalone"
+    if actual_type != request["datasource_type"]:
+        dsportal_fail(
+            "Datasource %s is %s but update request selected %s"
+            % (name, actual_type, request["datasource_type"])
+        )
+
+    source_targets = [
+        dsportal_text(target.getName())
+        for target in (ds.getTargets() or [])
+    ]
+    requested_targets = request.get("target_targets") or []
+    target_targets = [
+        dsportal_text(value).strip()
+        for value in requested_targets
+        if dsportal_text(value).strip()
+    ]
+    if not target_targets:
+        target_targets = source_targets
+
+    properties = {}
+    try:
+        for prop in driver.getProperties().getProperties():
+            prop_name = dsportal_text(prop.getName())
+            if prop_name.lower() != "user":
+                properties[prop_name] = dsportal_text(prop.getValue())
+    except Exception:
+        pass
+
+    return {
+        "source_name": name,
+        "target_name": name,
+        "source_jndis": jndis,
+        "target_jndis": jndis,
+        "source_user": source_user,
+        "target_user": dsportal_text(request.get("schema_username") or "").strip().upper(),
+        "source_url": dsportal_text(driver.getUrl()),
+        "target_url": dsportal_target_url(request),
+        "driver_name": dsportal_text(driver.getDriverName()),
+        "datasource_type": request["datasource_type"],
+        "datasource_attributes": dsportal_capture_attributes(params, DATASOURCE_ATTRIBUTES),
+        "pool_attributes": dsportal_capture_attributes(pool, POOL_ATTRIBUTES),
+        "driver_properties": properties,
+        "source_targets": source_targets,
+        "target_targets": target_targets,
+        "fan_enabled": request["datasource_type"] == "gridlink",
+        "ons_nodes": dsportal_text(request.get("ons_nodes") or "").strip(),
+        "status": "Ready",
+        "change_type": "Update",
     }
 
 
@@ -396,33 +463,46 @@ def dsportal_main():
     connect(request["weblogic_username"], request["weblogic_password"], admin_url)
     domainConfig()
 
+    operation_mode = dsportal_text(request.get("operation_mode") or "create").lower()
     reference_entity = request["reference_entity"].upper()
     target_entity = request["target_entity"].upper()
-    matches = [
-        ds
-        for ds in (cmo.getJDBCSystemResources() or [])
-        if dsportal_matches_reference(
-            ds,
-            reference_entity,
-            request["datasource_type"],
-        )
-    ]
 
-    if not matches:
-        dsportal_fail(
-            "No WebLogic datasources were found for reference entity %s"
-            % reference_entity
-        )
+    if operation_mode == "update":
+        datasource_name = dsportal_text(request.get("datasource_name") or "").strip()
+        if not datasource_name:
+            dsportal_fail("Existing datasource name is required for update mode")
 
-    datasource_items = [
-        dsportal_capture_reference(ds, reference_entity, target_entity, request)
-        for ds in matches
-    ]
+        existing_ds = dsportal_find_datasource(datasource_name)
+        if existing_ds is None:
+            dsportal_fail("Datasource %s was not found in WebLogic" % datasource_name)
 
-    # Existing targets are updates; missing targets are creates.
-    # This behavior is application-agnostic and is determined entirely from
-    # the live WebLogic reference entity and current target state.
-    update_existing = True
+        datasource_items = [dsportal_capture_existing(existing_ds, request)]
+        update_existing = True
+    else:
+        matches = [
+            ds
+            for ds in (cmo.getJDBCSystemResources() or [])
+            if dsportal_matches_reference(
+                ds,
+                reference_entity,
+                request["datasource_type"],
+            )
+        ]
+
+        if not matches:
+            dsportal_fail(
+                "No WebLogic datasources were found for reference entity %s"
+                % reference_entity
+            )
+
+        datasource_items = [
+            dsportal_capture_reference(ds, reference_entity, target_entity, request)
+            for ds in matches
+        ]
+
+        # Create/complete setup remains application-agnostic and can update
+        # an already-existing target discovered from the reference pattern.
+        update_existing = True
 
     plan = {
         "request_id": request["request_id"],
@@ -430,6 +510,8 @@ def dsportal_main():
         "environment": request["environment"],
         "domain_name": request["domain_name"],
         "action": action,
+        "operation_mode": operation_mode,
+        "datasource_name": dsportal_text(request.get("datasource_name") or ""),
         "datasource_type": request["datasource_type"],
         "reference_entity": reference_entity,
         "target_entity": target_entity,
@@ -500,10 +582,11 @@ def dsportal_main():
 
     disconnect()
     print(
-        "Datasource %s completed request_id=%s reference=%s target=%s count=%s"
+        "Datasource %s completed request_id=%s mode=%s reference=%s target=%s count=%s"
         % (
             action,
             request["request_id"],
+            operation_mode,
             reference_entity,
             target_entity,
             len(plan["datasources"]),
