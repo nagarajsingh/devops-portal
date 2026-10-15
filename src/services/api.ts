@@ -54,9 +54,7 @@ export type WebLogicEnvironmentInput={
   default_db_port:number;
   default_ons_nodes:string;
   weblogic_username:string;
-  weblogic_password?:string;
   ssh_username:string;
-  ssh_password?:string;
   is_production:boolean;
   is_active:boolean;
 };
