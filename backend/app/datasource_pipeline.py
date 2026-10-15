@@ -3,7 +3,9 @@ from __future__ import annotations
 import base64
 import io
 import json
+import ssl
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from typing import Any
@@ -24,13 +26,36 @@ logger = get_logger("datasource-pipeline")
 
 def _download_bytes(url: str, pat: str) -> bytes:
     token = base64.b64encode(f":{pat.strip()}".encode()).decode()
-    request = urllib.request.Request(
-        url,
-        method="GET",
-        headers={"Authorization": f"Basic {token}"},
+    last_error: Exception | None = None
+
+    for attempt in range(1, 4):
+        try:
+            request = urllib.request.Request(
+                url,
+                method="GET",
+                headers={
+                    "Authorization": f"Basic {token}",
+                    "Connection": "close",
+                    "User-Agent": "devops-portal/1.0",
+                },
+            )
+            with urllib.request.urlopen(request, timeout=120) as response:
+                return response.read()
+        except urllib.error.HTTPError:
+            raise
+        except (urllib.error.URLError, ssl.SSLError, ConnectionResetError, TimeoutError) as exc:
+            last_error = exc
+            logger.warning(
+                "Transient datasource artifact download error attempt=%s/3 error=%s",
+                attempt,
+                exc,
+            )
+            if attempt < 3:
+                time.sleep(attempt * 2)
+
+    raise RuntimeError(
+        f"Datasource artifact download failed after 3 attempts: {last_error}"
     )
-    with urllib.request.urlopen(request, timeout=120) as response:
-        return response.read()
 
 
 def _download_plan(run_id: int, pat: str) -> dict[str, Any]:
