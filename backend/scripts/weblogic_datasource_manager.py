@@ -62,14 +62,6 @@ def bean_value(bean, name, default=None):
             return default
 
 
-def truthy(value):
-    # Avoid calling bool() in the WLST global namespace; some WebLogic/Jython
-    # environments can resolve global names through Java package lookup.
-    if value:
-        return True
-    return False
-
-
 def capture_attributes(bean, names):
     values = {}
     for name in names:
@@ -172,7 +164,8 @@ def capture_reference(ds, reference_entity, target_entity, request):
 
     ons_nodes = text(request.get("ons_nodes") or "")
     source_ons = text(bean_value(oracle, "OnsNodeList", "") or "")
-    fan_enabled = truthy(bean_value(oracle, "FanEnabled", False))
+    fan_value = bean_value(oracle, "FanEnabled", False)
+    fan_enabled = text(fan_value).strip().lower() in ("true", "1", "yes")
 
     return {
         "source_name": source_name,
@@ -198,10 +191,11 @@ def capture_reference(ds, reference_entity, target_entity, request):
 def is_gridlink(ds):
     try:
         oracle = ds.getJDBCResource().getJDBCOracleParams()
-        return truthy(bean_value(oracle, "FanEnabled", False)) or truthy(
-            text(bean_value(oracle, "OnsNodeList", "") or "").strip()
-        )
-    except Exception:
+        fan_value = bean_value(oracle, "FanEnabled", False)
+        fan_enabled = text(fan_value).strip().lower() in ("true", "1", "yes")
+        ons_nodes = text(bean_value(oracle, "OnsNodeList", "") or "").strip()
+        return fan_enabled or ons_nodes != ""
+    except:
         return False
 
 
@@ -292,13 +286,13 @@ def create_datasource(item, password_pattern):
     oracle = resource.getJDBCOracleParams()
     if item.get("fan_enabled") or item.get("ons_nodes"):
         try:
-            oracle.setFanEnabled(truthy(item.get("fan_enabled") or item.get("ons_nodes")))
-        except Exception:
+            oracle.setFanEnabled(True)
+        except:
             pass
     if item.get("ons_nodes"):
         try:
             oracle.setOnsNodeList(item["ons_nodes"])
-        except Exception:
+        except:
             pass
 
     for target_name in item["target_targets"]:
