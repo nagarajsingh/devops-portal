@@ -58,9 +58,8 @@ export interface WebLogicEnvironment {
   is_production:boolean;
   is_active:boolean;
   weblogic_username:string;
-  weblogic_password_configured:boolean;
   ssh_username:string;
-  ssh_password_configured:boolean;
+  password_source:"ansible_vault";
   entities:DatasourceEntityProfile[];
   created_at:string;
   updated_at:string;
