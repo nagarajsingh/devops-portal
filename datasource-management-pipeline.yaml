@@ -231,6 +231,24 @@ jobs:
           fi
 
           python3 -m json.tool "$OUTPUT_DIR/datasource-plan.json" >/dev/null
+
+          # Emit a compact, non-secret copy of the plan into the build log so
+          # the portal can retrieve it through dev.azure.com without depending
+          # on the Azure artifact CDN endpoint.
+          python3 - "$OUTPUT_DIR/datasource-plan.json" <<'PY'
+          import base64
+          import json
+          import sys
+          import zlib
+
+          with open(sys.argv[1], "r") as handle:
+              plan = json.load(handle)
+
+          raw = json.dumps(plan, separators=(",", ":")).encode("utf-8")
+          encoded = base64.b64encode(zlib.compress(raw, 9)).decode("ascii")
+          print("DEVOPS_PORTAL_DATASOURCE_PLAN_ZLIB_B64=" + encoded)
+          PY
+
           echo "Datasource $P_ACTION completed for request $P_REQUEST_ID."
         displayName: 'Run WLST datasource operation'
         env:
