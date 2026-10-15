@@ -100,6 +100,8 @@ export interface DatasourcePlan {
   environment:string;
   domain_name:string;
   action:string;
+  operation_mode?:"create"|"update";
+  datasource_name?:string;
   datasource_type:string;
   reference_entity:string;
   target_entity:string;
@@ -113,6 +115,9 @@ export interface DatasourceOperation {
   environment_instance_id:number;
   reference_entity:string;
   target_entity:string;
+  operation_mode:"create"|"update";
+  datasource_name:string;
+  target_targets:string[];
   datasource_type:string;
   db_host:string;
   db_port:number;
