@@ -81,6 +81,7 @@ export type DatasourcePreviewInput={
   service_id:string;
   schema_username:string;
   password_pattern?:string;
+  explicit_password?:string;
   ons_nodes:string;
   azure_devops_pat:string;
 };
