@@ -32,6 +32,7 @@ BEGIN
         application VARCHAR(50) NOT NULL,
         environment VARCHAR(50) NOT NULL,
         instance_name VARCHAR(50) NOT NULL CONSTRAINT df_weblogic_instance_name DEFAULT 'app1',
+        inventory_hostname VARCHAR(255) NULL,
         base_path VARCHAR(255) NULL,
         domain_name VARCHAR(100) NOT NULL,
         admin_host VARCHAR(255) NOT NULL,
@@ -55,6 +56,9 @@ BEGIN
 END;
 GO
 
+IF COL_LENGTH('weblogic_environment_instances', 'inventory_hostname') IS NULL
+    ALTER TABLE weblogic_environment_instances ADD inventory_hostname VARCHAR(255) NULL;
+GO
 IF COL_LENGTH('weblogic_environment_instances', 'artifacts_location') IS NULL
     ALTER TABLE weblogic_environment_instances ADD artifacts_location VARCHAR(255) NULL;
 GO
