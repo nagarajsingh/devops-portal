@@ -73,6 +73,9 @@ parameters:
   - name: serviceId
     type: string
 
+  - name: schemaUsername
+    type: string
+
   - name: onsNodes
     type: string
     default: ''
@@ -122,6 +125,7 @@ jobs:
               "db_host": os.environ["P_DB_HOST"],
               "db_port": int(os.environ["P_DB_PORT"]),
               "service_id": os.environ["P_SERVICE_ID"],
+              "schema_username": os.environ["P_SCHEMA_USERNAME"],
               "ons_nodes": os.environ.get("P_ONS_NODES", ""),
               "weblogic_username": os.environ["P_WEBLOGIC_USERNAME"],
               "weblogic_password": os.environ["WEBLOGIC_PASSWORD"],
@@ -195,6 +199,7 @@ jobs:
           P_DB_HOST: '${{ parameters.dbHost }}'
           P_DB_PORT: '${{ parameters.dbPort }}'
           P_SERVICE_ID: '${{ parameters.serviceId }}'
+          P_SCHEMA_USERNAME: '${{ parameters.schemaUsername }}'
           P_ONS_NODES: '${{ parameters.onsNodes }}'
 
       - task: PublishPipelineArtifact@1
