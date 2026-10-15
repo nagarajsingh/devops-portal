@@ -2,9 +2,6 @@ name: '$(Date:yyyyMMdd).$(Rev:r)-${{ parameters.environment }}-${{ parameters.ap
 
 trigger: none
 
-variables:
-  DATASOURCE_RUNTIME_API_URL: 'https://h2h-dev.mashreqdev.com/devops-portal/api'
-
 parameters:
   - name: action
     type: string
@@ -97,7 +94,7 @@ jobs:
           set -euo pipefail
           command -v sshpass >/dev/null
           command -v ssh-keyscan >/dev/null
-          command -v curl >/dev/null
+          command -v ansible-vault >/dev/null
           command -v python3 >/dev/null
           test -f backend/scripts/weblogic_datasource_manager.py
         displayName: 'Validate execution agent'
@@ -109,40 +106,74 @@ jobs:
           OUTPUT_DIR="$(Pipeline.Workspace)/datasource-output"
           LOCAL_RUNTIME="$(Pipeline.Workspace)/datasource-runtime.json"
           LOCAL_REQUEST="$(Pipeline.Workspace)/datasource-request.json"
+          VAULT_PASSWORD_FILE="$(Pipeline.Workspace)/datasource-vault-password"
+          CONFIG_FILE="$(Build.SourcesDirectory)/datasource-config/${P_ENVIRONMENT,,}/${P_APPLICATION,,}.json.vault"
           REMOTE_DIR="/tmp/devops-portal-ds-${P_REQUEST_ID}"
           mkdir -p "$OUTPUT_DIR"
 
-          curl --fail --silent --show-error \
-            --connect-timeout 30 \
-            --max-time 60 \
-            -H "X-Datasource-Pipeline-Token: $DATASOURCE_PIPELINE_API_TOKEN" \
-            -H "Accept: application/json" \
-            "$P_RUNTIME_API_URL/datasources/internal/runtime/$P_REQUEST_ID" \
-            -o "$LOCAL_RUNTIME"
+          if [[ ! -f "$CONFIG_FILE" ]]; then
+            echo "Datasource config not found: $CONFIG_FILE"
+            echo "Create and encrypt it with ansible-vault before running this pipeline."
+            exit 1
+          fi
+
+          printf "%s" "$ANSIBLE_VAULT_PASSWORD" > "$VAULT_PASSWORD_FILE"
+          chmod 600 "$VAULT_PASSWORD_FILE"
+          ansible-vault view --vault-password-file "$VAULT_PASSWORD_FILE" "$CONFIG_FILE" > "$LOCAL_RUNTIME"
+          chmod 600 "$LOCAL_RUNTIME"
 
           python3 - <<'PY'
           import json, os
 
-          request_id = os.environ['P_REQUEST_ID']
           with open(os.environ['LOCAL_RUNTIME']) as handle:
-              payload = json.load(handle)
+              config = json.load(handle)
 
-          if payload.get('request_id') != request_id:
-              raise RuntimeError('Datasource runtime response request ID did not match')
+          application = os.environ['P_APPLICATION'].upper()
+          environment = os.environ['P_ENVIRONMENT'].lower()
+          target_entity = os.environ['P_TARGET_ENTITY'].upper()
 
-          remote_payload = dict(payload)
-          remote_payload.pop('ssh_password', None)
+          if str(config.get('application', '')).upper() != application:
+              raise RuntimeError('Datasource config application does not match pipeline request')
+          if str(config.get('environment', '')).lower() != environment:
+              raise RuntimeError('Datasource config environment does not match pipeline request')
+
+          entities = config.get('entities') or {}
+          entity = entities.get(target_entity) or {}
+          password_pattern = entity.get('password_pattern') or config.get('password_pattern')
+          if not password_pattern:
+              raise RuntimeError('password_pattern is missing for target entity %s' % target_entity)
+
+          payload = {
+              'request_id': os.environ['P_REQUEST_ID'],
+              'application': application,
+              'environment': environment,
+              'instance_name': config.get('instance_name', 'app1'),
+              'domain_name': config['domain_name'],
+              'admin_host': config['admin_host'],
+              'admin_port': int(config['admin_port']),
+              'reference_entity': os.environ['P_REFERENCE_ENTITY'].upper(),
+              'target_entity': target_entity,
+              'datasource_type': os.environ['P_DATASOURCE_TYPE'].lower(),
+              'db_host': os.environ['P_DB_HOST'],
+              'db_port': int(os.environ['P_DB_PORT']),
+              'service_id': os.environ['P_SERVICE_ID'],
+              'schema_username': os.environ['P_SCHEMA_USERNAME'],
+              'ons_nodes': os.environ.get('P_ONS_NODES', ''),
+              'weblogic_username': config['weblogic_username'],
+              'weblogic_password': config['weblogic_password'],
+              'password_pattern': password_pattern,
+          }
+
           with open(os.environ['LOCAL_REQUEST'], 'w') as handle:
-              json.dump(remote_payload, handle)
+              json.dump(payload, handle)
           PY
 
-          chmod 600 "$LOCAL_RUNTIME" "$LOCAL_REQUEST"
+          chmod 600 "$LOCAL_REQUEST"
           SSH_PASSWORD="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ssh_password"])' "$LOCAL_RUNTIME")"
           P_SSH_USERNAME="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ssh_username"])' "$LOCAL_RUNTIME")"
           P_ADMIN_HOST="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["admin_host"])' "$LOCAL_RUNTIME")"
-          P_SSH_PORT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ssh_port"])' "$LOCAL_RUNTIME")"
+          P_SSH_PORT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("ssh_port",22))' "$LOCAL_RUNTIME")"
           P_WLST_PATH="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["wlst_path"])' "$LOCAL_RUNTIME")"
-
           KNOWN_HOSTS="$(Pipeline.Workspace)/datasource-known-hosts"
           rm -f "$KNOWN_HOSTS"
           ssh-keyscan -p "$P_SSH_PORT" "$P_ADMIN_HOST" > "$KNOWN_HOSTS" 2>/dev/null
@@ -173,7 +204,7 @@ jobs:
 
           SSHPASS="$SSH_PASSWORD" sshpass -e ssh "${SSH_OPTS[@]}" "$P_SSH_USERNAME@$P_ADMIN_HOST" "rm -rf '$REMOTE_DIR'" || true
           unset SSH_PASSWORD
-          rm -f "$LOCAL_RUNTIME" "$LOCAL_REQUEST"
+          rm -f "$LOCAL_RUNTIME" "$LOCAL_REQUEST" "$VAULT_PASSWORD_FILE"
 
           if [[ "$RC" -ne 0 ]]; then
             echo "WLST datasource operation failed with exit code $RC"
@@ -186,10 +217,19 @@ jobs:
         env:
           LOCAL_RUNTIME: '$(Pipeline.Workspace)/datasource-runtime.json'
           LOCAL_REQUEST: '$(Pipeline.Workspace)/datasource-request.json'
-          DATASOURCE_PIPELINE_API_TOKEN: '$(DATASOURCE_PIPELINE_API_TOKEN)'
-          P_RUNTIME_API_URL: '$(DATASOURCE_RUNTIME_API_URL)'
+          ANSIBLE_VAULT_PASSWORD: '$(ANSIBLE_VAULT_PASSWORD)'
           P_ACTION: '${{ parameters.action }}'
           P_REQUEST_ID: '${{ parameters.requestId }}'
+          P_APPLICATION: '${{ parameters.application }}'
+          P_ENVIRONMENT: '${{ parameters.environment }}'
+          P_REFERENCE_ENTITY: '${{ parameters.referenceEntity }}'
+          P_TARGET_ENTITY: '${{ parameters.targetEntity }}'
+          P_DATASOURCE_TYPE: '${{ parameters.datasourceType }}'
+          P_DB_HOST: '${{ parameters.dbHost }}'
+          P_DB_PORT: '${{ parameters.dbPort }}'
+          P_SERVICE_ID: '${{ parameters.serviceId }}'
+          P_SCHEMA_USERNAME: '${{ parameters.schemaUsername }}'
+          P_ONS_NODES: '${{ parameters.onsNodes }}'
       - task: PublishPipelineArtifact@1
         displayName: 'Publish datasource plan'
         inputs:
