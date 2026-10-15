@@ -132,15 +132,12 @@ def capture_reference(ds, reference_entity, target_entity, request):
         for value in jndis
     ]
     source_user = read_property(driver, "user")
-    target_user = replace_entity(source_user, reference_entity, target_entity)
+    target_user = text(request.get("schema_username") or "").strip().upper()
 
     if not source_user:
         fail("Reference datasource %s does not expose a JDBC user property" % source_name)
-    if target_user == source_user:
-        fail(
-            "Unable to derive target schema username from %s using reference entity %s"
-            % (source_user, reference_entity)
-        )
+    if not target_user:
+        fail("Target schema username is required")
 
     target_url = "jdbc:oracle:thin:@//%s:%s/%s" % (
         request["db_host"],
@@ -379,6 +376,23 @@ def main():
             except Exception:
                 pass
             raise
+
+    created = [
+        item["target_name"]
+        for item in plan["datasources"]
+        if item.get("status") == "Created"
+    ]
+    ready = [
+        item["target_name"]
+        for item in plan["datasources"]
+        if item.get("status") == "Ready"
+    ]
+    plan["summary"] = {
+        "total": len(plan["datasources"]),
+        "created_count": len(created),
+        "created_names": created,
+        "ready_count": len(ready),
+    }
 
     with open(plan_path, "w") as handle:
         json.dump(plan, handle, indent=2)
