@@ -121,6 +121,9 @@ BEGIN
         environment_instance_id INT NOT NULL,
         reference_entity VARCHAR(30) NOT NULL,
         target_entity VARCHAR(30) NOT NULL,
+        operation_mode VARCHAR(20) NULL,
+        datasource_name VARCHAR(255) NULL,
+        target_targets VARCHAR(2000) NULL,
         datasource_type VARCHAR(30) NOT NULL,
         db_host VARCHAR(255) NOT NULL,
         db_port INT NOT NULL,
@@ -146,4 +149,13 @@ END;
 GO
 IF COL_LENGTH('datasource_operations', 'schema_username') IS NULL
     ALTER TABLE datasource_operations ADD schema_username VARCHAR(100) NULL;
+GO
+IF COL_LENGTH('datasource_operations', 'operation_mode') IS NULL
+    ALTER TABLE datasource_operations ADD operation_mode VARCHAR(20) NULL;
+GO
+IF COL_LENGTH('datasource_operations', 'datasource_name') IS NULL
+    ALTER TABLE datasource_operations ADD datasource_name VARCHAR(255) NULL;
+GO
+IF COL_LENGTH('datasource_operations', 'target_targets') IS NULL
+    ALTER TABLE datasource_operations ADD target_targets VARCHAR(2000) NULL;
 GO
