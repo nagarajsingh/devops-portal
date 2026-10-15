@@ -95,14 +95,19 @@ def initialize_datasource_database() -> None:
             # passwords in weblogic_credentials. Copy only the usernames into
             # the environment record; passwords are now sourced exclusively
             # from the Ansible Vault file at pipeline runtime.
-            if not row.weblogic_username:
-                legacy_weblogic = _credential(db, row.id, "WEBLOGIC_ADMIN")
-                if legacy_weblogic:
-                    row.weblogic_username = legacy_weblogic.username
-            if not row.ssh_username:
-                legacy_ssh = _credential(db, row.id, "SSH")
-                if legacy_ssh:
-                    row.ssh_username = legacy_ssh.username
+            legacy_weblogic = _credential(db, row.id, "WEBLOGIC_ADMIN")
+            legacy_ssh = _credential(db, row.id, "SSH")
+            if not row.weblogic_username and legacy_weblogic:
+                row.weblogic_username = legacy_weblogic.username
+            if not row.ssh_username and legacy_ssh:
+                row.ssh_username = legacy_ssh.username
+
+            # Server passwords now live only in Ansible Vault. Remove legacy
+            # encrypted credential rows after retaining their usernames.
+            if legacy_weblogic:
+                db.delete(legacy_weblogic)
+            if legacy_ssh:
+                db.delete(legacy_ssh)
 
             root, common, channel, ear = _derived_paths(
                 row.environment,
