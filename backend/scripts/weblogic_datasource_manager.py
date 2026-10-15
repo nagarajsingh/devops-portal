@@ -138,20 +138,12 @@ def dsportal_capture_reference(ds, reference_entity, target_entity, request):
     if not source_user:
         dsportal_fail("Reference datasource %s does not expose a JDBC user property" % source_name)
 
-    # Derive each target schema from the live reference datasource.
-    # This works for both single-schema applications (for example OBPUS ->
-    # OBPIN) and applications with multiple datasource-specific schemas.
-    target_user = dsportal_replace_entity(
-        source_user,
-        reference_entity,
-        target_entity,
-    ).upper()
-
-    if not target_user or target_user == source_user.upper():
-        dsportal_fail(
-            "Unable to derive target schema user from %s using reference entity %s"
-            % (source_user, reference_entity)
-        )
+    # Connection-specific target values come from the Datasource details
+    # form. The reference datasource supplies only the structure/configuration
+    # to clone (JNDI pattern, driver, pool attributes, targets, properties).
+    target_user = dsportal_text(request.get("schema_username") or "").strip().upper()
+    if not target_user:
+        dsportal_fail("Target schema username is required")
 
     if request["datasource_type"] == "gridlink":
         target_url = (
