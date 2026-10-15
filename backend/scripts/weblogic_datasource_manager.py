@@ -178,10 +178,10 @@ def dsportal_capture_reference(ds, reference_entity, target_entity, request):
     except Exception:
         pass
 
-    ons_nodes = dsportal_text(request.get("ons_nodes") or "")
-    source_ons = dsportal_text(dsportal_bean_value(oracle, "OnsNodeList", "") or "")
-    fan_value = dsportal_bean_value(oracle, "FanEnabled", False)
-    fan_enabled = dsportal_text(fan_value).strip().lower() in ("true", "1", "yes")
+    # Target ONS/FAN settings are supplied by Datasource details.
+    # Never inherit ONS nodes from the reference datasource.
+    ons_nodes = dsportal_text(request.get("ons_nodes") or "").strip()
+    fan_enabled = request["datasource_type"] == "gridlink"
 
     return {
         "source_name": source_name,
@@ -200,7 +200,7 @@ def dsportal_capture_reference(ds, reference_entity, target_entity, request):
         "source_targets": source_targets,
         "target_targets": target_targets,
         "fan_enabled": fan_enabled,
-        "ons_nodes": ons_nodes or source_ons,
+        "ons_nodes": ons_nodes,
         "status": "Ready",
     }
 
