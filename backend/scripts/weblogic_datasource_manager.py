@@ -332,9 +332,19 @@ def dsportal_validate_plan(plan):
     for ds in (cmo.getJDBCSystemResources() or []):
         existing_names[dsportal_text(ds.getName()).lower()] = True
 
+    allow_update = plan.get("update_existing") is True
+
     for item in plan["datasources"]:
         if item["target_name"].lower() in existing_names:
-            item["status"] = "Already Exists"
+            if allow_update:
+                item["status"] = "Ready"
+                item["change_type"] = "Update"
+            else:
+                item["status"] = "Already Exists"
+                item["change_type"] = "Create"
+        else:
+            item["change_type"] = "Create"
+
         missing_targets = []
         for target_name in item["target_targets"]:
             if dsportal_target_mbean(target_name) is None:
@@ -344,9 +354,16 @@ def dsportal_validate_plan(plan):
             item["missing_targets"] = missing_targets
 
 
-def dsportal_create_datasource(item, password_pattern):
+def dsportal_find_datasource(name):
+    wanted = name.lower()
+    for ds in (cmo.getJDBCSystemResources() or []):
+        if dsportal_text(ds.getName()).lower() == wanted:
+            return ds
+    return None
+
+
+def dsportal_configure_datasource(ds, item, password_pattern, replace_targets):
     name = item["target_name"]
-    ds = cmo.createJDBCSystemResource(name)
     resource = ds.getJDBCResource()
     resource.setName(name)
 
@@ -367,13 +384,17 @@ def dsportal_create_datasource(item, password_pattern):
     driver.setPassword(password)
 
     props = driver.getProperties()
-    user_prop = props.createProperty("user")
+    user_prop = props.lookupProperty("user")
+    if user_prop is None:
+        user_prop = props.createProperty("user")
     user_prop.setValue(item["target_user"])
 
     for prop_name in item["driver_properties"]:
         if prop_name.lower() == "user":
             continue
-        prop = props.createProperty(prop_name)
+        prop = props.lookupProperty(prop_name)
+        if prop is None:
+            prop = props.createProperty(prop_name)
         prop.setValue(item["driver_properties"][prop_name])
 
     oracle = resource.getJDBCOracleParams()
@@ -382,17 +403,54 @@ def dsportal_create_datasource(item, password_pattern):
             oracle.setFanEnabled(True)
         except:
             pass
+    else:
+        try:
+            oracle.setFanEnabled(False)
+        except:
+            pass
+
     if item.get("ons_nodes"):
         try:
             oracle.setOnsNodeList(item["ons_nodes"])
         except:
             pass
+    else:
+        try:
+            oracle.setOnsNodeList("")
+        except:
+            pass
+
+    if replace_targets:
+        for current_target in (ds.getTargets() or []):
+            try:
+                ds.removeTarget(current_target)
+            except:
+                pass
 
     for target_name in item["target_targets"]:
         target = dsportal_target_mbean(target_name)
         if target is None:
-            dsportal_fail("Target %s was not found while creating %s" % (target_name, name))
-        ds.addTarget(target)
+            dsportal_fail("Target %s was not found while configuring %s" % (target_name, name))
+        already_targeted = False
+        for current_target in (ds.getTargets() or []):
+            if dsportal_text(current_target.getName()) == target_name:
+                already_targeted = True
+                break
+        if not already_targeted:
+            ds.addTarget(target)
+
+
+def dsportal_update_datasource(item, password_pattern):
+    ds = dsportal_find_datasource(item["target_name"])
+    if ds is None:
+        dsportal_fail("Existing datasource %s was not found for update" % item["target_name"])
+    dsportal_configure_datasource(ds, item, password_pattern, True)
+
+
+def dsportal_create_datasource(item, password_pattern):
+    name = item["target_name"]
+    ds = cmo.createJDBCSystemResource(name)
+    dsportal_configure_datasource(ds, item, password_pattern, False)
 
 
 def dsportal_main():
@@ -434,12 +492,21 @@ def dsportal_main():
         for ds in matches
     ]
 
-    if request["application"].upper() == "OBP" and reference_entity == "IN":
+    if (
+        request["application"].upper() == "OBP"
+        and reference_entity in ("IN", "US")
+    ):
         datasource_items = dsportal_apply_obp_us_pattern(
             datasource_items,
             reference_entity,
             target_entity,
         )
+
+    update_existing = (
+        request["application"].upper() == "OBP"
+        and reference_entity == "US"
+        and target_entity == "IN"
+    )
 
     plan = {
         "request_id": request["request_id"],
@@ -450,6 +517,7 @@ def dsportal_main():
         "datasource_type": request["datasource_type"],
         "reference_entity": reference_entity,
         "target_entity": target_entity,
+        "update_existing": update_existing,
         "datasources": datasource_items,
     }
 
@@ -463,7 +531,7 @@ def dsportal_main():
         ]
         if blocked:
             dsportal_fail(
-                "Apply blocked because one or more target datasources already exist or reference invalid targets"
+                "Apply blocked because one or more datasource changes are not ready or reference invalid targets"
             )
 
         edit()
@@ -471,8 +539,12 @@ def dsportal_main():
         try:
             cd("/")
             for item in plan["datasources"]:
-                dsportal_create_datasource(item, request["password_pattern"])
-                item["status"] = "Created"
+                if item.get("change_type") == "Update":
+                    dsportal_update_datasource(item, request["password_pattern"])
+                    item["status"] = "Updated"
+                else:
+                    dsportal_create_datasource(item, request["password_pattern"])
+                    item["status"] = "Created"
             save()
             activate(block="true")
         except Exception:
@@ -488,6 +560,11 @@ def dsportal_main():
         for item in plan["datasources"]
         if item.get("status") == "Created"
     ]
+    updated = [
+        item["target_name"]
+        for item in plan["datasources"]
+        if item.get("status") == "Updated"
+    ]
     ready = [
         item["target_name"]
         for item in plan["datasources"]
@@ -497,6 +574,8 @@ def dsportal_main():
         "total": len(plan["datasources"]),
         "created_count": len(created),
         "created_names": created,
+        "updated_count": len(updated),
+        "updated_names": updated,
         "ready_count": len(ready),
     }
 
