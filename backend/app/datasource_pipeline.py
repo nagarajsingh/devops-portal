@@ -13,7 +13,6 @@ from .config import (
     AZDO_ORG,
     DATASOURCE_AZURE_DEVOPS_PROJECT,
     DATASOURCE_PIPELINE_ID,
-    DATASOURCE_PIPELINE_BRANCH,
     DATASOURCE_PIPELINE_POLL_SECONDS,
     DATASOURCE_PIPELINE_TIMEOUT_SECONDS,
     DATASOURCE_PREVIEW_ARTIFACT_NAME,
@@ -112,7 +111,7 @@ def run_datasource_pipeline(
         parameters["onsNodes"] = str(operation.get("ons_nodes") or "")
 
     logger.info(
-        "Queueing datasource pipeline action=%s request_id=%s application=%s environment=%s reference_entity=%s target_entity=%s project=%s pipeline_id=%s branch=%s",
+        "Queueing datasource pipeline action=%s request_id=%s application=%s environment=%s reference_entity=%s target_entity=%s project=%s pipeline_id=%s",
         action,
         request_id,
         environment["application"],
@@ -121,26 +120,12 @@ def run_datasource_pipeline(
         operation["target_entity"],
         DATASOURCE_AZURE_DEVOPS_PROJECT,
         pipeline_id,
-        DATASOURCE_PIPELINE_BRANCH,
     )
-    ref_name = DATASOURCE_PIPELINE_BRANCH
-    if not ref_name.startswith("refs/"):
-        ref_name = f"refs/heads/{ref_name}"
-
     code, body = azdo_request(
         "POST",
         f"_apis/pipelines/{pipeline_id}/runs?api-version=7.1",
         azure_devops_pat,
-        {
-            "resources": {
-                "repositories": {
-                    "self": {
-                        "refName": ref_name,
-                    }
-                }
-            },
-            "templateParameters": parameters,
-        },
+        {"templateParameters": parameters},
         project=DATASOURCE_AZURE_DEVOPS_PROJECT,
     )
     if code not in (200, 201):
