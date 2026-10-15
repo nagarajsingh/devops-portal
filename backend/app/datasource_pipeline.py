@@ -195,8 +195,11 @@ def run_datasource_pipeline(
         "wlstPath": environment["wlst_path"],
         "sshUsername": environment["ssh_username"],
         "weblogicUsername": environment["weblogic_username"],
+        "operationMode": operation.get("operation_mode") or "create",
         "referenceEntity": operation["reference_entity"],
         "targetEntity": operation["target_entity"],
+        "datasourceName": operation.get("datasource_name") or "",
+        "targetTargets": ",".join(operation.get("target_targets") or []),
         "datasourceType": operation["datasource_type"],
         "dbHost": operation["db_host"],
         "dbPort": str(operation["db_port"]),
@@ -222,7 +225,15 @@ def run_datasource_pipeline(
         "POST",
         f"_apis/pipelines/{pipeline_id}/runs?api-version=7.1",
         azure_devops_pat,
-        {"templateParameters": parameters},
+        {
+            "templateParameters": parameters,
+            "variables": {
+                "DS_PASSWORD_PATTERN": {
+                    "value": operation["password_pattern"],
+                    "isSecret": True,
+                }
+            },
+        },
         project=DATASOURCE_AZURE_DEVOPS_PROJECT,
     )
     if code not in (200, 201):
