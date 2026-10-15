@@ -11,12 +11,5 @@
   "ssh_password": "REPLACE_BEFORE_ENCRYPTING",
   "weblogic_username": "REPLACE_WITH_WEBLOGIC_USER",
   "weblogic_password": "REPLACE_BEFORE_ENCRYPTING",
-  "entities": {
-    "AE": {"password_pattern": "{username}_TXS1T"},
-    "EG": {"password_pattern": "{username}_TXS1T"},
-    "IBG": {"password_pattern": "{username}_TXS1T"},
-    "FI": {"password_pattern": "{username}_TXS1T"},
-    "US": {"password_pattern": "{username}_TXS1T"},
-    "IN": {"password_pattern": "{username}_TXS1T"}
-  }
+  "password_pattern": "{username}_TXS1T"
 }
