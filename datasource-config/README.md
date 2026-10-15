@@ -43,12 +43,14 @@ The dashboard database is the source of truth for all non-secret WebLogic enviro
 - default DB host / port / ONS nodes
 - production and active flags
 
-The Ansible Vault file contains only the two server passwords:
+The Ansible Vault file contains server passwords and, for OBMA applications, the schema password prefix/suffix:
 
 ```json
 {
   "ssh_password": "SECRET",
-  "weblogic_password": "SECRET"
+  "weblogic_password": "SECRET",
+  "schma_fpwd": "SCHEMA_PASSWORD_PREFIX",
+  "schma_pwd": "SCHEMA_PASSWORD_SUFFIX"
 }
 ```
 
@@ -58,9 +60,9 @@ The pipeline selects the vault by application/environment:
 datasource-config/<environment>/<application>.json.vault
 ```
 
-It decrypts that file only to obtain the two passwords. All other execution values are supplied from the dashboard database through pipeline parameters.
+It decrypts that file at runtime to obtain server credentials and, for OBMA, the schema password fragments. For `OBTFPM`, `CMNCORE`, `MOCORE`, `PLATO`, `OBLM`, `OBLMIC`, `OBVAM`, and `OBVAMIC`, leaving both dashboard password inputs blank uses `schma_fpwd + schema_username + schma_pwd` for each generated datasource (for example `PLATOALERTSUK`). The optional explicit password takes priority over the optional custom pattern, which takes priority over the OBMA Vault default. If either OBMA Vault fragment is absent, the pipeline fails without exposing passwords. All other execution values are supplied from the dashboard database through pipeline parameters.
 
-Datasource target values are supplied from the Create/Update form, including DB host/port, service ID, schema username, datasource type, targets, and ONS nodes when applicable. The schema password pattern is encrypted by the portal and sent to Azure DevOps as the secret run variable `DS_PASSWORD_PATTERN`.
+Datasource target values are supplied from the Create/Update form, including DB host/port, service ID, schema username, datasource type, targets, and ONS nodes when applicable. An explicit schema password or custom schema password pattern is encrypted by the portal and sent to Azure DevOps as the secret run variable `DS_PASSWORD_PATTERN`. The OBMA default sends only a marker; the actual prefix and suffix are resolved inside the pipeline from Ansible Vault.
 
 The Datasources page has two operation modes:
 
