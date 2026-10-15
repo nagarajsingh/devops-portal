@@ -24,6 +24,18 @@ def _derived_paths(environment: str, artifacts_location: str | None) -> tuple[st
     return root, common, f"{common}/channel", f"{common}/consulting/deploy/"
 
 
+def _normalize_wlst_path(base_path: str | None, wlst_path: str | None) -> str:
+    value = (wlst_path or "").strip().rstrip("/")
+    if value.endswith("/bin"):
+        return value + "/wlst.sh"
+    if value:
+        return value
+    base = (base_path or "").strip().rstrip("/")
+    if not base:
+        raise HTTPException(status_code=400, detail="BASE or WLST executable path is required")
+    return f"{base}/Oracle/Middleware/Oracle_Home/oracle_common/common/bin/wlst.sh"
+
+
 def initialize_datasource_database() -> None:
     """Create/upgrade datasource metadata tables and seed the supported applications."""
     factory = session_factory()
@@ -453,7 +465,7 @@ def create_environment(payload: dict[str, Any]) -> dict[str, Any]:
             admin_host=payload["admin_host"].strip(),
             admin_port=int(payload["admin_port"]),
             ssh_port=int(payload.get("ssh_port") or 22),
-            wlst_path=payload["wlst_path"].strip(),
+            wlst_path=_normalize_wlst_path(payload.get("base_path"), payload.get("wlst_path")),
             artifacts_location=artifacts_location,
             common_artifacts_location=common_artifacts_location,
             cz_config_location=cz_config_location,
@@ -504,7 +516,7 @@ def update_environment(environment_id: int, payload: dict[str, Any]) -> dict[str
         row.admin_host = payload["admin_host"].strip()
         row.admin_port = int(payload["admin_port"])
         row.ssh_port = int(payload.get("ssh_port") or 22)
-        row.wlst_path = payload["wlst_path"].strip()
+        row.wlst_path = _normalize_wlst_path(payload.get("base_path"), payload.get("wlst_path"))
         (
             row.artifacts_location,
             row.common_artifacts_location,
