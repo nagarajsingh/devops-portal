@@ -2,6 +2,9 @@ name: '$(Date:yyyyMMdd).$(Rev:r)-${{ parameters.environment }}-${{ parameters.ap
 
 trigger: none
 
+variables:
+  DATASOURCE_RUNTIME_API_URL: 'https://h2h-dev.mashreqdev.com/devops-portal/api'
+
 parameters:
   - name: action
     type: string
@@ -11,9 +14,6 @@ parameters:
       - apply
 
   - name: requestId
-    type: string
-
-  - name: runtimeApiUrl
     type: string
 
   - name: application
@@ -171,7 +171,7 @@ jobs:
           LOCAL_RUNTIME: '$(Pipeline.Workspace)/datasource-runtime.json'
           LOCAL_REQUEST: '$(Pipeline.Workspace)/datasource-request.json'
           DATASOURCE_PIPELINE_API_TOKEN: '$(DATASOURCE_PIPELINE_API_TOKEN)'
-          P_RUNTIME_API_URL: '${{ parameters.runtimeApiUrl }}'
+          P_RUNTIME_API_URL: '$(DATASOURCE_RUNTIME_API_URL)'
           P_ACTION: '${{ parameters.action }}'
           P_REQUEST_ID: '${{ parameters.requestId }}'
       - task: PublishPipelineArtifact@1
