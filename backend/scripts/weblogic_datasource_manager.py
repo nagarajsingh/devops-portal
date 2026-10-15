@@ -62,6 +62,14 @@ def bean_value(bean, name, default=None):
             return default
 
 
+def truthy(value):
+    # Avoid calling bool() in the WLST global namespace; some WebLogic/Jython
+    # environments can resolve global names through Java package lookup.
+    if value:
+        return True
+    return False
+
+
 def capture_attributes(bean, names):
     values = {}
     for name in names:
@@ -164,7 +172,7 @@ def capture_reference(ds, reference_entity, target_entity, request):
 
     ons_nodes = text(request.get("ons_nodes") or "")
     source_ons = text(bean_value(oracle, "OnsNodeList", "") or "")
-    fan_enabled = bool(bean_value(oracle, "FanEnabled", False))
+    fan_enabled = truthy(bean_value(oracle, "FanEnabled", False))
 
     return {
         "source_name": source_name,
@@ -190,7 +198,7 @@ def capture_reference(ds, reference_entity, target_entity, request):
 def is_gridlink(ds):
     try:
         oracle = ds.getJDBCResource().getJDBCOracleParams()
-        return bool(bean_value(oracle, "FanEnabled", False)) or bool(
+        return truthy(bean_value(oracle, "FanEnabled", False)) or truthy(
             text(bean_value(oracle, "OnsNodeList", "") or "").strip()
         )
     except Exception:
@@ -284,7 +292,7 @@ def create_datasource(item, password_pattern):
     oracle = resource.getJDBCOracleParams()
     if item.get("fan_enabled") or item.get("ons_nodes"):
         try:
-            oracle.setFanEnabled(bool(item.get("fan_enabled") or item.get("ons_nodes")))
+            oracle.setFanEnabled(truthy(item.get("fan_enabled") or item.get("ons_nodes")))
         except Exception:
             pass
     if item.get("ons_nodes"):
