@@ -236,9 +236,11 @@ def dsportal_target_mbean(name):
 
 
 def dsportal_validate_plan(plan):
-    existing_names = set(
-        [dsportal_text(ds.getName()).lower() for ds in (cmo.getJDBCSystemResources() or [])]
-    )
+    # Avoid Python's set() name because WLST defines its own set() command.
+    existing_names = {}
+    for ds in (cmo.getJDBCSystemResources() or []):
+        existing_names[dsportal_text(ds.getName()).lower()] = True
+
     for item in plan["datasources"]:
         if item["target_name"].lower() in existing_names:
             item["status"] = "Already Exists"
