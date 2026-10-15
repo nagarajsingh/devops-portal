@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import json
 import re
+import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -31,22 +33,60 @@ def azdo_request(
     data = json.dumps(payload).encode() if payload is not None else None
     request = urllib.request.Request(url, data=data, method=method, headers={"Authorization": f"Basic {token}", "Content-Type": "application/json"})
     logger.debug("Azure DevOps request method=%s project=%s path=%s", method, target_project, path)
-    try:
-        with urllib.request.urlopen(request, timeout=45) as response:
-            raw = response.read().decode()
+
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            # Recreate the Request for each attempt so urllib opens a fresh
+            # HTTPS connection after transient TLS/proxy EOF failures.
+            retry_request = urllib.request.Request(
+                url,
+                data=data,
+                method=method,
+                headers={
+                    "Authorization": f"Basic {token}",
+                    "Content-Type": "application/json",
+                    "Connection": "close",
+                    "User-Agent": "devops-portal/1.0",
+                },
+            )
+            with urllib.request.urlopen(retry_request, timeout=45) as response:
+                raw = response.read().decode()
+                try:
+                    body = json.loads(raw or "{}")
+                except json.JSONDecodeError:
+                    body = {"content": raw}
+                return response.status, body
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode()
             try:
                 body = json.loads(raw or "{}")
             except json.JSONDecodeError:
-                body = {"content": raw}
-            return response.status, body
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode()
-        try:
-            body = json.loads(raw or "{}")
-        except json.JSONDecodeError:
-            body = {"message": raw or f"Azure DevOps request failed with HTTP {exc.code}"}
-        logger.error("Azure DevOps request failed method=%s project=%s path=%s status=%s", method, target_project, path, exc.code)
-        return exc.code, body
+                body = {"message": raw or f"Azure DevOps request failed with HTTP {exc.code}"}
+            logger.error(
+                "Azure DevOps request failed method=%s project=%s path=%s status=%s",
+                method,
+                target_project,
+                path,
+                exc.code,
+            )
+            return exc.code, body
+        except (urllib.error.URLError, ssl.SSLError, ConnectionResetError, TimeoutError) as exc:
+            last_error = exc
+            logger.warning(
+                "Transient Azure DevOps connection error method=%s project=%s path=%s attempt=%s/3 error=%s",
+                method,
+                target_project,
+                path,
+                attempt,
+                exc,
+            )
+            if attempt < 3:
+                time.sleep(attempt * 2)
+
+    raise RuntimeError(
+        f"Azure DevOps connection failed after 3 attempts for {path}: {last_error}"
+    )
 
 
 def get_repository(name: str, pat: str) -> dict | None:
