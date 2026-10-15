@@ -298,7 +298,11 @@ def apply_datasources(
         update_operation(
             operation_id,
             status="Apply Running",
-            message="Datasource creation is running through Azure DevOps",
+            message=(
+                "Datasource update is running through Azure DevOps"
+                if operation.get("operation_mode") == "update"
+                else "Datasource creation is running through Azure DevOps"
+            ),
         )
         result = run_datasource_pipeline(
             action="apply",
