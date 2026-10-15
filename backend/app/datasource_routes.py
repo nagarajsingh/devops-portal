@@ -66,7 +66,7 @@ class DatasourcePreviewPayload(BaseModel):
     db_host: str = Field(min_length=2, max_length=255)
     db_port: int = Field(ge=1, le=65535)
     service_id: str = Field(min_length=1, max_length=100)
-    schema_username: str = Field(min_length=1, max_length=100)
+    schema_username: str = Field(default="", max_length=100)
     password_pattern: SecretStr | None = None
     ons_nodes: str = Field(default="", max_length=1000)
     azure_devops_pat: SecretStr = Field(min_length=10)
