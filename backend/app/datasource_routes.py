@@ -60,8 +60,11 @@ class DatasourceEntityPayload(BaseModel):
 
 class DatasourcePreviewPayload(BaseModel):
     environment_instance_id: int
-    reference_entity: str = Field(min_length=1, max_length=30)
-    target_entity: str = Field(min_length=1, max_length=30)
+    operation_mode: str = Field(default="create", pattern=r"^(create|update)$")
+    reference_entity: str = Field(default="", max_length=30)
+    target_entity: str = Field(default="", max_length=30)
+    datasource_name: str = Field(default="", max_length=255)
+    target_targets: list[str] = Field(default_factory=list)
     datasource_type: str = Field(pattern=r"^(standalone|gridlink)$")
     db_host: str = Field(min_length=2, max_length=255)
     db_port: int = Field(ge=1, le=65535)
@@ -156,36 +159,68 @@ def preview_datasources(
     user: UserContext = Depends(require_devops),
 ):
     environment = get_environment(payload.environment_instance_id)
-    target_entity = payload.target_entity.strip().upper()
-    reference_entity = payload.reference_entity.strip().upper()
-    if target_entity == reference_entity:
-        raise HTTPException(
-            status_code=400,
-            detail="Target entity must be different from the reference entity",
-        )
-
+    operation_mode = payload.operation_mode.strip().lower()
     password_pattern = (
         payload.password_pattern.get_secret_value()
         if payload.password_pattern
         else None
     )
-    upsert_entity_profile(
-        payload.environment_instance_id,
-        target_entity,
-        payload.service_id,
-        payload.schema_username,
-        payload.db_host,
-        payload.db_port,
-        payload.ons_nodes,
-        password_pattern,
-    )
-    existing = get_entity_runtime(payload.environment_instance_id, target_entity)
-    password_pattern = existing["password_pattern"]
+
+    if operation_mode == "create":
+        target_entity = payload.target_entity.strip().upper()
+        reference_entity = payload.reference_entity.strip().upper()
+        if not reference_entity or not target_entity:
+            raise HTTPException(
+                status_code=400,
+                detail="Reference entity and target entity are required for Create Datasource",
+            )
+        if target_entity == reference_entity:
+            raise HTTPException(
+                status_code=400,
+                detail="Target entity must be different from the reference entity",
+            )
+
+        upsert_entity_profile(
+            payload.environment_instance_id,
+            target_entity,
+            payload.service_id,
+            payload.schema_username,
+            payload.db_host,
+            payload.db_port,
+            payload.ons_nodes,
+            password_pattern,
+        )
+        existing = get_entity_runtime(payload.environment_instance_id, target_entity)
+        password_pattern = existing["password_pattern"]
+        datasource_name = ""
+        target_targets = []
+    else:
+        datasource_name = payload.datasource_name.strip()
+        if not datasource_name:
+            raise HTTPException(
+                status_code=400,
+                detail="Existing datasource name is required for Update Datasource",
+            )
+        if not password_pattern:
+            raise HTTPException(
+                status_code=400,
+                detail="Schema password pattern is required when updating an existing datasource",
+            )
+        reference_entity = "UPDATE"
+        target_entity = "UPDATE"
+        target_targets = [
+            value.strip()
+            for value in payload.target_targets
+            if value and value.strip()
+        ]
 
     operation = create_operation(
         payload.environment_instance_id,
         reference_entity,
         target_entity,
+        operation_mode,
+        datasource_name,
+        target_targets,
         payload.datasource_type,
         payload.db_host,
         payload.db_port,
@@ -212,16 +247,22 @@ def preview_datasources(
             run_id=result["run_id"],
             run_url=result["run_url"],
             preview=result["plan"],
-            message="Datasource preview completed from the live WebLogic reference configuration",
+            message=(
+                "Single datasource update preview completed from live WebLogic"
+                if operation_mode == "update"
+                else "Datasource preview completed from the live WebLogic reference configuration"
+            ),
         )
     except Exception as exc:
         logger.exception(
-            "Datasource preview failed request_id=%s application=%s environment=%s reference_entity=%s target_entity=%s",
+            "Datasource preview failed request_id=%s application=%s environment=%s mode=%s reference_entity=%s target_entity=%s datasource=%s",
             operation["request_id"],
             environment["application"],
             environment["environment"],
+            operation_mode,
             reference_entity,
             target_entity,
+            datasource_name,
         )
         update_operation(
             operation["id"],
