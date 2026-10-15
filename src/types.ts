@@ -81,6 +81,7 @@ export interface DatasourcePlanItem {
   fan_enabled:boolean;
   ons_nodes:string;
   status:string;
+  change_type?:"Create"|"Update";
   missing_targets?:string[];
 }
 
@@ -88,6 +89,8 @@ export interface DatasourcePlanSummary {
   total:number;
   created_count:number;
   created_names:string[];
+  updated_count?:number;
+  updated_names?:string[];
   ready_count:number;
 }
 
