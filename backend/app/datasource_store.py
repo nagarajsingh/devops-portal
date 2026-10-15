@@ -726,6 +726,20 @@ def get_operation_runtime(operation_id: int) -> dict[str, Any]:
         }
 
 
+def get_operation_runtime_by_request_id(request_id: str) -> dict[str, Any]:
+    factory = session_factory()
+    with factory() as db:
+        row = db.scalar(
+            select(DatasourceOperation).where(DatasourceOperation.request_id == request_id.strip())
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Datasource operation was not found")
+        return {
+            **operation_view(row),
+            "password_pattern": decrypt_secret(row.password_pattern_ciphertext),
+        }
+
+
 def update_operation(
     operation_id: int,
     *,
