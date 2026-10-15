@@ -50,10 +50,11 @@ def initialize_user_database() -> None:
     # Import feature stores before create_all so their SQLAlchemy models are
     # registered on the shared metadata without introducing migration-time
     # coupling between modules.
-    from . import datasource_store  # noqa: F401
+    from . import datasource_store
 
     factory = session_factory()
     Base.metadata.create_all(bind=factory.kw["bind"])
+    datasource_store.initialize_datasource_database()
 
 
 def normalize_email(email: str) -> str:
