@@ -210,6 +210,9 @@ class WebLogicEnvironment(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
 
+# Legacy table retained only so startup migration can copy usernames and purge
+# previously stored server passwords. New datasource environment writes never
+# use this table; passwords come exclusively from Ansible Vault.
 class WebLogicCredential(Base):
     __tablename__ = "weblogic_credentials"
     __table_args__ = (
