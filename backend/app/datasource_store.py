@@ -114,7 +114,7 @@ def list_applications() -> list[dict[str, Any]]:
         rows = list(
             db.scalars(
                 select(DatasourceApplication)
-                .where(DatasourceApplication.is_active.is_(True))
+                .where(DatasourceApplication.is_active== 1)
                 .order_by(DatasourceApplication.id)
             ).all()
         )
@@ -393,7 +393,7 @@ def list_environments(active_only: bool = False) -> list[dict[str, Any]]:
     with factory() as db:
         query = select(WebLogicEnvironment)
         if active_only:
-            query = query.where(WebLogicEnvironment.is_active.is_(True))
+            query = query.where(WebLogicEnvironment.is_active== 1)
         rows = list(
             db.scalars(
                 query.order_by(
