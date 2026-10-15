@@ -150,11 +150,23 @@ def dsportal_capture_reference(ds, reference_entity, target_entity, request):
     if not target_user:
         dsportal_fail("Target schema username is required")
 
-    target_url = "jdbc:oracle:thin:@//%s:%s/%s" % (
-        request["db_host"],
-        request["db_port"],
-        request["service_id"],
-    )
+    if request["datasource_type"] == "gridlink":
+        target_url = (
+            "jdbc:oracle:thin:@(DESCRIPTION="
+            "(ADDRESS_LIST=(ADDRESS=(PROTOCOL=TCP)(HOST=%s)(PORT=%s)))"
+            "(CONNECT_DATA=(SERVICE_NAME=%s)))"
+            % (
+                request["db_host"],
+                request["db_port"],
+                request["service_id"],
+            )
+        )
+    else:
+        target_url = "jdbc:oracle:thin:@//%s:%s/%s" % (
+            request["db_host"],
+            request["db_port"],
+            request["service_id"],
+        )
 
     source_targets = [dsportal_text(target.getName()) for target in (ds.getTargets() or [])]
     target_targets = [
