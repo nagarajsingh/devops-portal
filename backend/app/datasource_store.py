@@ -6,7 +6,7 @@ from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, inspect, select, text as sql_text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .config import CREDENTIAL_ENCRYPTION_KEY
@@ -15,6 +15,130 @@ from .user_store import Base, session_factory
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _derived_paths(environment: str, artifacts_location: str | None) -> tuple[str, str, str, str]:
+    root = (artifacts_location or "/azure_artifact").rstrip("/") or "/azure_artifact"
+    env = environment.strip().lower()
+    common = f"{root}/{env}"
+    return root, common, f"{common}/channel", f"{common}/consulting/deploy/"
+
+
+def initialize_datasource_database() -> None:
+    """Create/upgrade datasource metadata tables and seed the supported applications."""
+    factory = session_factory()
+    engine = factory.kw["bind"]
+
+    # create_all creates new tables. The ALTER statements below keep existing
+    # installations forward-compatible because create_all does not add columns.
+    inspector = inspect(engine)
+    migrations = {
+        "weblogic_environment_instances": {
+            "artifacts_location": "VARCHAR(255) NULL",
+            "common_artifacts_location": "VARCHAR(500) NULL",
+            "cz_config_location": "VARCHAR(500) NULL",
+            "ear_path": "VARCHAR(500) NULL",
+        },
+        "datasource_entity_profiles": {
+            "schema_username": "VARCHAR(100) NULL",
+        },
+        "datasource_operations": {
+            "schema_username": "VARCHAR(100) NULL",
+        },
+    }
+    with engine.begin() as connection:
+        for table_name, columns in migrations.items():
+            if not inspector.has_table(table_name):
+                continue
+            existing = {column["name"].lower() for column in inspector.get_columns(table_name)}
+            for column_name, ddl in columns.items():
+                if column_name.lower() not in existing:
+                    connection.execute(
+                        sql_text(f"ALTER TABLE {table_name} ADD {column_name} {ddl}")
+                    )
+
+    with factory() as db:
+        for code in DATASOURCE_APPLICATIONS:
+            existing = db.scalar(
+                select(DatasourceApplication).where(DatasourceApplication.code == code)
+            )
+            if not existing:
+                db.add(
+                    DatasourceApplication(
+                        code=code,
+                        display_name=code,
+                        is_active=True,
+                    )
+                )
+
+        environments = list(db.scalars(select(WebLogicEnvironment)).all())
+        for row in environments:
+            root, common, channel, ear = _derived_paths(
+                row.environment,
+                row.artifacts_location,
+            )
+            changed = False
+            if not row.artifacts_location:
+                row.artifacts_location = root
+                changed = True
+            if not row.common_artifacts_location:
+                row.common_artifacts_location = common
+                changed = True
+            if not row.cz_config_location:
+                row.cz_config_location = channel
+                changed = True
+            if not row.ear_path:
+                row.ear_path = ear
+                changed = True
+            if changed:
+                row.updated_at = _utcnow()
+        db.commit()
+
+
+def list_applications() -> list[dict[str, Any]]:
+    factory = session_factory()
+    with factory() as db:
+        rows = list(
+            db.scalars(
+                select(DatasourceApplication)
+                .where(DatasourceApplication.is_active.is_(True))
+                .order_by(DatasourceApplication.id)
+            ).all()
+        )
+        return [
+            {
+                "id": row.id,
+                "code": row.code,
+                "display_name": row.display_name,
+                "is_active": row.is_active,
+            }
+            for row in rows
+        ]
+
+
+DATASOURCE_APPLICATIONS = (
+    "OBP",
+    "OBTF",
+    "OBTFPM",
+    "OBLM",
+    "OBVAM",
+    "OBVAMIC",
+    "OBLMIC",
+    "PLATO",
+    "CMNCORE",
+    "MOCORE",
+)
+
+
+class DatasourceApplication(Base):
+    __tablename__ = "datasource_applications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
 
 class WebLogicEnvironment(Base):
@@ -33,6 +157,10 @@ class WebLogicEnvironment(Base):
     admin_port: Mapped[int] = mapped_column(Integer, nullable=False)
     ssh_port: Mapped[int] = mapped_column(Integer, nullable=False, default=22)
     wlst_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    artifacts_location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    common_artifacts_location: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    cz_config_location: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    ear_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     agent_pool: Mapped[str] = mapped_column(String(100), nullable=False)
     default_db_host: Mapped[str] = mapped_column(String(255), nullable=False)
     default_db_port: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -78,6 +206,7 @@ class DatasourceEntityProfile(Base):
     )
     entity_code: Mapped[str] = mapped_column(String(30), nullable=False)
     service_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    schema_username: Mapped[str | None] = mapped_column(String(100), nullable=True)
     db_host: Mapped[str] = mapped_column(String(255), nullable=False)
     db_port: Mapped[int] = mapped_column(Integer, nullable=False)
     ons_nodes: Mapped[str | None] = mapped_column(String(1000), nullable=True)
@@ -103,6 +232,7 @@ class DatasourceOperation(Base):
     db_host: Mapped[str] = mapped_column(String(255), nullable=False)
     db_port: Mapped[int] = mapped_column(Integer, nullable=False)
     service_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    schema_username: Mapped[str | None] = mapped_column(String(100), nullable=True)
     ons_nodes: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     password_pattern_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="Queued")
@@ -198,6 +328,7 @@ def _entity_views(db, environment_id: int) -> list[dict[str, Any]]:
             "id": row.id,
             "entity_code": row.entity_code,
             "service_id": row.service_id,
+            "schema_username": row.schema_username or "",
             "db_host": row.db_host,
             "db_port": row.db_port,
             "ons_nodes": row.ons_nodes or "",
@@ -222,6 +353,10 @@ def _environment_view(db, row: WebLogicEnvironment) -> dict[str, Any]:
         "admin_port": row.admin_port,
         "ssh_port": row.ssh_port,
         "wlst_path": row.wlst_path,
+        "artifacts_location": row.artifacts_location or "",
+        "common_artifacts_location": row.common_artifacts_location or "",
+        "cz_config_location": row.cz_config_location or "",
+        "ear_path": row.ear_path or "",
         "agent_pool": row.agent_pool,
         "default_db_host": row.default_db_host,
         "default_db_port": row.default_db_port,
@@ -297,9 +432,17 @@ def create_environment(payload: dict[str, Any]) -> dict[str, Any]:
         )
         if duplicate:
             raise HTTPException(status_code=409, detail="Application/environment/instance already exists")
+        application = payload["application"].strip().upper()
+        if application not in DATASOURCE_APPLICATIONS:
+            raise HTTPException(status_code=400, detail="Unsupported datasource application")
+        environment = payload["environment"].strip().lower()
+        artifacts_location, common_artifacts_location, cz_config_location, ear_path = _derived_paths(
+            environment,
+            payload.get("artifacts_location"),
+        )
         row = WebLogicEnvironment(
-            application=payload["application"].strip().upper(),
-            environment=payload["environment"].strip().lower(),
+            application=application,
+            environment=environment,
             instance_name=payload["instance_name"].strip().lower(),
             base_path=(payload.get("base_path") or "").strip() or None,
             domain_name=payload["domain_name"].strip(),
@@ -307,6 +450,10 @@ def create_environment(payload: dict[str, Any]) -> dict[str, Any]:
             admin_port=int(payload["admin_port"]),
             ssh_port=int(payload.get("ssh_port") or 22),
             wlst_path=payload["wlst_path"].strip(),
+            artifacts_location=artifacts_location,
+            common_artifacts_location=common_artifacts_location,
+            cz_config_location=cz_config_location,
+            ear_path=ear_path,
             agent_pool=payload["agent_pool"].strip(),
             default_db_host=payload["default_db_host"].strip(),
             default_db_port=int(payload["default_db_port"]),
@@ -341,7 +488,10 @@ def update_environment(environment_id: int, payload: dict[str, Any]) -> dict[str
         row = db.get(WebLogicEnvironment, environment_id)
         if not row:
             raise HTTPException(status_code=404, detail="WebLogic environment was not found")
-        row.application = payload["application"].strip().upper()
+        application = payload["application"].strip().upper()
+        if application not in DATASOURCE_APPLICATIONS:
+            raise HTTPException(status_code=400, detail="Unsupported datasource application")
+        row.application = application
         row.environment = payload["environment"].strip().lower()
         row.instance_name = payload["instance_name"].strip().lower()
         row.base_path = (payload.get("base_path") or "").strip() or None
@@ -350,6 +500,12 @@ def update_environment(environment_id: int, payload: dict[str, Any]) -> dict[str
         row.admin_port = int(payload["admin_port"])
         row.ssh_port = int(payload.get("ssh_port") or 22)
         row.wlst_path = payload["wlst_path"].strip()
+        (
+            row.artifacts_location,
+            row.common_artifacts_location,
+            row.cz_config_location,
+            row.ear_path,
+        ) = _derived_paths(row.environment, payload.get("artifacts_location"))
         row.agent_pool = payload["agent_pool"].strip()
         row.default_db_host = payload["default_db_host"].strip()
         row.default_db_port = int(payload["default_db_port"])
@@ -384,6 +540,7 @@ def upsert_entity_profile(
     environment_id: int,
     entity_code: str,
     service_id: str,
+    schema_username: str,
     db_host: str,
     db_port: int,
     ons_nodes: str,
@@ -410,6 +567,7 @@ def upsert_entity_profile(
                 environment_instance_id=environment_id,
                 entity_code=entity,
                 service_id=service_id.strip(),
+                schema_username=schema_username.strip().upper(),
                 db_host=db_host.strip(),
                 db_port=int(db_port),
                 ons_nodes=ons_nodes.strip() or None,
@@ -418,6 +576,7 @@ def upsert_entity_profile(
             db.add(row)
         else:
             row.service_id = service_id.strip()
+            row.schema_username = schema_username.strip().upper()
             row.db_host = db_host.strip()
             row.db_port = int(db_port)
             row.ons_nodes = ons_nodes.strip() or None
@@ -430,6 +589,7 @@ def upsert_entity_profile(
             "id": row.id,
             "entity_code": row.entity_code,
             "service_id": row.service_id,
+            "schema_username": row.schema_username or "",
             "db_host": row.db_host,
             "db_port": row.db_port,
             "ons_nodes": row.ons_nodes or "",
@@ -451,6 +611,7 @@ def get_entity_runtime(environment_id: int, entity_code: str) -> dict[str, Any]:
         return {
             "entity_code": row.entity_code,
             "service_id": row.service_id,
+            "schema_username": row.schema_username or "",
             "db_host": row.db_host,
             "db_port": row.db_port,
             "ons_nodes": row.ons_nodes or "",
@@ -466,6 +627,7 @@ def create_operation(
     db_host: str,
     db_port: int,
     service_id: str,
+    schema_username: str,
     ons_nodes: str,
     password_pattern: str,
     requested_by: str,
@@ -480,6 +642,7 @@ def create_operation(
             db_host=db_host.strip(),
             db_port=int(db_port),
             service_id=service_id.strip(),
+            schema_username=schema_username.strip().upper(),
             ons_nodes=ons_nodes.strip() or None,
             password_pattern_ciphertext=encrypt_secret(password_pattern),
             status="Preview Queued",
@@ -510,6 +673,7 @@ def operation_view(row: DatasourceOperation) -> dict[str, Any]:
         "db_host": row.db_host,
         "db_port": row.db_port,
         "service_id": row.service_id,
+        "schema_username": row.schema_username or "",
         "ons_nodes": row.ons_nodes or "",
         "status": row.status,
         "requested_by": row.requested_by,
