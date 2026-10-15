@@ -29,6 +29,7 @@ class DatasourceEnvironmentPayload(BaseModel):
     application: str = Field(min_length=2, max_length=50)
     environment: str = Field(min_length=2, max_length=50)
     instance_name: str = Field(default="app1", min_length=2, max_length=50)
+    inventory_hostname: str = Field(default="", max_length=255)
     base_path: str = Field(default="", max_length=255)
     domain_name: str = Field(min_length=2, max_length=100)
     admin_host: str = Field(min_length=2, max_length=255)
