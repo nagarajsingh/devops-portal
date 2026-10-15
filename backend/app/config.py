@@ -59,8 +59,6 @@ DATASOURCE_PREVIEW_ARTIFACT_NAME = env("DATASOURCE_PREVIEW_ARTIFACT_NAME", "data
 CREDENTIAL_ENCRYPTION_KEY = env("CREDENTIAL_ENCRYPTION_KEY")
 
 PORTAL_PUBLIC_URL = env("PORTAL_PUBLIC_URL", "http://localhost:8000").rstrip("/")
-DATASOURCE_RUNTIME_API_URL = env("DATASOURCE_RUNTIME_API_URL") or f"{PORTAL_PUBLIC_URL}/api"
-DATASOURCE_PIPELINE_API_TOKEN = env("DATASOURCE_PIPELINE_API_TOKEN")
 APPROVAL_TOKEN_HOURS = int(env("APPROVAL_TOKEN_HOURS", "72"))
 
 DEFAULT_APP_OWNERS = {"H2H": "Nagarajs@mashreq.com", "Native-Mobile": "mujahid@mashreq.com", "Collections": "mohanreddy1@mashreq.com", "Safenet": "krishnakants@mashreq.com"}
