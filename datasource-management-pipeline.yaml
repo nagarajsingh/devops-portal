@@ -144,11 +144,9 @@ jobs:
           if str(config.get('environment', '')).lower() != environment:
               raise RuntimeError('Datasource config environment does not match pipeline request')
 
-          entities = config.get('entities') or {}
-          entity = entities.get(target_entity) or {}
-          password_pattern = entity.get('password_pattern') or config.get('password_pattern')
+          password_pattern = config.get('password_pattern')
           if not password_pattern:
-              raise RuntimeError('password_pattern is missing for target entity %s' % target_entity)
+              raise RuntimeError('password_pattern is missing from datasource environment configuration')
 
           payload = {
               'request_id': os.environ['P_REQUEST_ID'],
