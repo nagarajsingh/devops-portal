@@ -1,5 +1,29 @@
--- Optional manual DDL for environments where the portal DB user cannot CREATE TABLE.
--- The application normally creates these tables through SQLAlchemy on startup.
+-- Optional manual DDL for environments where the portal DB user cannot CREATE/ALTER tables.
+-- Normal deployments run equivalent create/upgrade logic automatically on backend startup.
+
+IF OBJECT_ID('datasource_applications', 'U') IS NULL
+BEGIN
+    CREATE TABLE datasource_applications (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        code VARCHAR(50) NOT NULL UNIQUE,
+        display_name VARCHAR(100) NOT NULL,
+        is_active BIT NOT NULL CONSTRAINT df_ds_app_active DEFAULT 1,
+        created_at DATETIME2 NOT NULL CONSTRAINT df_ds_app_created DEFAULT SYSUTCDATETIME(),
+        updated_at DATETIME2 NOT NULL CONSTRAINT df_ds_app_updated DEFAULT SYSUTCDATETIME()
+    );
+END;
+GO
+
+MERGE datasource_applications AS target
+USING (VALUES
+    ('OBP'),('OBTF'),('OBTFPM'),('OBLM'),('OBVAM'),
+    ('OBVAMIC'),('OBLMIC'),('PLATO'),('CMNCORE'),('MOCORE')
+) AS source(code)
+ON target.code = source.code
+WHEN NOT MATCHED THEN
+    INSERT (code, display_name, is_active)
+    VALUES (source.code, source.code, 1);
+GO
 
 IF OBJECT_ID('weblogic_environment_instances', 'U') IS NULL
 BEGIN
@@ -14,6 +38,10 @@ BEGIN
         admin_port INT NOT NULL,
         ssh_port INT NOT NULL CONSTRAINT df_weblogic_ssh_port DEFAULT 22,
         wlst_path VARCHAR(500) NOT NULL,
+        artifacts_location VARCHAR(255) NULL,
+        common_artifacts_location VARCHAR(500) NULL,
+        cz_config_location VARCHAR(500) NULL,
+        ear_path VARCHAR(500) NULL,
         agent_pool VARCHAR(100) NOT NULL,
         default_db_host VARCHAR(255) NOT NULL,
         default_db_port INT NOT NULL,
@@ -25,6 +53,19 @@ BEGIN
         CONSTRAINT uq_weblogic_environment_instance UNIQUE(application, environment, instance_name)
     );
 END;
+GO
+
+IF COL_LENGTH('weblogic_environment_instances', 'artifacts_location') IS NULL
+    ALTER TABLE weblogic_environment_instances ADD artifacts_location VARCHAR(255) NULL;
+GO
+IF COL_LENGTH('weblogic_environment_instances', 'common_artifacts_location') IS NULL
+    ALTER TABLE weblogic_environment_instances ADD common_artifacts_location VARCHAR(500) NULL;
+GO
+IF COL_LENGTH('weblogic_environment_instances', 'cz_config_location') IS NULL
+    ALTER TABLE weblogic_environment_instances ADD cz_config_location VARCHAR(500) NULL;
+GO
+IF COL_LENGTH('weblogic_environment_instances', 'ear_path') IS NULL
+    ALTER TABLE weblogic_environment_instances ADD ear_path VARCHAR(500) NULL;
 GO
 
 IF OBJECT_ID('weblogic_credentials', 'U') IS NULL
@@ -51,6 +92,7 @@ BEGIN
         environment_instance_id INT NOT NULL,
         entity_code VARCHAR(30) NOT NULL,
         service_id VARCHAR(100) NOT NULL,
+        schema_username VARCHAR(100) NULL,
         db_host VARCHAR(255) NOT NULL,
         db_port INT NOT NULL,
         ons_nodes VARCHAR(1000) NULL,
@@ -62,6 +104,9 @@ BEGIN
         CONSTRAINT uq_datasource_entity_profile UNIQUE(environment_instance_id, entity_code)
     );
 END;
+GO
+IF COL_LENGTH('datasource_entity_profiles', 'schema_username') IS NULL
+    ALTER TABLE datasource_entity_profiles ADD schema_username VARCHAR(100) NULL;
 GO
 
 IF OBJECT_ID('datasource_operations', 'U') IS NULL
@@ -76,6 +121,7 @@ BEGIN
         db_host VARCHAR(255) NOT NULL,
         db_port INT NOT NULL,
         service_id VARCHAR(100) NOT NULL,
+        schema_username VARCHAR(100) NULL,
         ons_nodes VARCHAR(1000) NULL,
         password_pattern_ciphertext VARCHAR(MAX) NOT NULL,
         status VARCHAR(50) NOT NULL,
@@ -93,4 +139,7 @@ BEGIN
         CONSTRAINT uq_ds_operation_request UNIQUE(request_id)
     );
 END;
+GO
+IF COL_LENGTH('datasource_operations', 'schema_username') IS NULL
+    ALTER TABLE datasource_operations ADD schema_username VARCHAR(100) NULL;
 GO
