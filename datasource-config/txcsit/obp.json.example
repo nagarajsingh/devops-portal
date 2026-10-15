@@ -10,6 +10,5 @@
   "ssh_username": "azdevops",
   "ssh_password": "REPLACE_BEFORE_ENCRYPTING",
   "weblogic_username": "REPLACE_WITH_WEBLOGIC_USER",
-  "weblogic_password": "REPLACE_BEFORE_ENCRYPTING",
-  "password_pattern": "{username}_TXS1T"
+  "weblogic_password": "REPLACE_BEFORE_ENCRYPTING"
 }
