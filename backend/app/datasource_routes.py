@@ -41,10 +41,8 @@ class DatasourceEnvironmentPayload(BaseModel):
     default_db_host: str = Field(default="", max_length=255)
     default_db_port: int = Field(default=1531, ge=1, le=65535)
     default_ons_nodes: str = Field(default="", max_length=1000)
-    weblogic_username: str = Field(default="", max_length=255)
-    weblogic_password: SecretStr | None = None
-    ssh_username: str = Field(default="", max_length=255)
-    ssh_password: SecretStr | None = None
+    weblogic_username: str = Field(min_length=1, max_length=255)
+    ssh_username: str = Field(min_length=1, max_length=255)
     is_production: bool = False
     is_active: bool = True
 
@@ -80,18 +78,7 @@ class DatasourceApplyPayload(BaseModel):
 
 
 def _environment_payload(payload: DatasourceEnvironmentPayload) -> dict:
-    data = payload.model_dump(exclude={"weblogic_password", "ssh_password"})
-    data["weblogic_password"] = (
-        payload.weblogic_password.get_secret_value()
-        if payload.weblogic_password
-        else None
-    )
-    data["ssh_password"] = (
-        payload.ssh_password.get_secret_value()
-        if payload.ssh_password
-        else None
-    )
-    return data
+    return payload.model_dump()
 
 
 @router.get("/applications")
