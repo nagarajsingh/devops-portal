@@ -5,10 +5,10 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from .config import APP_OWNER_EMAILS, KUBERNETES_TARGETS, LANGUAGE_PORTS, LOCAL_KUBERNETES_TARGET
-from .email_service import decode_approval_token, send_app_owner_approval_email
+from .email_service import decode_approval_token, send_app_owner_approval_email, send_pipeline_closure_email
 from .kubernetes_ops import cluster_namespaces, namespace_ingresses
 from .logging_config import get_logger
-from .models import PipelineRequest, PipelineRequestCreate, ReviewUpdate, UserContext
+from .models import DatabaseCredentialDelivery, PipelineRequest, PipelineRequestCreate, ReviewUpdate, UserContext
 from .provisioning import provision, provision_remote_kubernetes
 from .storage import find_request, now_iso, read_requests, timeline_event, write_requests
 
@@ -306,6 +306,7 @@ def close_pipeline_request(
     request_id: str,
     comment: str,
     user: UserContext,
+    database_credentials: list[DatabaseCredentialDelivery] | None = None,
 ) -> PipelineRequest:
     items = read_requests()
     index, current = find_request(items, request_id)
@@ -324,12 +325,32 @@ def close_pipeline_request(
             status_code=400,
             detail="Closure comment is mandatory",
         )
+
+    database_requests = current.get("database_requests") or []
+    transient_credentials: list[dict[str, str | int]] = []
+    for credential in database_credentials or []:
+        if credential.request_index >= len(database_requests):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Database credential index {credential.request_index} does not match a database request",
+            )
+        transient_credentials.append(
+            {
+                "request_index": credential.request_index,
+                "password": credential.password.get_secret_value()
+                if credential.password
+                else "",
+            }
+        )
+
+    closed_at = now_iso()
     current.update(
         {
             "status": "Closed",
             "reviewed_by": user.username,
             "closure_comment": comment.strip(),
-            "updated_at": now_iso(),
+            "closure_mail_sent": None,
+            "updated_at": closed_at,
         }
     )
     current.setdefault("timeline", []).append(
@@ -339,6 +360,35 @@ def close_pipeline_request(
             comment.strip(),
         )
     )
+    items[index] = current
+    write_requests(items)
+
+    try:
+        send_pipeline_closure_email(current, transient_credentials)
+        current["closure_mail_sent"] = True
+        current.setdefault("timeline", []).append(
+            timeline_event(
+                "Closure Email Sent",
+                "system",
+                f"Completion details sent to {current.get('requested_by', '')}",
+            )
+        )
+    except Exception as exc:
+        logger.exception(
+            "Unable to send pipeline closure email request_id=%s developer=%s",
+            request_id,
+            current.get("requested_by"),
+        )
+        current["closure_mail_sent"] = False
+        current.setdefault("timeline", []).append(
+            timeline_event(
+                "Closure Email Failed",
+                "system",
+                str(exc),
+            )
+        )
+
+    current["updated_at"] = now_iso()
     items[index] = current
     write_requests(items)
     return PipelineRequest(**current)
