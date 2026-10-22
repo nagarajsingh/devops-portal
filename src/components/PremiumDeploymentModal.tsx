@@ -20,6 +20,8 @@ interface Props {
   inputLabel?: string;
   inputValue?: string;
   inputPlaceholder?: string;
+  inputType?: "text" | "password";
+  primaryDisabled?: boolean;
   onInputChange?: (value: string) => void;
   onPrimary: () => void;
   onSecondary?: () => void;
@@ -45,6 +47,8 @@ export default function PremiumDeploymentModal({
   inputLabel,
   inputValue = "",
   inputPlaceholder,
+  inputType = "text",
+  primaryDisabled = false,
   onInputChange,
   onPrimary,
   onSecondary,
@@ -75,6 +79,7 @@ export default function PremiumDeploymentModal({
           <label className="deployment-modal-input">
             {inputLabel}
             <input
+              type={inputType}
               value={inputValue}
               placeholder={inputPlaceholder}
               onChange={(event) => onInputChange?.(event.target.value)}
@@ -87,7 +92,7 @@ export default function PremiumDeploymentModal({
           {secondaryLabel && onSecondary && (
             <button className="secondary-button" disabled={busy} onClick={onSecondary}>{secondaryLabel}</button>
           )}
-          <button className="primary-button" disabled={busy} onClick={onPrimary}>{busy ? "Processing..." : primaryLabel}</button>
+          <button className="primary-button" disabled={busy || primaryDisabled} onClick={onPrimary}>{busy ? "Processing..." : primaryLabel}</button>
         </div>
       </div>
     </div>
