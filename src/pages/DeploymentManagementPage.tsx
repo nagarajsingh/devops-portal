@@ -401,6 +401,11 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
       return;
     }
 
+    if (current.kind === "reextract") {
+      await action(current.request.id, "extract-document");
+      return;
+    }
+
     if (current.kind === "bypass") {
       if (!isAdmin) {
         setInlineNotice({ variant: "error", message: "Only a DevOps Admin can bypass application-owner approval." });
@@ -421,6 +426,9 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
       const actionLabel = dialog.actionName.split("-").join(" ");
       return <PremiumDeploymentModal open variant="info" eyebrow="AZURE DEVOPS AUTHENTICATION" title="Azure DevOps PAT required" message={`Enter your Azure DevOps PAT to continue with ${actionLabel}. The token is retained only for this browser session and is cleared on logout.`} details={[{ label: "Request", value: dialog.requestId }, { label: "Next action", value: actionLabel }]} inputLabel="Personal Access Token" inputType="password" inputValue={dialog.patValue} inputPlaceholder="Enter Azure DevOps PAT" primaryLabel="Continue securely" primaryDisabled={!dialog.patValue.trim()} secondaryLabel="Cancel" busy={busy} onInputChange={(value) => setDialog({ ...dialog, patValue: value })} onPrimary={() => void confirmDialog()} onSecondary={() => setDialog(null)} />;
     }
+    if (dialog.kind === "reextract") {
+      return <PremiumDeploymentModal open variant="warning" eyebrow="RE-EXTRACT RELEASE DOCUMENT" title="Re-extract and reset orchestration state?" message="The original uploaded release document will be parsed again. Existing extracted values, build runs and release/deployment tracking for this request will be reset so the workflow follows the newly extracted data." details={[{ label: "Request", value: dialog.request.id }, { label: "Document", value: dialog.request.document_name }, { label: "Current status", value: dialog.request.status }]} primaryLabel="Re-extract document" secondaryLabel="Keep current state" busy={busy} onPrimary={() => void confirmDialog()} onSecondary={() => setDialog(null)} />;
+    }
     if (dialog.kind === "bypass") {
       if (!isAdmin) return null;
       return <PremiumDeploymentModal open variant="warning" eyebrow="DEVOPS ADMIN APPROVAL" title="Bypass application-owner approval?" message="This privileged action is available only to DevOps Admins. Continue only when there is an authorized reason to bypass the owner approval gate." details={[{ label: "Request", value: dialog.request.id }, { label: "Application", value: dialog.request.application || dialog.request.application_type }, { label: "Owner", value: dialog.request.app_owner }]} primaryLabel="Yes, bypass approval" secondaryLabel="Keep pending" busy={busy} onPrimary={() => void confirmDialog()} onSecondary={() => setDialog(null)} />;
@@ -433,7 +441,17 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
     if (!selected) return null;
     const step = nextStep(selected);
     const approval = approvalState(selected);
+    const downstreamWorkExists = Boolean(
+      buildRuns.length ||
+      deploymentRuns.length ||
+      !["", "Waiting", "Pending"].includes(String(selected.steps?.build?.status || "")) ||
+      !["", "Waiting", "Pending"].includes(String(selected.steps?.deployment?.status || ""))
+    );
     return <section className="deployment-card deployment-wizard">
+      <div className="deployment-wizard-toolbar">
+        <button type="button" className="deployment-back-button" onClick={backToRequests}><ArrowLeft size={17}/>Back to requests</button>
+        {role === "devops" && selected.extracted && selected.status !== "Completed" && String(selected.steps?.owner_approval?.status || "") === "Approved" && <button type="button" className="secondary-button" disabled={busy} onClick={() => downstreamWorkExists ? setDialog({ kind: "reextract", request: selected }) : void action(selected.id, "extract-document")}><FileText size={16}/>Re-extract document</button>}
+      </div>
       <div className="deployment-wizard-header">
         <div><span className="eyebrow">{selected.application_type}</span><h2>{selected.application || selected.document_name}</h2><p>{selected.id} · {selected.country || selected.environment || "Environment pending"}</p></div>
         <div className="deployment-wizard-state"><span className={`owner-approval-badge ${approval.className}`}>{approval.label}</span><div className="wizard-next-step"><span>Next step</span><strong>{step}</strong></div></div>
@@ -481,7 +499,7 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
 
       {role === "devops" && selected.steps?.deployment?.status === "Succeeded" && selected.status !== "Completed" && showCompletionForm && <div className="ticket-closure-form"><div><span className="eyebrow">DEPLOYMENT COMPLETION</span><h3>Complete this deployment request</h3><p>The mandatory comment will be stored in the request timeline and emailed to {selected.requested_by}.</p></div><label>Completion comment<textarea autoFocus rows={4} maxLength={2000} value={completionComment} placeholder="Example: Deployment completed successfully in UAT. Smoke validation completed." onChange={(event) => setCompletionComment(event.target.value)}/><small>{completionComment.trim().length}/2000 characters</small></label><div className="ticket-closure-actions"><button className="secondary-button" disabled={busy} onClick={() => { setShowCompletionForm(false); setCompletionComment(""); }}>Cancel</button><button className="primary-button" disabled={busy || !completionComment.trim()} onClick={() => void action(selected.id, "complete-request", { comment: completionComment.trim() })}>{busy ? "Completing..." : "Confirm Complete & Email Developer"}</button></div></div>}
 
-      <div className="deployment-actions">{role === "devops" && selected.status !== "Completed" && <button className="secondary-button" onClick={() => action(selected.id, "refresh-status")}><RefreshCw size={15}/>Refresh status</button>}<button className="secondary-button" onClick={() => { collectionsDirtyRef.current = false; setSelected(null); setInlineNotice(null); }}><ArrowLeft size={15}/>Back to requests</button></div>
+      <div className="deployment-actions">{role === "devops" && selected.status !== "Completed" && <button className="secondary-button" onClick={() => action(selected.id, "refresh-status")}><RefreshCw size={15}/>Refresh status</button>}<button className="secondary-button" onClick={backToRequests}><ArrowLeft size={15}/>Back to requests</button></div>
 
     </section>;
   }
