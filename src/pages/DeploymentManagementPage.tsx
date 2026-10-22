@@ -192,10 +192,17 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
     const rows = (await readResponse(response)) as DeploymentRequest[];
     setRequests(rows);
     setSelected((current) => {
-      if (!current) return null;
-      const fresh = rows.find((row) => row.id === current.id);
-      if (!fresh) return current;
-      if (collectionsDirtyRef.current && current.application_type === "Collections") {
+      const requestId = current?.id || deploymentLocationState().requestId;
+      if (!requestId) return null;
+      const fresh = rows.find((row) => row.id === requestId);
+      if (!fresh) {
+        writeDeploymentLocation(null, deploymentLocationState().scope || null);
+        return current;
+      }
+      if (!selectedType) {
+        setSelectedType(deploymentLocationState().scope || fresh.application_type);
+      }
+      if (current && collectionsDirtyRef.current && current.application_type === "Collections") {
         return { ...fresh, collections_items: current.collections_items };
       }
       return fresh;
@@ -367,7 +374,18 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
     setInlineNotice(null);
     setShowCompletionForm(false);
     setCompletionComment("");
+    const scope = selectedType || request.application_type;
+    writeDeploymentLocation(request.id, scope);
     setSelected(request);
+  }
+
+  function backToRequests() {
+    collectionsDirtyRef.current = false;
+    setInlineNotice(null);
+    setShowCompletionForm(false);
+    setCompletionComment("");
+    writeDeploymentLocation(null, selectedType);
+    setSelected(null);
   }
 
   async function confirmDialog() {
