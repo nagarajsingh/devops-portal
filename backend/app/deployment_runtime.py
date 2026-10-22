@@ -65,7 +65,7 @@ def _refresh_build_run(run: dict[str, Any], pat: str) -> None:
     )
 
 
-COLLECTIONS_DEPLOYMENT_ENVIRONMENTS = ("DEV", "SIT", "UAT", "TRAINING/PPR", "PROD", "DR")
+COLLECTIONS_DEPLOYMENT_ENVIRONMENTS = dm.COLLECTIONS_DEPLOYMENT_ENVIRONMENTS
 
 _COLLECTIONS_ENVIRONMENT_ALIASES = {
     "DEV": {"dev", "development"},
@@ -258,8 +258,6 @@ def reextract_document(request_id: str, actor: str) -> dict[str, Any]:
     steps["deployment"] = {"status": "Waiting", "runs": []}
 
     row["extracted"] = True
-    if row.get("application_type") == "Collections":
-        row["deployment_environment"] = ""
     row["status"] = "DevOps Review"
     row["progress_percent"] = 40 if row.get("application_type") == "Collections" else row.get("progress_percent", 0)
     now = dm._now()
