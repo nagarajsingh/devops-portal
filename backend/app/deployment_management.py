@@ -46,6 +46,7 @@ COLLECTIONS_PIPELINES = {
         "vtransact-ui": "collections-static-web-egypt",
         "vtwidget": "collections-widget-service-egypt",
         "vtopenapi": "collections-open-api-service-egypt",
+        "vtarchival": "collections-data-archival-service-egypt",
     },
     "UAE": {
         "vtbatch-01": "collections-batch-01-service",
@@ -62,6 +63,7 @@ COLLECTIONS_PIPELINES = {
         "vtransact-ui": "collections-static-web",
         "vtwidget": "collections-widget-service",
         "vtopenapi": "collections-open-api-service",
+        "vtarchival": "collections-data-archival-service",
     },
 }
 COLLECTIONS_ALIASES = {"vtdashrep": "vtdashboardreports"}
@@ -390,7 +392,15 @@ def _refresh_collections_release_links(row: dict[str, Any], pat: str) -> None:
         if environment_states and all(state.lower() in {"succeeded", "rejected", "canceled", "cancelled"} for state in environment_states):
             status = "Succeeded" if all(state.lower() == "succeeded" for state in environment_states) else "Failed"
         deployment_runs.append({
+            "service": build_run.get("service") or "",
+            "vendor_image": build_run.get("vendor_image") or "",
             "pipeline_name": release.get("name") or build_run.get("pipeline_name"),
+            "release_name": release.get("name") or "",
+            "release_definition_name": (
+                (release.get("releaseDefinition") or {}).get("name")
+                or build_run.get("pipeline_name")
+                or ""
+            ),
             "release_id": release.get("id"),
             "status": status,
             "result": status,
