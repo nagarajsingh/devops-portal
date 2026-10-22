@@ -16,7 +16,7 @@ from .deployment_management import (
     list_deployment_requests,
     submit_document,
 )
-from .deployment_notifications import decode_owner_action_token, send_devops_ready, send_owner_approval_request
+from .deployment_notifications import decode_owner_action_token, send_deployment_completed, send_devops_ready, send_owner_approval_request
 from .deployment_runtime import perform_action as execute_action
 from .logging_config import get_logger
 from .models import UserContext
@@ -236,6 +236,15 @@ def perform_action(
                 "DevOps notification email result request_id=%s bypassed=%s sent=%s",
                 request_id,
                 bypassed,
+                mail_sent,
+            )
+        if action == "complete-request":
+            mail_sent = send_deployment_completed(result)
+            result["developer_mail_sent"] = mail_sent
+            logger.info(
+                "Developer completion email result request_id=%s developer=%s sent=%s",
+                request_id,
+                result.get("requested_by"),
                 mail_sent,
             )
     except Exception:
