@@ -195,6 +195,7 @@ def provision(item: dict, azure_devops_pat: str) -> tuple[str, dict[str, Any]]:
                 item.get("reference_branch", ""),
                 item.get("application_type", "H2H"),
                 azure_devops_pat,
+                update_values=bool(item.get("update_values", False)),
             )
             steps["repository_bootstrap"] = bootstrap_result
         except Exception as exc:
