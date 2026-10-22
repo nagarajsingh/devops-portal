@@ -192,6 +192,41 @@ def send_pipeline_closure_email(
         if int(entry.get("request_index", -1)) >= 0
     }
 
+    provisioning = item.get("provisioning") or {}
+    repository_url = str((provisioning.get("repository") or {}).get("url") or "").strip()
+    pipeline_url = str((provisioning.get("pipeline") or {}).get("url") or "").strip()
+    release_pipeline_url = str((provisioning.get("release_pipeline") or {}).get("url") or "").strip()
+
+    def resource_link(label: str, url: str) -> str:
+        if not url:
+            return (
+                "<tr>"
+                f"<td style='padding:12px 14px;background:#fbfcfe;border-bottom:1px solid #edf0f4;font-weight:700;width:31%'>{html.escape(label)}</td>"
+                "<td style='padding:12px 14px;border-bottom:1px solid #edf0f4;color:#7b8795'>Not created or unavailable</td>"
+                "</tr>"
+            )
+        safe_url = html.escape(url, quote=True)
+        return (
+            "<tr>"
+            f"<td style='padding:12px 14px;background:#fbfcfe;border-bottom:1px solid #edf0f4;font-weight:700;width:31%'>{html.escape(label)}</td>"
+            "<td style='padding:12px 14px;border-bottom:1px solid #edf0f4'>"
+            f"<a href='{safe_url}' style='color:#315b8a;font-weight:700;text-decoration:none'>Open resource</a>"
+            f"<div style='margin-top:5px;font-size:11px;line-height:17px;color:#7b8795;word-break:break-all'>{safe_url}</div>"
+            "</td>"
+            "</tr>"
+        )
+
+    pipeline_resources_section = f"""
+        <div style="margin-top:24px">
+          <div style="font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#ef641f">Provisioned resources</div>
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:10px;border:1px solid #e7ebf0;border-radius:12px;border-collapse:separate;overflow:hidden">
+            {resource_link("Repository URL", repository_url)}
+            {resource_link("Build Pipeline URL", pipeline_url)}
+            {resource_link("Release Pipeline URL", release_pipeline_url)}
+          </table>
+        </div>
+    """
+
     database_requests = item.get("database_requests") or []
     database_rows = ""
     for index, request in enumerate(database_requests):
@@ -227,6 +262,18 @@ def send_pipeline_closure_email(
         </div>
         """
         if database_requests
+        else ""
+    )
+
+    review_comments = str(item.get("review_comments") or "").strip()
+    review_comments_section = (
+        f"""
+        <div style="margin-top:24px">
+          <div style="font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#ef641f">DevOps review comments</div>
+          <div style="margin-top:9px;padding:14px 16px;border-radius:12px;background:#f8fafc;border:1px solid #e7ebf0;white-space:pre-wrap;line-height:21px">{html.escape(review_comments)}</div>
+        </div>
+        """
+        if review_comments
         else ""
     )
 
@@ -271,10 +318,12 @@ def send_pipeline_closure_email(
                   <tr><td style="padding:11px 13px;background:#fbfcfe;font-weight:700">Repository</td><td style="padding:11px 13px">{html.escape(str(item.get('repository_name') or '—'))}</td></tr>
                   <tr><td style="padding:11px 13px;background:#fbfcfe;font-weight:700">Closed by</td><td style="padding:11px 13px">{html.escape(str(item.get('reviewed_by') or '—'))}</td></tr>
                 </table>
-                <div style="margin-top:22px;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#ef641f">DevOps closure comment</div>
-                <div style="margin-top:9px;padding:16px 18px;border-radius:12px;background:#f8fafc;border:1px solid #e7ebf0;white-space:pre-wrap;line-height:22px">{html.escape(str(item.get('closure_comment') or 'Completed'))}</div>
+                {pipeline_resources_section}
                 {database_section}
                 {acl_section}
+                {review_comments_section}
+                <div style="margin-top:24px;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#ef641f">Final closure comments</div>
+                <div style="margin-top:9px;padding:16px 18px;border-radius:12px;background:#fff8ef;border:1px solid #efd2b2;white-space:pre-wrap;line-height:22px;color:#704825">{html.escape(str(item.get('closure_comment') or 'Completed'))}</div>
                 {portal_link}
               </td></tr>
               <tr><td style="padding:16px 32px;background:#f8fafc;border-top:1px solid #e7ebf0;color:#7b8795;font-size:11px;text-align:center">Mashreq NEO CORP · Internal DevOps Portal</td></tr>
@@ -290,8 +339,16 @@ def send_pipeline_closure_email(
     message["To"] = developer
     message["Subject"] = f"[Completed] {item.get('repository_name') or item.get('id')} onboarding request"
     message.set_content(
-        f"DevOps completed request {item.get('id')}. "
-        "Open the HTML version of this email for closure and database details."
+        "\n".join(
+            [
+                f"DevOps completed request {item.get('id')}.",
+                f"Repository URL: {repository_url or 'Not created or unavailable'}",
+                f"Build Pipeline URL: {pipeline_url or 'Not created or unavailable'}",
+                f"Release Pipeline URL: {release_pipeline_url or 'Not created or unavailable'}",
+                f"Closure comments: {item.get('closure_comment') or 'Completed'}",
+                "Open the HTML version of this email for database and ACL details.",
+            ]
+        )
     )
     message.add_alternative(body, subtype="html")
 
