@@ -1,1 +1,124 @@
-.sidebar{position:sticky;top:0;height:100vh;max-height:100vh;overflow:hidden}.sidebar nav{min-height:0;overflow-y:auto;padding-right:3px}.sidebar nav::-webkit-scrollbar{width:5px}.sidebar nav::-webkit-scrollbar-thumb{background:#f2c4a8;border-radius:999px}.sidebar-footer{flex-shrink:0;background:linear-gradient(180deg,rgba(255,250,246,0),#fff5ee 28%)}.topbar{z-index:30}.content{min-height:calc(100vh - 88px)}@media(max-width:600px){.sidebar{position:fixed;height:auto;max-height:none;overflow:visible}.sidebar nav{overflow:visible}.content{min-height:0}}
+.sidebar{
+  position:sticky;
+  top:0;
+  align-self:start;
+  height:100vh;
+  max-height:100vh;
+  overflow:hidden;
+}
+.sidebar .brand,
+.sidebar .collapse-button,
+.sidebar .sidebar-footer{flex-shrink:0}
+.sidebar nav{
+  flex:1 1 auto;
+  min-height:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+  overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+  padding-right:3px;
+}
+.sidebar nav::-webkit-scrollbar{width:5px}
+.sidebar nav::-webkit-scrollbar-track{background:transparent}
+.sidebar nav::-webkit-scrollbar-thumb{background:#f2c4a8;border-radius:999px}
+.sidebar-footer{
+  flex-shrink:0;
+  background:linear-gradient(180deg,rgba(255,250,246,0),#fff5ee 28%);
+}
+.topbar{z-index:30}
+.content{min-height:calc(100vh - 88px)}
+
+/*
+ * Operational feedback must remain visible at the user's current scroll
+ * position. Scope this to authenticated app pages so login validation keeps
+ * its normal inline presentation.
+ */
+.app-shell .form-error,
+.app-shell .form-success,
+.app-shell .datasource-notice,
+.app-shell .deployment-inline-notice,
+.app-shell .fp-success{
+  position:fixed;
+  top:104px;
+  right:28px;
+  left:auto;
+  z-index:2100;
+  width:min(520px,calc(100vw - 56px));
+  max-height:min(42vh,360px);
+  overflow:auto;
+  margin:0;
+  padding:14px 44px 14px 16px;
+  border-radius:14px;
+  box-shadow:0 22px 56px rgba(20,38,62,.20);
+  backdrop-filter:blur(14px);
+  animation:portal-feedback-in .18s ease-out;
+}
+.app-shell .form-error{
+  background:rgba(255,243,242,.98);
+  border:1px solid #efc5c1;
+  color:#a53d36;
+}
+.app-shell .form-success,
+.app-shell .fp-success{
+  background:rgba(240,250,244,.98);
+  border:1px solid #c5e7d2;
+  color:#237248;
+}
+.app-shell .datasource-notice.info,
+.app-shell .deployment-inline-notice.info{
+  background:rgba(243,248,253,.98);
+  border-color:#cbdceb;
+  color:#2d5f8b;
+}
+.app-shell .datasource-notice.warning,
+.app-shell .deployment-inline-notice.warning{
+  background:rgba(255,248,239,.98);
+  border-color:#efd2b2;
+  color:#9c5625;
+}
+.app-shell .datasource-notice.error,
+.app-shell .deployment-inline-notice.error{
+  background:rgba(255,243,242,.98);
+  border-color:#efc5c1;
+  color:#a53d36;
+}
+.app-shell .datasource-notice.success,
+.app-shell .deployment-inline-notice.success{
+  background:rgba(240,250,244,.98);
+  border-color:#c5e7d2;
+  color:#237248;
+}
+
+@keyframes portal-feedback-in{
+  from{opacity:0;transform:translateY(-8px) scale(.985)}
+  to{opacity:1;transform:translateY(0) scale(1)}
+}
+
+@media(max-width:760px){
+  .app-shell .form-error,
+  .app-shell .form-success,
+  .app-shell .datasource-notice,
+  .app-shell .deployment-inline-notice,
+  .app-shell .fp-success{
+    top:82px;
+    left:12px;
+    right:12px;
+    width:auto;
+    max-height:34vh;
+  }
+}
+
+@media(max-width:600px){
+  .sidebar{
+    position:sticky;
+    top:0;
+    height:100vh;
+    max-height:100vh;
+    overflow:hidden;
+  }
+  .sidebar nav{
+    min-height:0;
+    overflow-y:auto;
+  }
+  .content{min-height:0}
+}
