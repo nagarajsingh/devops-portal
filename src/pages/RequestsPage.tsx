@@ -1,3 +1,4 @@
+import { ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import ProvisioningConfirmationModal from "../components/ProvisioningConfirmationModal";
 import PremiumDeploymentModal from "../components/PremiumDeploymentModal";
