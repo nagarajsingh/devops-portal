@@ -138,6 +138,7 @@ function nextStep(request: DeploymentRequest) {
   if (["Waiting", "Failed"].includes(request.steps?.build?.status || "Waiting")) return "Build";
   if (["Queued", "Running"].includes(request.steps?.build?.status || "")) return "Build Status";
   if (["Waiting", "Failed"].includes(request.steps?.deployment?.status || "Waiting")) return "Deployment";
+  if (request.steps?.deployment?.status === "Succeeded") return "Completed";
   return "Deployment Status";
 }
 
@@ -403,7 +404,7 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
           {displayedRequests.map((request) => { const approval = approvalState(request); return <button className="deployment-request-row" key={request.id} onClick={() => startRequest(request)}>
             <span className="request-id-cell"><strong>{request.id}</strong><small>{formatDate(request.created_at)}</small></span>
             <span><strong>{request.application || request.application_type}</strong><small>{request.document_name}</small></span>
-            <span><strong>{request.country || request.environment || "Pending"}</strong><small>{request.application_type}</small></span>
+            <span><strong>{request.deployment_environment || request.country || request.environment || "Pending"}</strong><small>{request.deployment_environment ? `${request.country || request.application_type} · target` : request.application_type}</small></span>
             <span><strong>{request.requested_by}</strong><small>{request.app_owner}</small></span>
             <span className="owner-approval-cell"><span className={`owner-approval-badge ${approval.className}`}>{approval.label}</span><small>{approval.detail}</small></span>
             <span><span className={`status ${statusClass(request.status)}`}>{request.status}</span></span>
