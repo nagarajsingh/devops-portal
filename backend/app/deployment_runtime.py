@@ -133,7 +133,7 @@ def _sync_collections_releases(row: dict[str, Any], pat: str) -> tuple[list[dict
         deployment["target_environment"] = target_environment
         statuses = [str(run.get("status") or "") for run in runs]
 
-        if all(status == "Succeeded" for status in statuses):
+        if all(status == "Succeeded" for status in statuses) and not missing:
             deployment["status"] = "Succeeded"
             row["status"] = "Deployment Completed"
         elif any(status == "Failed" for status in statuses):
@@ -144,7 +144,7 @@ def _sync_collections_releases(row: dict[str, Any], pat: str) -> tuple[list[dict
             row["status"] = "Deployment Running"
         else:
             deployment["status"] = "Ready"
-            row["status"] = "Release Discovered"
+            row["status"] = "Release Discovery Pending" if missing else "Release Discovered"
     else:
         deployment["runs"] = []
         deployment["status"] = "Waiting"
@@ -258,6 +258,8 @@ def reextract_document(request_id: str, actor: str) -> dict[str, Any]:
     steps["deployment"] = {"status": "Waiting", "runs": []}
 
     row["extracted"] = True
+    if row.get("application_type") == "Collections":
+        row["deployment_environment"] = ""
     row["status"] = "DevOps Review"
     row["progress_percent"] = 40 if row.get("application_type") == "Collections" else row.get("progress_percent", 0)
     now = dm._now()
