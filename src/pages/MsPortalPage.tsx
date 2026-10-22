@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { createPipelineRequest, getApplicationOwners } from "../services/api";
-import type { ApplicationType, PipelineRequestInput } from "../types";
+import type { ApplicationType, DatabaseCreationRequest, PipelineRequestInput } from "../types";
 
 interface Props { token: string; onCreated: () => void; }
 
@@ -115,10 +115,10 @@ export default function MsPortalPage({ token, onCreated }: Props) {
     }));
   }
 
-  function updateDatabaseRequest(
+  function updateDatabaseRequest<K extends keyof DatabaseCreationRequest>(
     index: number,
-    key: "environment" | "db_username" | "server_url" | "server_port" | "db_name",
-    value: string | number | null,
+    key: K,
+    value: DatabaseCreationRequest[K],
   ) {
     setForm((current) => ({
       ...current,
