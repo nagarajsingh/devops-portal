@@ -295,7 +295,9 @@ def send_pipeline_closure_email(
     )
     message.add_alternative(body, subtype="html")
 
-    recipients = [developer] + parse_recipients(MAIL_BCC)
+    # Credential-bearing closure mail is intentionally sent only to the
+    # original requester. Do not copy the general notification BCC list.
+    recipients = [developer]
     if SMTP_SSL:
         smtp_client: smtplib.SMTP = smtplib.SMTP_SSL(
             SMTP_HOST,
