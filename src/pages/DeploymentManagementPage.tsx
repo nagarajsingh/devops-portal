@@ -9,6 +9,23 @@ const COLLECTIONS_COUNTRIES = ["UAE", "Egypt"];
 const COLLECTIONS_DEPLOYMENT_ENVIRONMENTS = ["DEV", "SIT", "UAT", "TRAINING/PPR", "PROD", "DR"] as const;
 const PAT_REQUIRED_ACTIONS = new Set(["trigger-code-pull", "create-pr", "trigger-build", "trigger-deployment", "refresh-status"]);
 
+function deploymentLocationState() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    requestId: params.get("request") || "",
+    scope: params.get("scope") || "",
+  };
+}
+
+function writeDeploymentLocation(requestId: string | null, scope: string | null) {
+  const url = new URL(window.location.href);
+  if (requestId) url.searchParams.set("request", requestId);
+  else url.searchParams.delete("request");
+  if (scope) url.searchParams.set("scope", scope);
+  else url.searchParams.delete("scope");
+  window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+}
+
 type Run = {
   pipeline_name?: string;
   pipeline_id?: number;
@@ -85,6 +102,7 @@ type Dialog =
   | { kind: "bypass"; request: DeploymentRequest }
   | { kind: "reject"; request: DeploymentRequest }
   | { kind: "pipeline"; request: DeploymentRequest; pipelineName: string }
+  | { kind: "reextract"; request: DeploymentRequest }
   | { kind: "pat"; requestId: string; actionName: string; updates: Record<string, unknown>; patValue: string };
 
 function readSessionPat() {
@@ -156,7 +174,7 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
   const [deploymentEnvironment, setDeploymentEnvironment] = useState("");
   const [appOwner, setAppOwner] = useState("");
   const [requests, setRequests] = useState<DeploymentRequest[]>([]);
-  const [selectedType, setSelectedType] = useState<string | null>(null);
+  const [selectedType, setSelectedType] = useState<string | null>(() => deploymentLocationState().scope || null);
   const [selected, setSelected] = useState<DeploymentRequest | null>(null);
   const [showNewRequest, setShowNewRequest] = useState(role !== "devops");
   const [busy, setBusy] = useState(false);
