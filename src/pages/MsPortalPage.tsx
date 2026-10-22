@@ -18,6 +18,7 @@ const initial: PipelineRequestInput = {
   reference_repository_name: "",
   reference_branch: "",
   setup_pipeline: false,
+  update_values: false,
   pipeline_type: "",
   ingress_path: "/api/",
   create_service: false,
