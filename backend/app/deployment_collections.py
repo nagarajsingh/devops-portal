@@ -6,10 +6,12 @@ from . import deployment_management as dm
 
 
 def normalize_collections_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Keep only Collections services that have a vendor image and a mapped build pipeline.
+    """Keep Collections application images while excluding obvious platform images.
 
-    Release documents can contain platform/base images such as nginx and JDK images. Those
-    images are not application build inputs and must not appear in the Collections build review.
+    Known services receive their configured build-pipeline mapping during extraction.
+    A newly introduced vt* service is intentionally retained even when no mapping exists
+    yet so DevOps can review it and provide the pipeline name instead of silently losing
+    the service from the extracted document.
     """
     if str(payload.get("application_type") or "") != "Collections":
         return payload
@@ -17,9 +19,15 @@ def normalize_collections_payload(payload: dict[str, Any]) -> dict[str, Any]:
     filtered: list[dict[str, Any]] = []
     for item in payload.get("collections_items") or []:
         vendor_image = str(item.get("vendor_image") or "").strip()
-        pipeline_name = str(item.get("pipeline_name") or "").strip()
-        if not vendor_image or not pipeline_name:
+        service = str(item.get("service") or "").strip().lower()
+        if not vendor_image:
             continue
+
+        # Collections application images consistently use vt* identifiers.
+        # This still excludes platform/base images such as nginx/JDK images.
+        if not service.startswith("vt"):
+            continue
+
         filtered.append(item)
 
     payload["collections_items"] = filtered
