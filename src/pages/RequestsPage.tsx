@@ -171,7 +171,6 @@ export default function RequestsPage({ token, role, refreshKey }: Props) {
           setNotice("Remote Kubernetes Service and Ingress provisioning completed. Confirm the existing build pipeline to continue release-pipeline creation.");
         }
 
-        setAzureDevOpsPat("");
         setConfirmation({ type: "pipeline", pat: patForRetry, pipelineName: updated.provisioning?.pipeline?.name || selected.provisioning?.pipeline?.name });
       } catch (reason) {
         await load();
