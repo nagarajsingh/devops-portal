@@ -355,20 +355,16 @@ def trigger_collections_deployment(
     if not row:
         raise HTTPException(status_code=404, detail="Deployment request not found")
 
-    requested_environment = str(
-        updates.get("deployment_environment")
-        or row.get("deployment_environment")
-        or ""
-    ).strip().upper()
+    requested_environment = str(row.get("deployment_environment") or "").strip().upper()
     if requested_environment not in COLLECTIONS_DEPLOYMENT_ENVIRONMENTS:
         raise HTTPException(
             status_code=422,
             detail=(
-                "Select a Collections deployment environment: "
+                "The Collections target environment is missing from the original deployment request. "
+                "The developer must select one of: "
                 + ", ".join(COLLECTIONS_DEPLOYMENT_ENVIRONMENTS)
             ),
         )
-    row["deployment_environment"] = requested_environment
 
     steps = row.setdefault("steps", {})
     build = steps.setdefault("build", {"status": "Waiting", "runs": []})
