@@ -7,6 +7,7 @@ const PAT_SESSION_KEY = "devops-portal-azure-pat";
 const APP_TYPES = ["H2H", "Collections", "GTB-Applications", "Native-Mobile", "Safenet"] as const;
 const COLLECTIONS_COUNTRIES = ["UAE", "Egypt"];
 const COLLECTIONS_DEPLOYMENT_ENVIRONMENTS = ["DEV", "SIT", "UAT", "TRAINING/PPR", "PROD", "DR"] as const;
+const PAT_REQUIRED_ACTIONS = new Set(["trigger-code-pull", "create-pr", "trigger-build", "trigger-deployment", "refresh-status"]);
 
 type Run = {
   pipeline_name?: string;
@@ -83,7 +84,8 @@ type InlineNotice = { variant: "success" | "warning" | "error" | "info"; message
 type Dialog =
   | { kind: "bypass"; request: DeploymentRequest }
   | { kind: "reject"; request: DeploymentRequest }
-  | { kind: "pipeline"; request: DeploymentRequest; pipelineName: string };
+  | { kind: "pipeline"; request: DeploymentRequest; pipelineName: string }
+  | { kind: "pat"; requestId: string; actionName: string; updates: Record<string, unknown>; patValue: string };
 
 function readSessionPat() {
   try { return sessionStorage.getItem(PAT_SESSION_KEY) || ""; }
@@ -151,6 +153,7 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
   const [file, setFile] = useState<File | null>(null);
   const [appType, setAppType] = useState<string>("Collections");
   const [country, setCountry] = useState("UAE");
+  const [deploymentEnvironment, setDeploymentEnvironment] = useState("");
   const [appOwner, setAppOwner] = useState("");
   const [requests, setRequests] = useState<DeploymentRequest[]>([]);
   const [selectedType, setSelectedType] = useState<string | null>(null);
@@ -161,7 +164,6 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [requestSearch, setRequestSearch] = useState("");
   const [pat, setPat] = useState(readSessionPat);
-  const [patEditable, setPatEditable] = useState(false);
   const [showCompletionForm, setShowCompletionForm] = useState(false);
   const [completionComment, setCompletionComment] = useState("");
   const collectionsDirtyRef = useRef(false);
@@ -195,12 +197,15 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
   }, [pat]);
 
   async function submitDocument() {
-    if (!file || !appOwner) return;
+    if (!file || !appOwner || (appType === "Collections" && !deploymentEnvironment)) return;
     setBusy(true); setInlineNotice(null);
     const form = new FormData();
     form.append("application_type", appType);
     form.append("app_owner", appOwner);
-    if (appType === "Collections") form.append("country", country);
+    if (appType === "Collections") {
+      form.append("country", country);
+      form.append("deployment_environment", deploymentEnvironment);
+    }
     form.append("document", file);
     try {
       const response = await fetch(`${API_BASE}/deployment-management/submit-document`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
@@ -215,19 +220,40 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
           ? `Request ${body.id} was created, but the owner email was not sent. Check SMTP configuration.`
           : `Request ${body.id} was submitted and the approval email was sent to the application owner.`,
       });
-      setFile(null); setAppOwner(""); setShowNewRequest(false); await loadRequests();
+      setFile(null); setAppOwner(""); setDeploymentEnvironment(""); setShowNewRequest(false); await loadRequests();
     } catch (error) {
       setInlineNotice({ variant: "error", message: error instanceof Error ? error.message : "Submission failed" });
     } finally { setBusy(false); }
   }
 
-  async function action(id: string, name: string, updates: Record<string, unknown> = {}, silent = false) {
+  async function action(
+    id: string,
+    name: string,
+    updates: Record<string, unknown> = {},
+    silent = false,
+    patOverride = "",
+  ) {
+    const actionPat = patOverride.trim() || pat.trim();
+
+    if (PAT_REQUIRED_ACTIONS.has(name) && !actionPat) {
+      if (!silent) {
+        setDialog({
+          kind: "pat",
+          requestId: id,
+          actionName: name,
+          updates,
+          patValue: "",
+        });
+      }
+      return;
+    }
+
     if (!silent) { setBusy(true); setInlineNotice(null); }
     try {
       const response = await fetch(`${API_BASE}/deployment-management/requests/${id}/${name}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ azure_devops_pat: pat || null, updates }),
+        body: JSON.stringify({ azure_devops_pat: actionPat || null, updates }),
       });
       const body = await readResponse(response);
       if (!response.ok) {
@@ -329,6 +355,15 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
     if (!dialog) return;
     const current = dialog;
     setDialog(null);
+
+    if (current.kind === "pat") {
+      const enteredPat = current.patValue.trim();
+      if (!enteredPat) return;
+      setPat(enteredPat);
+      await action(current.requestId, current.actionName, current.updates, false, enteredPat);
+      return;
+    }
+
     if (current.kind === "bypass") {
       if (!isAdmin) {
         setInlineNotice({ variant: "error", message: "Only a DevOps Admin can bypass application-owner approval." });
@@ -345,6 +380,10 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
 
   function renderDialog() {
     if (!dialog) return null;
+    if (dialog.kind === "pat") {
+      const actionLabel = dialog.actionName.split("-").join(" ");
+      return <PremiumDeploymentModal open variant="info" eyebrow="AZURE DEVOPS AUTHENTICATION" title="Azure DevOps PAT required" message={`Enter your Azure DevOps PAT to continue with ${actionLabel}. The token is retained only for this browser session and is cleared on logout.`} details={[{ label: "Request", value: dialog.requestId }, { label: "Next action", value: actionLabel }]} inputLabel="Personal Access Token" inputType="password" inputValue={dialog.patValue} inputPlaceholder="Enter Azure DevOps PAT" primaryLabel="Continue securely" primaryDisabled={!dialog.patValue.trim()} secondaryLabel="Cancel" busy={busy} onInputChange={(value) => setDialog({ ...dialog, patValue: value })} onPrimary={() => void confirmDialog()} onSecondary={() => setDialog(null)} />;
+    }
     if (dialog.kind === "bypass") {
       if (!isAdmin) return null;
       return <PremiumDeploymentModal open variant="warning" eyebrow="DEVOPS ADMIN APPROVAL" title="Bypass application-owner approval?" message="This privileged action is available only to DevOps Admins. Continue only when there is an authorized reason to bypass the owner approval gate." details={[{ label: "Request", value: dialog.request.id }, { label: "Application", value: dialog.request.application || dialog.request.application_type }, { label: "Owner", value: dialog.request.app_owner }]} primaryLabel="Yes, bypass approval" secondaryLabel="Keep pending" busy={busy} onPrimary={() => void confirmDialog()} onSecondary={() => setDialog(null)} />;
@@ -364,6 +403,10 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
       </div>
       {inlineNotice && <div className={`deployment-inline-notice ${inlineNotice.variant}`}>{inlineNotice.message}</div>}
       <div className="deployment-progress-card"><div><span>Overall progress</span><strong>{selected.progress_percent || 0}%</strong></div><div className="deployment-progress-track"><span style={{ width: `${selected.progress_percent || 0}%` }}/></div></div>
+
+      {selected.application_type === "Collections" && selected.deployment_environment && <div className="deployment-target-summary"><div><span className="eyebrow">DEPLOYMENT TARGET</span><strong>{selected.deployment_environment}</strong><small>Selected by the requester when the deployment request was raised.</small></div><div><span>Country</span><strong>{selected.country || "—"}</strong></div></div>}
+
+      {role === "devops" && <div className={`deployment-auth-state ${pat ? "ready" : "required"}`}><ShieldCheck size={17}/><div><strong>{pat ? "Azure DevOps PAT ready for this session" : "Azure DevOps authentication will be requested when required"}</strong><small>{pat ? "The token is stored only in this browser session." : "You will be prompted securely before build, release, PR, code-pull or manual refresh actions."}</small></div>{pat && <button type="button" className="secondary-button" onClick={() => setPat("")}>Clear session PAT</button>}</div>}
 
       {step === "Approval" && <div className="wizard-action-panel"><ShieldCheck/><div><h3>Application-owner approval pending</h3><p>Owner: {selected.app_owner}. The owner can approve or reject directly from the release email.</p>{role === "devops" ? <><div className="approval-wait-note">{isAdmin ? "As a DevOps Admin, you can manually record or bypass approval when authorized." : "Waiting for the application owner. Only a DevOps Admin can manually approve or bypass this gate."}</div><div className="deployment-actions">{isAdmin&&<><button className="primary-button" onClick={() => action(selected.id, "owner-approve")}>Record approval</button><button className="secondary-button" onClick={() => setDialog({ kind: "bypass", request: selected })}>Bypass approval</button></>}<button className="danger-button" onClick={() => setDialog({ kind: "reject", request: selected })}>Reject</button></div></> : <div className="approval-wait-note">Waiting for the application owner to respond from the approval email.</div>}</div></div>}
 
@@ -391,7 +434,7 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
 
       {buildRuns.length > 0 && <div className="lifecycle-section"><div className="deployment-result-header"><h3>Build lifecycle</h3><span className={`status ${statusClass(selected.steps?.build?.status)}`}>{selected.steps?.build?.status}</span></div>{autoRefreshRequired && <p className="auto-refresh-note">Auto-refreshing every 5 seconds</p>}<div className="table-card lifecycle-table"><table><thead><tr><th>Service</th><th>Pipeline</th><th>Status</th><th>Duration</th><th>Link</th></tr></thead><tbody>{buildRuns.map((run, index) => <tr key={`${run.run_id}-${index}`}><td>{run.service || "—"}</td><td>{run.pipeline_name}</td><td><span className={`status ${statusClass(run.status)}`}>{run.status}</span></td><td>{formatDuration(run.duration_seconds)}</td><td>{run.url ? <a href={run.url} target="_blank" rel="noreferrer" title="Open build in Azure DevOps" aria-label="Open build in Azure DevOps"><ExternalLink size={17}/> Open</a> : "—"}</td></tr>)}</tbody></table></div></div>}
 
-      {step === "Deployment" && role === "devops" && <div className="wizard-action-panel"><Rocket/><div><h3>Trigger deployment</h3><p>Build status: {selected.steps?.build?.status}</p>{selected.application_type === "Collections" ? <><p>Select the intended Classic Release environment. The portal marks deployment complete when this environment succeeds; other release environments do not block completion.</p><label>Target deployment environment<select value={selected.deployment_environment || ""} onChange={(event) => setSelected({ ...selected, deployment_environment: event.target.value })}><option value="">Select environment</option>{COLLECTIONS_DEPLOYMENT_ENVIRONMENTS.map((environment) => <option key={environment} value={environment}>{environment}</option>)}</select></label><button className="primary-button" disabled={selected.steps?.build?.status !== "Succeeded" || !selected.deployment_environment || busy} onClick={() => void action(selected.id, "trigger-deployment", { deployment_environment: selected.deployment_environment })}>{busy ? "Discovering release..." : "Trigger deployment"}</button></> : <button className="primary-button" onClick={() => setDialog({ kind: "pipeline", request: selected, pipelineName: "" })}>Trigger deployment</button>}</div></div>}
+      {step === "Deployment" && role === "devops" && <div className="wizard-action-panel"><Rocket/><div><h3>Trigger deployment</h3><p>Build status: {selected.steps?.build?.status}</p>{selected.application_type === "Collections" ? <><div className="deployment-target-action"><span>Target environment</span><strong>{selected.deployment_environment || "Not configured"}</strong><small>This environment was selected by the developer when the request was raised and cannot be changed during orchestration.</small></div><p>The portal will discover the Classic Releases linked to the successful builds and track completion against <strong>{selected.deployment_environment || "the requested environment"}</strong>.</p><button className="primary-button" disabled={selected.steps?.build?.status !== "Succeeded" || !selected.deployment_environment || busy} onClick={() => void action(selected.id, "trigger-deployment")}>{busy ? "Discovering release..." : "Trigger deployment"}</button></> : <button className="primary-button" onClick={() => setDialog({ kind: "pipeline", request: selected, pipelineName: "" })}>Trigger deployment</button>}</div></div>}
 
       {deploymentRuns.length > 0 && <div className="lifecycle-section"><div className="deployment-result-header"><div><h3>Deployment lifecycle</h3>{selected.deployment_environment && <small>Completion target: {selected.deployment_environment}</small>}</div><span className={`status ${statusClass(selected.steps?.deployment?.status)}`}>{selected.steps?.deployment?.status}</span></div><div className="table-card lifecycle-table"><table><thead><tr><th>Service</th><th>Release</th><th>Release definition</th><th>Status</th><th>Duration</th><th>Target environment</th><th>All environments</th><th>Link</th></tr></thead><tbody>{deploymentRuns.map((run, index) => <tr key={`${run.release_id || run.run_id}-${index}`}><td>{run.service || "—"}</td><td>{run.release_name || run.pipeline_name || "—"}{run.release_id ? <small>#{run.release_id}</small> : null}</td><td>{run.release_definition_name || run.pipeline_name || "—"}</td><td><span className={`status ${statusClass(run.status)}`}>{run.status}</span></td><td>{formatDuration(run.duration_seconds)}</td><td><strong>{run.target_environment || selected.deployment_environment || "—"}</strong><small>{run.target_environment_status || "Waiting"}</small></td><td>{run.environment_status || "—"}</td><td>{run.url ? <a href={run.url} target="_blank" rel="noreferrer" title="Open release in Azure DevOps" aria-label="Open release in Azure DevOps"><ExternalLink size={17}/> Open release</a> : "—"}</td></tr>)}</tbody></table></div></div>}
 
@@ -402,7 +445,7 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
       {role === "devops" && selected.steps?.deployment?.status === "Succeeded" && selected.status !== "Completed" && showCompletionForm && <div className="ticket-closure-form"><div><span className="eyebrow">DEPLOYMENT COMPLETION</span><h3>Complete this deployment request</h3><p>The mandatory comment will be stored in the request timeline and emailed to {selected.requested_by}.</p></div><label>Completion comment<textarea autoFocus rows={4} maxLength={2000} value={completionComment} placeholder="Example: Deployment completed successfully in UAT. Smoke validation completed." onChange={(event) => setCompletionComment(event.target.value)}/><small>{completionComment.trim().length}/2000 characters</small></label><div className="ticket-closure-actions"><button className="secondary-button" disabled={busy} onClick={() => { setShowCompletionForm(false); setCompletionComment(""); }}>Cancel</button><button className="primary-button" disabled={busy || !completionComment.trim()} onClick={() => void action(selected.id, "complete-request", { comment: completionComment.trim() })}>{busy ? "Completing..." : "Confirm Complete & Email Developer"}</button></div></div>}
 
       <div className="deployment-actions">{role === "devops" && <button className="secondary-button" onClick={() => action(selected.id, "refresh-status")}><RefreshCw size={15}/>Refresh status</button>}<button className="secondary-button" onClick={() => { collectionsDirtyRef.current = false; setSelected(null); setInlineNotice(null); }}><ArrowLeft size={15}/>Back to requests</button></div>
-      {role === "devops" && <div className="deployment-pat-card"><label className="deployment-pat">Azure DevOps PAT<input type="password" name="azure-devops-session-pat" value={pat} onChange={(event) => setPat(event.target.value)} onFocus={() => setPatEditable(true)} readOnly={!patEditable} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" spellCheck={false} placeholder="Enter once for this login session"/></label><div className="pat-session-note"><span>{pat ? "PAT available for this session" : "No session PAT entered"}</span><small>The token is kept only in this browser session and is cleared on logout.</small>{pat && <button type="button" className="secondary-button" onClick={() => { setPat(""); setPatEditable(true); }}>Clear PAT</button>}</div></div>}
+
     </section>;
   }
 
@@ -419,7 +462,7 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
 
       {role === "devops" && <div className="dashboard-toolbar"><button className="primary-button" onClick={() => setShowNewRequest(!showNewRequest)}><UploadCloud size={16}/>{showNewRequest ? "Hide request form" : "New deployment request"}</button></div>}
 
-      {showNewRequest && <section className="deployment-card developer-release-card"><div className="deployment-card-title"><UploadCloud/><div><h2>Raise deployment request</h2><p>Developers and DevOps can upload the structured release document.</p></div></div><div className="deployment-form"><label>Application type<select value={appType} onChange={(event) => setAppType(event.target.value)}>{APP_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label>{appType === "Collections" && <label>Country<select value={country} onChange={(event) => setCountry(event.target.value)}>{COLLECTIONS_COUNTRIES.map((value) => <option key={value}>{value}</option>)}</select></label>}<label>Application owner<input value={appOwner} onChange={(event) => setAppOwner(event.target.value)} placeholder="owner@mashreq.com"/></label></div><label className="deployment-upload"><FileText/><input type="file" accept=".pdf,.docx,.txt,.md" onChange={(event) => setFile(event.target.files?.[0] || null)}/><span>{file?.name || "Choose structured release document"}</span></label><button className="primary-button" disabled={!file || !appOwner || busy} onClick={submitDocument}>{busy ? "Submitting..." : "Send for approval"}</button></section>}
+      {showNewRequest && <section className="deployment-card developer-release-card"><div className="deployment-card-title"><UploadCloud/><div><h2>Raise deployment request</h2><p>Provide the release details and intended deployment target before sending the request for approval.</p></div></div><div className="deployment-form"><label>Application type<select value={appType} onChange={(event) => { const value = event.target.value; setAppType(value); if (value !== "Collections") setDeploymentEnvironment(""); }}>{APP_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label>{appType === "Collections" && <><label>Country<select value={country} onChange={(event) => setCountry(event.target.value)}>{COLLECTIONS_COUNTRIES.map((value) => <option key={value}>{value}</option>)}</select></label><label>Target deployment environment<select required value={deploymentEnvironment} onChange={(event) => setDeploymentEnvironment(event.target.value)}><option value="">Select target environment</option>{COLLECTIONS_DEPLOYMENT_ENVIRONMENTS.map((environment) => <option key={environment} value={environment}>{environment}</option>)}</select><small>The release will be tracked and completed against this environment.</small></label></>}<label>Application owner<input value={appOwner} onChange={(event) => setAppOwner(event.target.value)} placeholder="owner@mashreq.com"/></label></div><label className="deployment-upload"><FileText/><input type="file" accept=".pdf,.docx,.txt,.md" onChange={(event) => setFile(event.target.files?.[0] || null)}/><span>{file?.name || "Choose structured release document"}</span></label><button className="primary-button" disabled={!file || !appOwner || (appType === "Collections" && !deploymentEnvironment) || busy} onClick={submitDocument}>{busy ? "Submitting..." : "Send for approval"}</button></section>}
 
       {inlineNotice && <div className={`deployment-inline-notice ${inlineNotice.variant}`}>{inlineNotice.message}</div>}
 
