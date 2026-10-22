@@ -119,7 +119,8 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
   const [onsNodes, setOnsNodes] = useState("");
 
   const [pat, setPat] = useState(readPat);
-  const [patEditable, setPatEditable] = useState(false);
+  const [patPromptAction, setPatPromptAction] = useState<"preview" | "apply" | null>(null);
+  const [patPromptValue, setPatPromptValue] = useState("");
   const [selectedOperation, setSelectedOperation] = useState<DatasourceOperation | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
@@ -323,13 +324,19 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     }
   }
 
-  async function preview(event: FormEvent) {
-    event.preventDefault();
+  async function runPreview(patOverride = "") {
     if (!selectedEnvironment) return;
     const isObma = OBMA_APPS.has(selectedEnvironment.application.toUpperCase());
     if (!isObma && !explicitPassword && !passwordPattern &&
         (operationMode === "update" || !existingTargetProfile?.password_pattern_configured)) {
       setNotice({ variant: "error", message: "Provide an explicit schema password or password pattern." });
+      return;
+    }
+
+    const actionPat = patOverride.trim() || pat.trim();
+    if (!actionPat) {
+      setPatPromptValue("");
+      setPatPromptAction("preview");
       return;
     }
 
@@ -353,7 +360,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
         password_pattern: passwordPattern || undefined,
         explicit_password: explicitPassword || undefined,
         ons_nodes: datasourceType === "gridlink" ? onsNodes : "",
-        azure_devops_pat: pat,
+        azure_devops_pat: actionPat,
       }, token);
       setPasswordPattern("");
       setExplicitPassword("");
@@ -372,13 +379,25 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     }
   }
 
-  async function apply() {
+  function preview(event: FormEvent) {
+    event.preventDefault();
+    void runPreview();
+  }
+
+  async function apply(patOverride = "") {
     if (!selectedOperation) return;
+    const actionPat = patOverride.trim() || pat.trim();
+    if (!actionPat) {
+      setConfirmApply(false);
+      setPatPromptValue("");
+      setPatPromptAction("apply");
+      return;
+    }
     setConfirmApply(false);
     setBusy(true);
     setNotice(null);
     try {
-      const result = await applyDatasourceOperation(selectedOperation.id, pat, token);
+      const result = await applyDatasourceOperation(selectedOperation.id, actionPat, token);
       setSelectedOperation(result);
       const created = result.preview?.summary?.created_count ?? result.preview?.datasources.filter((item) => item.status === "Created").length ?? 0;
       const updated = result.preview?.summary?.updated_count ?? result.preview?.datasources.filter((item) => item.status === "Updated").length ?? 0;
@@ -408,7 +427,6 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     schemaUsername.trim() &&
     dbHost.trim() &&
     (datasourceType === "standalone" || operationMode === "update" || onsNodes.trim()) &&
-    pat.trim() &&
     !busy
   );
 
@@ -578,9 +596,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
 
         {datasourceType === "gridlink" && <label className="full-width">ONS nodes<input required={operationMode === "create"} value={onsNodes} onChange={(e) => setOnsNodes(e.target.value)} placeholder="host1:6200,host2:6200"/><small>{operationMode === "update" ? "Leave blank to preserve the datasource's current ONS/FAN settings." : "Required for GridLink datasource creation."}</small></label>}
 
-        <label className="full-width">Azure DevOps PAT
-          <input type="password" name="datasource-azure-devops-pat" value={pat} onChange={(e) => setPat(e.target.value)} onFocus={() => setPatEditable(true)} readOnly={!patEditable} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" spellCheck={false} placeholder="PAT is kept only for this browser session"/>
-        </label>
+        <div className={`full-width deployment-auth-state ${pat ? "ready" : "required"}`}><Settings size={17}/><div><strong>{pat ? "Azure DevOps PAT ready for this session" : "Azure DevOps authentication will be requested when required"}</strong><small>{pat ? "The token is retained only for this browser session." : "Preview from WebLogic will securely prompt for your PAT before triggering Azure DevOps."}</small></div>{pat && <button type="button" className="secondary-button" onClick={() => setPat("")}>Clear session PAT</button>}</div>
 
         <div className="full-width datasource-form-actions">
           <button className="primary-button" disabled={!canPreview}><Eye size={15}/>{busy ? "Running pipeline..." : "Preview from WebLogic"}</button>
@@ -648,6 +664,40 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
         </table>
       </div>
     </section>
+
+    <PremiumDeploymentModal
+      open={Boolean(patPromptAction)}
+      variant="info"
+      eyebrow="AZURE DEVOPS AUTHENTICATION"
+      title="Azure DevOps PAT required"
+      message={patPromptAction === "apply"
+        ? "Enter your Azure DevOps PAT to apply the previewed datasource changes."
+        : "Enter your Azure DevOps PAT to run the live WebLogic datasource preview through Azure DevOps."}
+      details={[
+        { label: "Action", value: patPromptAction === "apply" ? "Apply datasource changes" : "Preview from WebLogic" },
+        { label: "Environment", value: selectedEnvironment ? `${selectedEnvironment.application} / ${selectedEnvironment.environment.toUpperCase()}` : "" },
+      ]}
+      inputLabel="Personal Access Token"
+      inputType="password"
+      inputValue={patPromptValue}
+      inputPlaceholder="Enter Azure DevOps PAT"
+      primaryLabel="Continue securely"
+      primaryDisabled={!patPromptValue.trim()}
+      secondaryLabel="Cancel"
+      busy={busy}
+      onInputChange={setPatPromptValue}
+      onPrimary={() => {
+        const enteredPat = patPromptValue.trim();
+        const nextAction = patPromptAction;
+        if (!enteredPat || !nextAction) return;
+        setPat(enteredPat);
+        setPatPromptAction(null);
+        setPatPromptValue("");
+        if (nextAction === "apply") void apply(enteredPat);
+        else void runPreview(enteredPat);
+      }}
+      onSecondary={() => { setPatPromptAction(null); setPatPromptValue(""); }}
+    />
 
     <PremiumDeploymentModal
       open={confirmApply}
