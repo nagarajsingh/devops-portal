@@ -103,6 +103,7 @@ async def submit_release_document(
     application_type: str = Form(...),
     app_owner: str = Form(...),
     country: str = Form(""),
+    deployment_environment: str = Form(""),
     document: UploadFile = File(...),
     user: UserContext = Depends(current_user),
 ) -> dict:
@@ -124,6 +125,7 @@ async def submit_release_document(
             raw,
             user.username,
             country,
+            deployment_environment,
         )
         mail_sent = send_owner_approval_request(result)
         result["owner_mail_sent"] = mail_sent
