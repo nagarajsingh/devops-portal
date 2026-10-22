@@ -41,6 +41,19 @@ class PortalUserResponse(BaseModel):
     created_at: str
     updated_at: str
 
+class DatabaseCreationRequest(BaseModel):
+    environment: str = Field(default="", max_length=100)
+    db_username: str = Field(default="", max_length=255)
+    server_url: str = Field(default="", max_length=500)
+    server_port: int | None = Field(default=None, ge=1, le=65535)
+    db_name: str = Field(default="", max_length=255)
+
+
+class DatabaseCredentialDelivery(BaseModel):
+    request_index: int = Field(ge=0)
+    password: SecretStr | None = None
+
+
 class PipelineRequestCreate(BaseModel):
     application_type: ApplicationType = "H2H"
     app_owner: str = ""
@@ -57,11 +70,15 @@ class PipelineRequestCreate(BaseModel):
     service_port: int = Field(default=8080, ge=1, le=65535)
     namespace: str = ""
     target_cluster: str = "local-cluster"
+    acl_details: str = Field(default="", max_length=10000)
+    database_requests: list[DatabaseCreationRequest] = Field(default_factory=list, max_length=25)
     comments: str | None = None
 class ReviewUpdate(PipelineRequestCreate): review_comments: str | None = None
 class ApproveRequest(BaseModel): azure_devops_pat: SecretStr = Field(min_length=10)
 class RejectRequest(BaseModel): reason: str = Field(min_length=2, max_length=1000)
-class CloseRequest(BaseModel): comment: str = Field(min_length=3, max_length=2000)
+class CloseRequest(BaseModel):
+    comment: str = Field(min_length=3, max_length=2000)
+    database_credentials: list[DatabaseCredentialDelivery] = Field(default_factory=list, max_length=25)
 class PipelineRequest(PipelineRequestCreate):
     id: str
     requested_by: str
@@ -71,6 +88,7 @@ class PipelineRequest(PipelineRequestCreate):
     reviewed_by: str | None = None
     review_comments: str | None = None
     closure_comment: str | None = None
+    closure_mail_sent: bool | None = None
     app_owner_decision_by: str | None = None
     app_owner_decision_at: str | None = None
     app_owner_comment: str | None = None
