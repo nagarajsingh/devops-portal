@@ -326,6 +326,7 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
       request.application,
       request.country,
       request.environment,
+      request.deployment_environment,
       request.requested_by,
       request.app_owner,
       request.document_name,
@@ -444,7 +445,7 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
 
       {role === "devops" && selected.steps?.deployment?.status === "Succeeded" && selected.status !== "Completed" && showCompletionForm && <div className="ticket-closure-form"><div><span className="eyebrow">DEPLOYMENT COMPLETION</span><h3>Complete this deployment request</h3><p>The mandatory comment will be stored in the request timeline and emailed to {selected.requested_by}.</p></div><label>Completion comment<textarea autoFocus rows={4} maxLength={2000} value={completionComment} placeholder="Example: Deployment completed successfully in UAT. Smoke validation completed." onChange={(event) => setCompletionComment(event.target.value)}/><small>{completionComment.trim().length}/2000 characters</small></label><div className="ticket-closure-actions"><button className="secondary-button" disabled={busy} onClick={() => { setShowCompletionForm(false); setCompletionComment(""); }}>Cancel</button><button className="primary-button" disabled={busy || !completionComment.trim()} onClick={() => void action(selected.id, "complete-request", { comment: completionComment.trim() })}>{busy ? "Completing..." : "Confirm Complete & Email Developer"}</button></div></div>}
 
-      <div className="deployment-actions">{role === "devops" && <button className="secondary-button" onClick={() => action(selected.id, "refresh-status")}><RefreshCw size={15}/>Refresh status</button>}<button className="secondary-button" onClick={() => { collectionsDirtyRef.current = false; setSelected(null); setInlineNotice(null); }}><ArrowLeft size={15}/>Back to requests</button></div>
+      <div className="deployment-actions">{role === "devops" && selected.status !== "Completed" && <button className="secondary-button" onClick={() => action(selected.id, "refresh-status")}><RefreshCw size={15}/>Refresh status</button>}<button className="secondary-button" onClick={() => { collectionsDirtyRef.current = false; setSelected(null); setInlineNotice(null); }}><ArrowLeft size={15}/>Back to requests</button></div>
 
     </section>;
   }
