@@ -68,6 +68,10 @@ type DeploymentRequest = {
   document_name: string;
   extracted: boolean;
   progress_percent?: number;
+  completion_comment?: string;
+  completed_by?: string;
+  completed_at?: string;
+  developer_mail_sent?: boolean;
   war_files: string[];
   jar_files: string[];
   container_images: string[];
@@ -129,6 +133,7 @@ async function readResponse(response: Response): Promise<any> {
 }
 
 function nextStep(request: DeploymentRequest) {
+  if (request.status === "Completed") return "Completed";
   const approval = String(request.steps?.owner_approval?.status || "Pending");
   if (approval === "Rejected") return "Rejected";
   if (approval !== "Approved") return "Approval";
@@ -157,6 +162,8 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
   const [requestSearch, setRequestSearch] = useState("");
   const [pat, setPat] = useState(readSessionPat);
   const [patEditable, setPatEditable] = useState(false);
+  const [showCompletionForm, setShowCompletionForm] = useState(false);
+  const [completionComment, setCompletionComment] = useState("");
   const collectionsDirtyRef = useRef(false);
 
   async function loadRequests() {
@@ -235,12 +242,23 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
       if (!silent) {
         const releaseCount = body?.application_type === "Collections" && name === "trigger-deployment" ? body?.steps?.deployment?.runs?.length || 0 : 0;
         const actionLabel = name.split("-").join(" ");
-        setInlineNotice({
-          variant: "success",
-          message: releaseCount
-            ? `${releaseCount} linked Azure DevOps release${releaseCount === 1 ? "" : "s"} discovered and loaded for ${id}.`
-            : `${actionLabel} completed for ${id}.`,
-        });
+        if (name === "complete-request") {
+          setShowCompletionForm(false);
+          setCompletionComment("");
+          setInlineNotice({
+            variant: body?.developer_mail_sent === false ? "warning" : "success",
+            message: body?.developer_mail_sent === false
+              ? `Request ${id} was completed, but the developer email could not be sent. Check SMTP configuration/logs.`
+              : `Request ${id} completed and the completion comment was emailed to ${body?.requested_by || "the developer"}.`,
+          });
+        } else {
+          setInlineNotice({
+            variant: "success",
+            message: releaseCount
+              ? `${releaseCount} linked Azure DevOps release${releaseCount === 1 ? "" : "s"} discovered and loaded for ${id}.`
+              : `${actionLabel} completed for ${id}.`,
+          });
+        }
       }
     } catch (error) {
       if (!silent) setInlineNotice({ variant: "error", message: error instanceof Error ? error.message : "Action failed" });
@@ -302,6 +320,8 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
   function startRequest(request: DeploymentRequest) {
     collectionsDirtyRef.current = false;
     setInlineNotice(null);
+    setShowCompletionForm(false);
+    setCompletionComment("");
     setSelected(request);
   }
 
@@ -374,6 +394,12 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
       {step === "Deployment" && role === "devops" && <div className="wizard-action-panel"><Rocket/><div><h3>Trigger deployment</h3><p>Build status: {selected.steps?.build?.status}</p>{selected.application_type === "Collections" ? <><p>Select the intended Classic Release environment. The portal marks deployment complete when this environment succeeds; other release environments do not block completion.</p><label>Target deployment environment<select value={selected.deployment_environment || ""} onChange={(event) => setSelected({ ...selected, deployment_environment: event.target.value })}><option value="">Select environment</option>{COLLECTIONS_DEPLOYMENT_ENVIRONMENTS.map((environment) => <option key={environment} value={environment}>{environment}</option>)}</select></label><button className="primary-button" disabled={selected.steps?.build?.status !== "Succeeded" || !selected.deployment_environment || busy} onClick={() => void action(selected.id, "trigger-deployment", { deployment_environment: selected.deployment_environment })}>{busy ? "Discovering release..." : "Trigger deployment"}</button></> : <button className="primary-button" onClick={() => setDialog({ kind: "pipeline", request: selected, pipelineName: "" })}>Trigger deployment</button>}</div></div>}
 
       {deploymentRuns.length > 0 && <div className="lifecycle-section"><div className="deployment-result-header"><div><h3>Deployment lifecycle</h3>{selected.deployment_environment && <small>Completion target: {selected.deployment_environment}</small>}</div><span className={`status ${statusClass(selected.steps?.deployment?.status)}`}>{selected.steps?.deployment?.status}</span></div><div className="table-card lifecycle-table"><table><thead><tr><th>Service</th><th>Release</th><th>Release definition</th><th>Status</th><th>Duration</th><th>Target environment</th><th>All environments</th><th>Link</th></tr></thead><tbody>{deploymentRuns.map((run, index) => <tr key={`${run.release_id || run.run_id}-${index}`}><td>{run.service || "—"}</td><td>{run.release_name || run.pipeline_name || "—"}{run.release_id ? <small>#{run.release_id}</small> : null}</td><td>{run.release_definition_name || run.pipeline_name || "—"}</td><td><span className={`status ${statusClass(run.status)}`}>{run.status}</span></td><td>{formatDuration(run.duration_seconds)}</td><td><strong>{run.target_environment || selected.deployment_environment || "—"}</strong><small>{run.target_environment_status || "Waiting"}</small></td><td>{run.environment_status || "—"}</td><td>{run.url ? <a href={run.url} target="_blank" rel="noreferrer" title="Open release in Azure DevOps" aria-label="Open release in Azure DevOps"><ExternalLink size={17}/> Open release</a> : "—"}</td></tr>)}</tbody></table></div></div>}
+
+      {selected.status === "Completed" && <div className="closure-summary"><h3>Deployment request completed</h3><p><strong>Completed by:</strong> {selected.completed_by || "—"}</p><p><strong>Completed at:</strong> {formatDate(selected.completed_at)}</p><p><strong>Completion comment:</strong> {selected.completion_comment || "—"}</p><p><strong>Developer:</strong> {selected.requested_by}</p></div>}
+
+      {role === "devops" && selected.steps?.deployment?.status === "Succeeded" && selected.status !== "Completed" && !showCompletionForm && <div className="deployment-actions"><button className="primary-button" disabled={busy} onClick={() => { setCompletionComment(""); setShowCompletionForm(true); }}>Complete Request</button></div>}
+
+      {role === "devops" && selected.steps?.deployment?.status === "Succeeded" && selected.status !== "Completed" && showCompletionForm && <div className="ticket-closure-form"><div><span className="eyebrow">DEPLOYMENT COMPLETION</span><h3>Complete this deployment request</h3><p>The mandatory comment will be stored in the request timeline and emailed to {selected.requested_by}.</p></div><label>Completion comment<textarea autoFocus rows={4} maxLength={2000} value={completionComment} placeholder="Example: Deployment completed successfully in UAT. Smoke validation completed." onChange={(event) => setCompletionComment(event.target.value)}/><small>{completionComment.trim().length}/2000 characters</small></label><div className="ticket-closure-actions"><button className="secondary-button" disabled={busy} onClick={() => { setShowCompletionForm(false); setCompletionComment(""); }}>Cancel</button><button className="primary-button" disabled={busy || !completionComment.trim()} onClick={() => void action(selected.id, "complete-request", { comment: completionComment.trim() })}>{busy ? "Completing..." : "Confirm Complete & Email Developer"}</button></div></div>}
 
       <div className="deployment-actions">{role === "devops" && <button className="secondary-button" onClick={() => action(selected.id, "refresh-status")}><RefreshCw size={15}/>Refresh status</button>}<button className="secondary-button" onClick={() => { collectionsDirtyRef.current = false; setSelected(null); setInlineNotice(null); }}><ArrowLeft size={15}/>Back to requests</button></div>
       {role === "devops" && <div className="deployment-pat-card"><label className="deployment-pat">Azure DevOps PAT<input type="password" name="azure-devops-session-pat" value={pat} onChange={(event) => setPat(event.target.value)} onFocus={() => setPatEditable(true)} readOnly={!patEditable} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" spellCheck={false} placeholder="Enter once for this login session"/></label><div className="pat-session-note"><span>{pat ? "PAT available for this session" : "No session PAT entered"}</span><small>The token is kept only in this browser session and is cleared on logout.</small>{pat && <button type="button" className="secondary-button" onClick={() => { setPat(""); setPatEditable(true); }}>Clear PAT</button>}</div></div>}
