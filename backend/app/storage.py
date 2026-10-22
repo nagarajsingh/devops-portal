@@ -29,6 +29,8 @@ def normalize_stored_request(item: dict[str, Any]) -> dict[str, Any]:
     item.setdefault("reference_branch", "")
     item.setdefault("ingress_name", None)
     item.setdefault("target_cluster", LOCAL_KUBERNETES_TARGET)
+    item.setdefault("acl_details", "")
+    item.setdefault("database_requests", [])
     item.setdefault("provisioning", {})
     item.setdefault("timeline", [])
     item.pop("application_name", None)
