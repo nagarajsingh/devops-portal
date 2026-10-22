@@ -247,12 +247,55 @@ def bootstrap_repository(target_repository: dict, reference_repository_name: str
     files = reference_files(reference_name, reference_branch, application_type, pat)
     transformed_files: list[dict[str, str]] = []
     transformed_count = 0
+    renamed_count = 0
+    transformed_paths: dict[str, str] = {}
     for item in files:
+        original_path = item["path"]
         original_content = item["content"]
-        transformed_content = _replace_reference_name(original_content, reference_name, target_name)
-        if transformed_content != original_content:
+
+        # Replace the reference repository name in both the file content and
+        # the Git path. ConfigMap/Secret manifests often include the
+        # application/repository name in their filename, so transforming only
+        # YAML content leaves stale reference-repository filenames behind.
+        transformed_path = _replace_reference_name(
+            original_path,
+            reference_name,
+            target_name,
+        )
+        transformed_content = _replace_reference_name(
+            original_content,
+            reference_name,
+            target_name,
+        )
+
+        normalized_path = transformed_path.casefold()
+        previous_source = transformed_paths.get(normalized_path)
+        if previous_source and previous_source != original_path:
+            raise RuntimeError(
+                "Repository bootstrap filename collision after replacing "
+                "%s with %s: %s and %s both resolve to %s"
+                % (
+                    reference_name,
+                    target_name,
+                    previous_source,
+                    original_path,
+                    transformed_path,
+                )
+            )
+        transformed_paths[normalized_path] = original_path
+
+        if transformed_path != original_path:
+            renamed_count += 1
+        if transformed_path != original_path or transformed_content != original_content:
             transformed_count += 1
-        transformed_files.append({"path": item["path"], "content": transformed_content})
+
+        transformed_files.append(
+            {
+                "path": transformed_path,
+                "source_path": original_path,
+                "content": transformed_content,
+            }
+        )
     files = transformed_files
 
     repository_id = target_repository["id"]
@@ -260,7 +303,44 @@ def bootstrap_repository(target_repository: dict, reference_repository_name: str
     develop_head = get_branch_head(repository_id, "develop", pat)
     base_head = develop_head if not head and develop_head and target_branch != "develop" else None
     existing_paths = list_branch_paths(repository_id, target_branch, pat) if head else (list_branch_paths(repository_id, "develop", pat) if base_head else set())
-    changes = [{"changeType": "edit" if item["path"] in existing_paths else "add", "item": {"path": item["path"]}, "newContent": {"content": item["content"], "contentType": "rawtext"}} for item in files]
+
+    existing_by_normalized = {
+        existing_path.casefold(): existing_path
+        for existing_path in existing_paths
+    }
+    changes: list[dict[str, Any]] = []
+    stale_paths: set[str] = set()
+    for item in files:
+        target_path = item["path"]
+        source_path = item["source_path"]
+        existing_target = existing_by_normalized.get(target_path.casefold())
+
+        changes.append(
+            {
+                "changeType": "edit" if existing_target else "add",
+                "item": {"path": existing_target or target_path},
+                "newContent": {
+                    "content": item["content"],
+                    "contentType": "rawtext",
+                },
+            }
+        )
+
+        # Clean up filenames produced by the old bootstrap behavior when this
+        # branch is re-run. Previously the content was transformed but a path
+        # containing the reference repository name was left unchanged.
+        if source_path.casefold() != target_path.casefold():
+            stale_path = existing_by_normalized.get(source_path.casefold())
+            if stale_path and stale_path.casefold() != target_path.casefold():
+                stale_paths.add(stale_path)
+
+    for stale_path in sorted(stale_paths):
+        changes.append(
+            {
+                "changeType": "delete",
+                "item": {"path": stale_path},
+            }
+        )
     commit = {"comment": f"Bootstrap {application_type} repository structure from {reference_branch}", "changes": changes}
     if base_head:
         commit["parents"] = [base_head]
@@ -274,8 +354,23 @@ def bootstrap_repository(target_repository: dict, reference_repository_name: str
     if develop_head and target_branch != "develop":
         pull_request = _ensure_pull_request(repository_id, target_name, target_branch, "develop", application_type, pat)
 
-    logger.info("Repository bootstrap completed repository=%s branch=%s source=%s transformed_files=%s pr=%s", target_name, target_branch, reference_name, transformed_count, pull_request.get("id") if pull_request else None)
-    message = f"{action} {target_branch} using {reference_name}:{reference_branch}; updated reference names in {transformed_count} file(s)"
+    logger.info(
+        "Repository bootstrap completed repository=%s branch=%s source=%s transformed_files=%s renamed_files=%s stale_files_removed=%s pr=%s",
+        target_name,
+        target_branch,
+        reference_name,
+        transformed_count,
+        renamed_count,
+        len(stale_paths),
+        pull_request.get("id") if pull_request else None,
+    )
+    message = (
+        f"{action} {target_branch} using {reference_name}:{reference_branch}; "
+        f"updated reference names in {transformed_count} file(s), "
+        f"renamed {renamed_count} file(s)"
+    )
+    if stale_paths:
+        message += f"; removed {len(stale_paths)} stale reference-named file(s)"
     if pull_request:
         message += f"; PR #{pull_request.get('id')} raised from {target_branch} to develop"
     return {
@@ -285,6 +380,8 @@ def bootstrap_repository(target_repository: dict, reference_repository_name: str
         "source_branch": reference_branch,
         "files": [item["path"] for item in files],
         "transformed_files": transformed_count,
+        "renamed_files": renamed_count,
+        "stale_files_removed": len(stale_paths),
         "pull_request": pull_request,
         "url": target_repository.get("webUrl") or target_repository.get("remoteUrl"),
     }
