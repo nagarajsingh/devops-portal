@@ -261,7 +261,7 @@ def submit_document(application_type: str, app_owner: str, upload: UploadFile, r
     row = {
         "id": request_id, "status": "Pending App Owner Approval", "requested_by": requested_by,
         "created_at": now, "updated_at": now, "application_type": application_type,
-        "country": country, "app_owner": app_owner.strip(), "document_name": upload.filename or "release-document",
+        "country": country, "deployment_environment": "", "app_owner": app_owner.strip(), "document_name": upload.filename or "release-document",
         "document_path": str(document_path), "extracted": False, "architecture": architecture,
         "application": "", "branch_name": "", "environment": country if application_type == "Collections" else "",
         "repository": "", "target_branch": "", "build_pipeline": "", "war_files": [], "jar_files": [],
