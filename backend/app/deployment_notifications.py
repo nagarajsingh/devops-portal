@@ -311,3 +311,70 @@ def send_devops_ready(row: dict[str, Any], bypassed: bool = False) -> bool:
         recipients,
         html_body,
     )
+
+
+def send_deployment_completed(row: dict[str, Any]) -> bool:
+    request_id = str(row.get("id") or "")
+    developer = str(row.get("requested_by") or "").strip()
+    comment = str(row.get("completion_comment") or "").strip()
+    completed_by = str(row.get("completed_by") or "").strip()
+    completed_at = str(row.get("completed_at") or "").strip()
+    target_environment = str(
+        row.get("deployment_environment")
+        or row.get("environment")
+        or row.get("country")
+        or ""
+    ).strip()
+    portal_url = _request_url(request_id)
+    safe_portal_url = html.escape(portal_url, quote=True)
+
+    if not developer:
+        logger.error(
+            "Deployment completion email not sent request_id=%s because requested_by is empty",
+            request_id,
+        )
+        return False
+
+    html_body = f"""
+    <!doctype html>
+    <html>
+      <body style="margin:0;padding:0;background:#f4f6fa;font-family:Arial,Helvetica,sans-serif;color:#24334a">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+          <tr><td align="center" style="padding:32px 16px">
+            <table role="presentation" width="680" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:680px;background:#ffffff;border:1px solid #e7ebf0;border-radius:18px;overflow:hidden">
+              <tr><td style="padding:28px 32px;background:#173d70;color:#ffffff">
+                <div style="font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#ffbd8f">Deployment completed</div>
+                <h1 style="margin:10px 0 6px;font-size:26px">Request {html.escape(request_id)} is complete</h1>
+                <p style="margin:0;color:#dbe5f0">DevOps has completed the deployment request.</p>
+              </td></tr>
+              <tr><td style="padding:26px 32px">
+                <table width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e7ebf0;border-radius:12px;border-collapse:separate;overflow:hidden">
+                  <tr><td style="padding:11px 13px;background:#fbfcfe;font-weight:700;width:34%">Application</td><td style="padding:11px 13px">{html.escape(str(row.get('application') or row.get('application_type') or '—'))}</td></tr>
+                  <tr><td style="padding:11px 13px;background:#fbfcfe;font-weight:700">Environment</td><td style="padding:11px 13px">{html.escape(target_environment or '—')}</td></tr>
+                  <tr><td style="padding:11px 13px;background:#fbfcfe;font-weight:700">Completed by</td><td style="padding:11px 13px">{html.escape(completed_by or '—')}</td></tr>
+                  <tr><td style="padding:11px 13px;background:#fbfcfe;font-weight:700">Completed at</td><td style="padding:11px 13px">{html.escape(completed_at or '—')}</td></tr>
+                </table>
+                <div style="margin-top:22px;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#ef6b22">DevOps completion comment</div>
+                <div style="margin-top:9px;padding:16px 18px;border-radius:12px;background:#f8fafc;border:1px solid #e7ebf0;white-space:pre-wrap;line-height:22px">{html.escape(comment or 'Completed')}</div>
+                {f'<p style="margin-top:22px"><a href="{safe_portal_url}" style="color:#315b8a;font-weight:700">Open request in DevOps Portal</a></p>' if safe_portal_url else ''}
+              </td></tr>
+              <tr><td style="padding:16px 32px;background:#f8fafc;border-top:1px solid #e7ebf0;color:#7b8795;font-size:11px;text-align:center">Mashreq NEO CORP · Internal DevOps Deployment Management</td></tr>
+            </table>
+          </td></tr>
+        </table>
+      </body>
+    </html>
+    """
+
+    sent = send_mail(
+        f"[Completed] Deployment Request {request_id}",
+        [developer],
+        html_body,
+    )
+    logger.info(
+        "Deployment completion email result request_id=%s developer=%s sent=%s",
+        request_id,
+        developer,
+        sent,
+    )
+    return sent
