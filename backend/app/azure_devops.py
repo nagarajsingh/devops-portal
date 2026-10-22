@@ -157,6 +157,68 @@ def _replace_reference_name(content: str, reference_name: str, target_name: str)
     return re.sub(re.escape(source), lambda _: target, content, flags=re.IGNORECASE)
 
 
+def _empty_top_level_yaml_keys(document: str, keys: set[str]) -> str:
+    """Replace selected top-level YAML mappings with empty mappings.
+
+    This intentionally avoids parsing/re-serializing the full YAML so bootstrap
+    preserves comments, templates and formatting in the reference manifests.
+    """
+    lines = document.splitlines(keepends=True)
+    output: list[str] = []
+    index = 0
+
+    while index < len(lines):
+        line = lines[index]
+        match = re.match(r"^([A-Za-z][A-Za-z0-9_-]*):(?:[^\r\n]*)?(\r?\n)?$", line)
+        if not match or match.group(1) not in keys:
+            output.append(line)
+            index += 1
+            continue
+
+        key = match.group(1)
+        newline = match.group(2) or ""
+        output.append(f"{key}: {{}}{newline}")
+        index += 1
+
+        # Skip the original block value until the next top-level YAML key or
+        # document separator. This handles normal data:/stringData: mappings.
+        while index < len(lines):
+            candidate = lines[index]
+            if re.match(r"^---\s*(?:#.*)?(?:\r?\n)?$", candidate):
+                break
+            if re.match(r"^[A-Za-z][A-Za-z0-9_-]*:", candidate):
+                break
+            index += 1
+
+    return "".join(output)
+
+
+def _strip_configmap_secret_values(content: str) -> tuple[str, int]:
+    """Clear value payloads only in Kubernetes ConfigMap/Secret documents."""
+    parts = re.split(r"(?m)(^---\s*(?:#.*)?(?:\r?\n|$))", content)
+    stripped_documents = 0
+
+    for index, part in enumerate(parts):
+        if not part or re.match(r"^---", part):
+            continue
+
+        kind_match = re.search(
+            r"(?m)^kind:\s*(ConfigMap|Secret)\s*(?:#.*)?$",
+            part,
+        )
+        if not kind_match:
+            continue
+
+        kind = kind_match.group(1)
+        keys = {"data", "binaryData"} if kind == "ConfigMap" else {"data", "stringData"}
+        updated = _empty_top_level_yaml_keys(part, keys)
+        if updated != part:
+            parts[index] = updated
+            stripped_documents += 1
+
+    return "".join(parts), stripped_documents
+
+
 def _application_bootstrap_profile(application_type: str) -> dict[str, Any]:
     if application_type == "Native-Mobile":
         return {"target_branch": "devops/pipeline", "required_files": ["/Dockerfile"], "required_folders": ["BuildAndPublish"], "optional_folders": []}
@@ -236,7 +298,15 @@ def _ensure_pull_request(repository_id: str, repository_name: str, source_branch
     return {"status": "Completed", "id": pr_id, "source_branch": source_branch, "target_branch": target_branch, "url": f"https://dev.azure.com/{AZDO_ORG}/{AZDO_PROJECT}/_git/{urllib.parse.quote(repository_name)}/pullrequest/{pr_id}"}
 
 
-def bootstrap_repository(target_repository: dict, reference_repository_name: str, reference_branch: str, application_type: str, pat: str) -> dict[str, Any]:
+def bootstrap_repository(
+    target_repository: dict,
+    reference_repository_name: str,
+    reference_branch: str,
+    application_type: str,
+    pat: str,
+    *,
+    update_values: bool = False,
+) -> dict[str, Any]:
     profile = _application_bootstrap_profile(application_type)
     target_branch = profile["target_branch"]
     reference_name = reference_repository_name.strip()
@@ -248,6 +318,7 @@ def bootstrap_repository(target_repository: dict, reference_repository_name: str
     transformed_files: list[dict[str, str]] = []
     transformed_count = 0
     renamed_count = 0
+    value_stripped_documents = 0
     transformed_paths: dict[str, str] = {}
     for item in files:
         original_path = item["path"]
@@ -267,6 +338,12 @@ def bootstrap_repository(target_repository: dict, reference_repository_name: str
             reference_name,
             target_name,
         )
+
+        if not update_values:
+            transformed_content, stripped_count = _strip_configmap_secret_values(
+                transformed_content
+            )
+            value_stripped_documents += stripped_count
 
         normalized_path = transformed_path.casefold()
         previous_source = transformed_paths.get(normalized_path)
@@ -355,12 +432,14 @@ def bootstrap_repository(target_repository: dict, reference_repository_name: str
         pull_request = _ensure_pull_request(repository_id, target_name, target_branch, "develop", application_type, pat)
 
     logger.info(
-        "Repository bootstrap completed repository=%s branch=%s source=%s transformed_files=%s renamed_files=%s stale_files_removed=%s pr=%s",
+        "Repository bootstrap completed repository=%s branch=%s source=%s transformed_files=%s renamed_files=%s stripped_config_docs=%s update_values=%s stale_files_removed=%s pr=%s",
         target_name,
         target_branch,
         reference_name,
         transformed_count,
         renamed_count,
+        value_stripped_documents,
+        update_values,
         len(stale_paths),
         pull_request.get("id") if pull_request else None,
     )
@@ -369,6 +448,13 @@ def bootstrap_repository(target_repository: dict, reference_repository_name: str
         f"updated reference names in {transformed_count} file(s), "
         f"renamed {renamed_count} file(s)"
     )
+    if update_values:
+        message += "; ConfigMap/Secret values copied from reference"
+    else:
+        message += (
+            f"; cleared values in {value_stripped_documents} "
+            "ConfigMap/Secret document(s)"
+        )
     if stale_paths:
         message += f"; removed {len(stale_paths)} stale reference-named file(s)"
     if pull_request:
@@ -381,6 +467,8 @@ def bootstrap_repository(target_repository: dict, reference_repository_name: str
         "files": [item["path"] for item in files],
         "transformed_files": transformed_count,
         "renamed_files": renamed_count,
+        "update_values": update_values,
+        "configmap_secret_values_cleared": value_stripped_documents,
         "stale_files_removed": len(stale_paths),
         "pull_request": pull_request,
         "url": target_repository.get("webUrl") or target_repository.get("remoteUrl"),
