@@ -65,15 +65,74 @@ def _refresh_build_run(run: dict[str, Any], pat: str) -> None:
     )
 
 
+COLLECTIONS_DEPLOYMENT_ENVIRONMENTS = ("DEV", "SIT", "UAT", "TRAINING/PPR", "PROD", "DR")
+
+_COLLECTIONS_ENVIRONMENT_ALIASES = {
+    "DEV": {"dev", "development"},
+    "SIT": {"sit"},
+    "UAT": {"uat"},
+    "TRAINING/PPR": {"training", "train", "ppr", "preprd", "preprod", "trainingppr"},
+    "PROD": {"prod", "production"},
+    "DR": {"dr", "disasterrecovery"},
+}
+
+
+def _normalized_environment_name(value: Any) -> str:
+    return "".join(
+        char
+        for char in str(value or "").strip().casefold()
+        if char.isalnum()
+    )
+
+
+def _target_environment(environments: list[dict[str, Any]], target: str) -> dict[str, Any] | None:
+    aliases = _COLLECTIONS_ENVIRONMENT_ALIASES.get(target, set())
+    for environment in environments:
+        if _normalized_environment_name(environment.get("name")) in aliases:
+            return environment
+    return None
+
+
+def _target_environment_release_status(environments: list[dict[str, Any]], target: str) -> tuple[str, str]:
+    environment = _target_environment(environments, target)
+    if not environment:
+        return "Ready", "Not Found"
+
+    raw_status = str(environment.get("status") or "").strip()
+    normalized = raw_status.casefold().replace("_", "").replace(" ", "")
+    if normalized == "succeeded":
+        return "Succeeded", raw_status or "succeeded"
+    if normalized in {"rejected", "canceled", "cancelled", "failed", "partiallysucceeded"}:
+        return "Failed", raw_status
+    if normalized in {"queued", "inprogress", "scheduled"}:
+        return "Running", raw_status
+    return "Ready", raw_status or "notStarted"
+
+
 def _sync_collections_releases(row: dict[str, Any], pat: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Discover Classic Releases tied to the exact successful Collections build runs."""
+    """Discover Classic Releases and evaluate only the DevOps-selected environment."""
     runs, missing = discover_collections_releases(row, pat)
     deployment = row.setdefault("steps", {}).setdefault("deployment", {"status": "Waiting", "runs": []})
+    target_environment = str(row.get("deployment_environment") or "").strip().upper()
 
     if runs:
+        if target_environment:
+            for run in runs:
+                target_status, raw_status = _target_environment_release_status(
+                    run.get("environments") or [],
+                    target_environment,
+                )
+                run["overall_release_status"] = run.get("status")
+                run["status"] = target_status
+                run["result"] = target_status
+                run["target_environment"] = target_environment
+                run["target_environment_status"] = raw_status
+
         deployment["runs"] = runs
         deployment["discovery_missing"] = missing
+        deployment["target_environment"] = target_environment
         statuses = [str(run.get("status") or "") for run in runs]
+
         if all(status == "Succeeded" for status in statuses):
             deployment["status"] = "Succeeded"
             row["status"] = "Deployment Completed"
@@ -89,6 +148,7 @@ def _sync_collections_releases(row: dict[str, Any], pat: str) -> tuple[list[dict
     else:
         deployment["runs"] = []
         deployment["status"] = "Waiting"
+        deployment["target_environment"] = target_environment
         deployment["discovery_missing"] = missing
 
     return runs, missing
@@ -284,11 +344,31 @@ def trigger_collections_build(request_id: str, actor: str, pat: str, updates: di
     return row
 
 
-def trigger_collections_deployment(request_id: str, actor: str, pat: str) -> dict[str, Any]:
+def trigger_collections_deployment(
+    request_id: str,
+    actor: str,
+    pat: str,
+    updates: dict[str, Any],
+) -> dict[str, Any]:
     rows = dm._load()
     row = next((item for item in rows if item.get("id") == request_id), None)
     if not row:
         raise HTTPException(status_code=404, detail="Deployment request not found")
+
+    requested_environment = str(
+        updates.get("deployment_environment")
+        or row.get("deployment_environment")
+        or ""
+    ).strip().upper()
+    if requested_environment not in COLLECTIONS_DEPLOYMENT_ENVIRONMENTS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Select a Collections deployment environment: "
+                + ", ".join(COLLECTIONS_DEPLOYMENT_ENVIRONMENTS)
+            ),
+        )
+    row["deployment_environment"] = requested_environment
 
     steps = row.setdefault("steps", {})
     build = steps.setdefault("build", {"status": "Waiting", "runs": []})
@@ -325,6 +405,7 @@ def trigger_collections_deployment(request_id: str, actor: str, pat: str) -> dic
             "actor": actor,
             "releases": len(releases),
             "missing": len(missing),
+            "deployment_environment": requested_environment,
         }
     )
     dm._update_progress(row)
@@ -377,6 +458,6 @@ def perform_action(
         rows = dm._load()
         row = next((item for item in rows if item.get("id") == request_id), None)
         if row and row.get("application_type") == "Collections":
-            return trigger_collections_deployment(request_id, actor, pat)
+            return trigger_collections_deployment(request_id, actor, pat, updates)
 
     return dm.update_action(request_id, action, actor, pat, updates)
