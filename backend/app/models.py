@@ -48,6 +48,7 @@ class PipelineRequestCreate(BaseModel):
     reference_repository_name: str = ""
     reference_branch: str = ""
     setup_pipeline: bool = False
+    update_values: bool = False
     pipeline_type: str | None = None
     ingress_path: str
     ingress_name: str | None = None
