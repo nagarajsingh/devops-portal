@@ -34,7 +34,7 @@ export const provisionRemoteKubernetes=(id:string,pat:string,token:string)=>requ
 export const confirmExistingRepository=(id:string,pat:string,token:string)=>request<PipelineRequest>(`/requests/${id}/confirm-existing-repository`,{method:"POST",body:JSON.stringify({azure_devops_pat:pat})},token);
 export const confirmExistingBuildPipeline=(id:string,pat:string,token:string)=>request<PipelineRequest>(`/requests/${id}/confirm-existing-build-pipeline`,{method:"POST",body:JSON.stringify({azure_devops_pat:pat})},token);
 export const rejectPipelineRequest=(id:string,reason:string,token:string)=>request<PipelineRequest>(`/requests/${id}/reject`,{method:"POST",body:JSON.stringify({reason})},token);
-export const closePipelineRequest=(id:string,comment:string,token:string)=>request<PipelineRequest>(`/requests/${id}/close`,{method:"POST",body:JSON.stringify({comment})},token);
+export const closePipelineRequest=(id:string,comment:string,databaseCredentials:{request_index:number;password:string}[],token:string)=>request<PipelineRequest>(`/requests/${id}/close`,{method:"POST",body:JSON.stringify({comment,database_credentials:databaseCredentials})},token);
 
 
 export type WebLogicEnvironmentInput={
