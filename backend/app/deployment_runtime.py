@@ -421,6 +421,63 @@ def trigger_collections_deployment(
     return row
 
 
+def complete_deployment_request(
+    request_id: str,
+    actor: str,
+    updates: dict[str, Any],
+) -> dict[str, Any]:
+    rows = dm._load()
+    row = next((item for item in rows if item.get("id") == request_id), None)
+    if not row:
+        raise HTTPException(status_code=404, detail="Deployment request not found")
+
+    comment = str(updates.get("comment") or "").strip()
+    if not comment:
+        raise HTTPException(status_code=422, detail="Completion comment is required")
+
+    deployment_status = str(
+        ((row.get("steps") or {}).get("deployment") or {}).get("status") or ""
+    )
+    if deployment_status != "Succeeded":
+        raise HTTPException(
+            status_code=409,
+            detail="Deployment can be completed only after the target deployment status is Succeeded",
+        )
+
+    if str(row.get("status") or "") == "Completed":
+        raise HTTPException(status_code=409, detail="Deployment request is already completed")
+
+    now = dm._now()
+    row["status"] = "Completed"
+    row["progress_percent"] = 100
+    row["completion_comment"] = comment
+    row["completed_by"] = actor
+    row["completed_at"] = now
+    row.setdefault("steps", {})["completion"] = {
+        "status": "Completed",
+        "actor": actor,
+        "at": now,
+        "comment": comment,
+    }
+    row.setdefault("timeline", []).append(
+        {
+            "at": now,
+            "action": "Deployment request completed",
+            "actor": actor,
+            "comment": comment,
+        }
+    )
+    row["updated_at"] = now
+    dm._save(rows)
+    logger.info(
+        "Deployment request completed request_id=%s actor=%s requested_by=%s",
+        request_id,
+        actor,
+        row.get("requested_by"),
+    )
+    return row
+
+
 def perform_action(
     request_id: str,
     action: str,
@@ -443,6 +500,9 @@ def perform_action(
             status_code=422,
             detail="Azure DevOps PAT is not configured. Set KUBERNETES_INVENTORY_PAT or enter a PAT.",
         )
+
+    if action == "complete-request":
+        return complete_deployment_request(request_id, actor, updates)
 
     if action == "extract-document":
         return reextract_document(request_id, actor)
