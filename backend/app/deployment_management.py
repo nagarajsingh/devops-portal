@@ -21,6 +21,7 @@ _LOCK = threading.RLock()
 
 APPLICATION_TYPES = ("H2H", "Collections", "GTB-Applications", "Native-Mobile", "Safenet")
 COLLECTIONS_COUNTRIES = ("Egypt", "UAE")
+COLLECTIONS_DEPLOYMENT_ENVIRONMENTS = ("DEV", "SIT", "UAT", "TRAINING/PPR", "PROD", "DR")
 
 ARCHITECTURES: dict[str, dict[str, Any]] = {
     "H2H": {"code_pull": False, "pull_request": False, "build": True, "deployment": True},
@@ -241,11 +242,25 @@ def extract_release_document(upload: UploadFile, raw: bytes, application_type: s
     return _structured_extract(upload.filename or "release-document", raw, application_type, country)
 
 
-def submit_document(application_type: str, app_owner: str, upload: UploadFile, raw: bytes, requested_by: str, country: str = "") -> dict[str, Any]:
+def submit_document(
+    application_type: str,
+    app_owner: str,
+    upload: UploadFile,
+    raw: bytes,
+    requested_by: str,
+    country: str = "",
+    deployment_environment: str = "",
+) -> dict[str, Any]:
     if application_type not in APPLICATION_TYPES:
         raise HTTPException(status_code=422, detail="Select a valid application type")
     if application_type == "Collections" and country not in COLLECTIONS_COUNTRIES:
         raise HTTPException(status_code=422, detail="Collections country must be Egypt or UAE")
+    deployment_environment = deployment_environment.strip().upper()
+    if application_type == "Collections" and deployment_environment not in COLLECTIONS_DEPLOYMENT_ENVIRONMENTS:
+        raise HTTPException(
+            status_code=422,
+            detail="Collections target environment must be one of: " + ", ".join(COLLECTIONS_DEPLOYMENT_ENVIRONMENTS),
+        )
     if not app_owner.strip():
         raise HTTPException(status_code=422, detail="Application owner is required")
     if not raw:
@@ -261,7 +276,7 @@ def submit_document(application_type: str, app_owner: str, upload: UploadFile, r
     row = {
         "id": request_id, "status": "Pending App Owner Approval", "requested_by": requested_by,
         "created_at": now, "updated_at": now, "application_type": application_type,
-        "country": country, "deployment_environment": "", "app_owner": app_owner.strip(), "document_name": upload.filename or "release-document",
+        "country": country, "deployment_environment": deployment_environment, "app_owner": app_owner.strip(), "document_name": upload.filename or "release-document",
         "document_path": str(document_path), "extracted": False, "architecture": architecture,
         "application": "", "branch_name": "", "environment": country if application_type == "Collections" else "",
         "repository": "", "target_branch": "", "build_pipeline": "", "war_files": [], "jar_files": [],
@@ -273,7 +288,12 @@ def submit_document(application_type: str, app_owner: str, upload: UploadFile, r
             "pull_request": {"status": "Not Required" if not architecture.get("pull_request") else "Waiting"},
             "build": {"status": "Waiting", "runs": []}, "deployment": {"status": "Waiting", "runs": []},
         },
-        "timeline": [{"at": now, "action": f"Document submitted{f' for {country}' if country else ''}", "actor": requested_by}],
+        "timeline": [{
+            "at": now,
+            "action": f"Document submitted{f' for {country}' if country else ''}",
+            "actor": requested_by,
+            "deployment_environment": deployment_environment or None,
+        }],
     }
     rows.insert(0, row); _save(rows)
     return row
