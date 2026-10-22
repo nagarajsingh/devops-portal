@@ -84,7 +84,7 @@ def _owner_action_url(request_id: str, owner: str, decision: str) -> str:
 def _release_overview(row: dict[str, Any]) -> dict[str, Any]:
     overview: dict[str, Any] = {
         "application": row.get("application") or row.get("application_type") or "",
-        "environment": row.get("country") or row.get("environment") or "",
+        "environment": row.get("deployment_environment") or row.get("country") or row.get("environment") or "",
         "branch": row.get("branch_name") or "",
         "repository": row.get("repository") or "",
         "services": row.get("collections_items") or [],
@@ -105,7 +105,7 @@ def _release_overview(row: dict[str, Any]) -> dict[str, Any]:
             overview.update(
                 {
                     "application": preview.get("application") or overview["application"],
-                    "environment": preview.get("environment") or overview["environment"],
+                    "environment": row.get("deployment_environment") or preview.get("environment") or overview["environment"],
                     "branch": preview.get("branch_name") or overview["branch"],
                     "repository": preview.get("repository") or overview["repository"],
                     "services": preview.get("collections_items") or overview["services"],
