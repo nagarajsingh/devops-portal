@@ -72,6 +72,8 @@ def send_app_owner_approval_email(item: dict) -> None:
         ("Language / Pipeline Type", item.get("pipeline_type") or "Not selected"),
         ("Reference Repository", item.get("reference_repository_name") or "Not requested"),
         ("Ingress Path", item.get("ingress_path") or "Not provided"),
+        ("ACL Details", item.get("acl_details") or "Not requested"),
+        ("Database Requests", len(item.get("database_requests") or [])),
         ("Requested By", item["requested_by"]),
         ("Comments", item.get("comments") or "None"),
     ]
@@ -165,3 +167,157 @@ def send_app_owner_approval_email(item: dict) -> None:
         smtp.send_message(message, from_addr=MAIL_FROM, to_addrs=recipients)
 
     logger.info("App owner approval email sent request_id=%s app_owner=%s", item["id"], app_owner)
+
+
+
+def send_pipeline_closure_email(
+    item: dict,
+    database_credentials: list[dict] | None = None,
+) -> None:
+    """Email final onboarding details to the developer.
+
+    Database passwords are supplied only for this email operation and are never
+    written into the persisted request object by the request service.
+    """
+    if not SMTP_HOST or not MAIL_FROM:
+        raise RuntimeError("SMTP_HOST and MAIL_FROM must be configured")
+
+    developer = str(item.get("requested_by") or "").strip()
+    if not developer:
+        raise RuntimeError("Pipeline request developer email is missing")
+
+    credential_map = {
+        int(entry.get("request_index", -1)): str(entry.get("password") or "")
+        for entry in (database_credentials or [])
+        if int(entry.get("request_index", -1)) >= 0
+    }
+
+    database_requests = item.get("database_requests") or []
+    database_rows = ""
+    for index, request in enumerate(database_requests):
+        password = credential_map.get(index, "")
+        server = str(request.get("server_url") or "")
+        port = request.get("server_port")
+        server_display = f"{server}:{port}" if server and port else (server or (str(port) if port else "—"))
+        database_rows += (
+            "<tr>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #edf0f4'>{html.escape(str(request.get('environment') or '—'))}</td>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #edf0f4'>{html.escape(str(request.get('db_name') or '—'))}</td>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #edf0f4'>{html.escape(str(request.get('db_username') or '—'))}</td>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #edf0f4'>{html.escape(server_display)}</td>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #edf0f4;font-family:monospace'>{html.escape(password or 'Not provided')}</td>"
+            "</tr>"
+        )
+
+    database_section = (
+        f"""
+        <div style="margin-top:24px">
+          <div style="font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#ef641f">Database connection details</div>
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:10px;border:1px solid #e7ebf0;border-radius:12px;border-collapse:separate;overflow:hidden;font-size:12px">
+            <tr style="background:#f8fafc;color:#54687f">
+              <th align="left" style="padding:10px 12px">Environment</th>
+              <th align="left" style="padding:10px 12px">DB Name</th>
+              <th align="left" style="padding:10px 12px">Username</th>
+              <th align="left" style="padding:10px 12px">Server</th>
+              <th align="left" style="padding:10px 12px">Password</th>
+            </tr>
+            {database_rows}
+          </table>
+          <div style="margin-top:9px;padding:10px 12px;border-radius:10px;background:#fff8ef;border:1px solid #f0d5b9;color:#8d572f;font-size:11px;line-height:17px">Database passwords are sensitive. Store them in the approved secret-management location and avoid forwarding this email.</div>
+        </div>
+        """
+        if database_requests
+        else ""
+    )
+
+    acl_details = str(item.get("acl_details") or "").strip()
+    acl_section = (
+        f"""
+        <div style="margin-top:24px">
+          <div style="font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#ef641f">ACL / Connectivity request</div>
+          <pre style="margin:10px 0 0;padding:14px;border-radius:12px;background:#f8fafc;border:1px solid #e7ebf0;white-space:pre-wrap;word-break:break-word;font-family:Consolas,monospace;font-size:12px;line-height:19px;color:#334d6a">{html.escape(acl_details)}</pre>
+        </div>
+        """
+        if acl_details
+        else ""
+    )
+
+    portal_url = (
+        f"{PORTAL_PUBLIC_URL.rstrip('/')}/requests"
+        if PORTAL_PUBLIC_URL
+        else ""
+    )
+    portal_link = (
+        f'<p style="margin-top:22px"><a href="{html.escape(portal_url, quote=True)}" style="color:#315b8a;font-weight:700">Open request in DevOps Portal</a></p>'
+        if portal_url
+        else ""
+    )
+
+    body = f"""
+    <!doctype html>
+    <html>
+      <body style="margin:0;padding:0;background:#f4f6fa;font-family:Arial,Helvetica,sans-serif;color:#24334a">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+          <tr><td align="center" style="padding:32px 16px">
+            <table role="presentation" width="720" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:720px;background:#fff;border:1px solid #e7ebf0;border-radius:20px;overflow:hidden">
+              <tr><td style="padding:28px 32px;background:#173d70;color:#fff">
+                <div style="font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#ffbd8f">Request completed</div>
+                <h1 style="margin:10px 0 6px;font-size:26px">{html.escape(str(item.get('repository_name') or 'Pipeline request'))}</h1>
+                <p style="margin:0;color:#dbe5f0">DevOps has completed request {html.escape(str(item.get('id') or ''))}.</p>
+              </td></tr>
+              <tr><td style="padding:26px 32px">
+                <table width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e7ebf0;border-radius:12px;border-collapse:separate;overflow:hidden">
+                  <tr><td style="padding:11px 13px;background:#fbfcfe;font-weight:700;width:34%">Application</td><td style="padding:11px 13px">{html.escape(str(item.get('application_type') or '—'))}</td></tr>
+                  <tr><td style="padding:11px 13px;background:#fbfcfe;font-weight:700">Repository</td><td style="padding:11px 13px">{html.escape(str(item.get('repository_name') or '—'))}</td></tr>
+                  <tr><td style="padding:11px 13px;background:#fbfcfe;font-weight:700">Closed by</td><td style="padding:11px 13px">{html.escape(str(item.get('reviewed_by') or '—'))}</td></tr>
+                </table>
+                <div style="margin-top:22px;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#ef641f">DevOps closure comment</div>
+                <div style="margin-top:9px;padding:16px 18px;border-radius:12px;background:#f8fafc;border:1px solid #e7ebf0;white-space:pre-wrap;line-height:22px">{html.escape(str(item.get('closure_comment') or 'Completed'))}</div>
+                {database_section}
+                {acl_section}
+                {portal_link}
+              </td></tr>
+              <tr><td style="padding:16px 32px;background:#f8fafc;border-top:1px solid #e7ebf0;color:#7b8795;font-size:11px;text-align:center">Mashreq NEO CORP · Internal DevOps Portal</td></tr>
+            </table>
+          </td></tr>
+        </table>
+      </body>
+    </html>
+    """
+
+    message = EmailMessage()
+    message["From"] = MAIL_FROM
+    message["To"] = developer
+    message["Subject"] = f"[Completed] {item.get('repository_name') or item.get('id')} onboarding request"
+    message.set_content(
+        f"DevOps completed request {item.get('id')}. "
+        "Open the HTML version of this email for closure and database details."
+    )
+    message.add_alternative(body, subtype="html")
+
+    recipients = [developer] + parse_recipients(MAIL_BCC)
+    if SMTP_SSL:
+        smtp_client: smtplib.SMTP = smtplib.SMTP_SSL(
+            SMTP_HOST,
+            SMTP_PORT,
+            timeout=SMTP_TIMEOUT_SECONDS,
+            context=ssl.create_default_context(),
+        )
+    else:
+        smtp_client = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT_SECONDS)
+
+    with smtp_client as smtp:
+        smtp.ehlo()
+        if SMTP_STARTTLS and not SMTP_SSL:
+            smtp.starttls(context=ssl.create_default_context())
+            smtp.ehlo()
+        if SMTP_USERNAME and SMTP_PASSWORD:
+            smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
+        smtp.send_message(message, from_addr=MAIL_FROM, to_addrs=recipients)
+
+    logger.info(
+        "Pipeline closure email sent request_id=%s developer=%s database_count=%s",
+        item.get("id"),
+        developer,
+        len(database_requests),
+    )
