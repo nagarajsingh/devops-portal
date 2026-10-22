@@ -199,9 +199,6 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
         writeDeploymentLocation(null, deploymentLocationState().scope || null);
         return current;
       }
-      if (!selectedType) {
-        setSelectedType(deploymentLocationState().scope || fresh.application_type);
-      }
       if (current && collectionsDirtyRef.current && current.application_type === "Collections") {
         return { ...fresh, collections_items: current.collections_items };
       }
@@ -511,9 +508,9 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
 
     {!selected && <>
       {!selectedType ? <div className="application-management-grid">
-        {APP_TYPES.map((type) => <button key={type} className="application-management-card" onClick={() => { setSelectedType(type); setRequestSearch(""); setInlineNotice(null); }}><Boxes/><div><h3>{type} Deployment Management</h3><p>{counts[type] || 0} total requests</p></div><span>{requests.filter((request) => request.application_type === type && String(request.steps?.owner_approval?.status || "Pending") === "Pending").length} pending</span></button>)}
-        <button className="application-management-card approval-card" onClick={() => { setSelectedType("Pending Approvals"); setRequestSearch(""); setInlineNotice(null); }}><ShieldCheck/><div><h3>Pending Approvals</h3><p>All application types</p></div><span>{pending.length}</span></button>
-      </div> : <section className="deployment-scope-header"><button className="deployment-back-button" onClick={() => { setSelectedType(null); setRequestSearch(""); setInlineNotice(null); }}><ArrowLeft size={17}/>All applications</button><div><span className="eyebrow">FILTERED DEPLOYMENT VIEW</span><h2>{scopeTitle}</h2><p>Only requests for this selection are shown below.</p></div><strong>{scopedRequests.length}</strong></section>}
+        {APP_TYPES.map((type) => <button key={type} className="application-management-card" onClick={() => { setSelectedType(type); writeDeploymentLocation(null, type); setRequestSearch(""); setInlineNotice(null); }}><Boxes/><div><h3>{type} Deployment Management</h3><p>{counts[type] || 0} total requests</p></div><span>{requests.filter((request) => request.application_type === type && String(request.steps?.owner_approval?.status || "Pending") === "Pending").length} pending</span></button>)}
+        <button className="application-management-card approval-card" onClick={() => { setSelectedType("Pending Approvals"); writeDeploymentLocation(null, "Pending Approvals"); setRequestSearch(""); setInlineNotice(null); }}><ShieldCheck/><div><h3>Pending Approvals</h3><p>All application types</p></div><span>{pending.length}</span></button>
+      </div> : <section className="deployment-scope-header"><button className="deployment-back-button" onClick={() => { setSelectedType(null); writeDeploymentLocation(null, null); setRequestSearch(""); setInlineNotice(null); }}><ArrowLeft size={17}/>All applications</button><div><span className="eyebrow">FILTERED DEPLOYMENT VIEW</span><h2>{scopeTitle}</h2><p>Only requests for this selection are shown below.</p></div><strong>{scopedRequests.length}</strong></section>}
 
       {role === "devops" && <div className="dashboard-toolbar"><button className="primary-button" onClick={() => setShowNewRequest(!showNewRequest)}><UploadCloud size={16}/>{showNewRequest ? "Hide request form" : "New deployment request"}</button></div>}
 
