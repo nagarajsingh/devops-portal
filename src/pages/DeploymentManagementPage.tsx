@@ -287,8 +287,11 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
   const buildRuns = selected?.steps?.build?.runs || [];
   const deploymentRuns = selected?.steps?.deployment?.runs || [];
   const buildLocked = buildRuns.length > 0;
-  const selectedItems = (selected?.collections_items || []).filter((item) => item.selected && item.vendor_image.trim() && item.pipeline_name.trim());
-  const collectionsBuildReady = selectedItems.length > 0 && selectedItems.every((item) => ((item.use_vendor_image ?? true) ? item.vendor_image.trim() : true));
+  const selectedItems = (selected?.collections_items || []).filter((item) => item.selected && item.vendor_image.trim());
+  const collectionsBuildReady = selectedItems.length > 0 && selectedItems.every((item) =>
+    item.pipeline_name.trim() &&
+    ((item.use_vendor_image ?? true) ? item.vendor_image.trim() : true)
+  );
 
   function startRequest(request: DeploymentRequest) {
     collectionsDirtyRef.current = false;
@@ -340,20 +343,20 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
 
       {step === "Rejected" && <div className="wizard-action-panel"><ShieldCheck/><div><h3>Release request rejected</h3><p>The application owner rejected this request. Raise a new deployment request when the release is ready again.</p></div></div>}
 
-      {step === "Extraction" && <div className="wizard-action-panel"><FileText/><div><h3>Extract the release document</h3><p>The document will be parsed and only actionable release inputs will be shown. For Collections, base nginx/JDK images and unmapped images are ignored.</p>{role === "devops" && <button className="primary-button" disabled={busy} onClick={() => action(selected.id, "extract-document")}>Extract release data</button>}</div></div>}
+      {step === "Extraction" && <div className="wizard-action-panel"><FileText/><div><h3>Extract the release document</h3><p>The document will be parsed and actionable release inputs will be shown. For Collections, platform/base images are ignored; newly detected vt* services remain visible even if their build pipeline needs to be supplied by DevOps.</p>{role === "devops" && <button className="primary-button" disabled={busy} onClick={() => action(selected.id, "extract-document")}>Extract release data</button>}</div></div>}
 
       {selected.extracted && selected.application_type === "Collections" && ["Build", "Build Status"].includes(step) && <div className="collections-build-panel">
-        <div className="deployment-result-header"><div><span className="eyebrow">COLLECTIONS BUILD INPUT REVIEW</span><h3>{selected.country} vendor images</h3><p>Only services with vendor image tags and mapped build pipelines are included.</p></div><strong>{selectedItems.length} selected</strong></div>
+        <div className="deployment-result-header"><div><span className="eyebrow">COLLECTIONS BUILD INPUT REVIEW</span><h3>{selected.country} vendor images</h3><p>Known services are mapped automatically. If a newly introduced service has no mapping yet, enter its build pipeline before triggering the build.</p></div><strong>{selectedItems.length} selected</strong></div>
         <div className="table-card collections-image-table"><table><thead><tr><th>Select</th><th>Service</th><th>Tag</th><th>useVendorImage</th><th>vendorImage</th><th>Pipeline</th></tr></thead><tbody>
-          {(selected.collections_items || []).map((item, itemIndex) => ({ item, itemIndex })).filter(({ item }) => item.vendor_image.trim() && item.pipeline_name.trim()).map(({ item, itemIndex }) => <tr key={`${item.service}-${itemIndex}`}>
+          {(selected.collections_items || []).map((item, itemIndex) => ({ item, itemIndex })).filter(({ item }) => item.vendor_image.trim()).map(({ item, itemIndex }) => <tr key={`${item.service}-${itemIndex}`}>
             <td><input type="checkbox" checked={item.selected} disabled={buildLocked || role !== "devops"} onChange={(event) => updateCollectionItem(itemIndex, "selected", event.target.checked)}/></td>
             <td>{item.service}</td><td>{item.image_tag}</td>
             <td><button type="button" className={`vendor-toggle-button ${(item.use_vendor_image ?? true) ? "enabled" : "disabled"}`} disabled={!item.selected || buildLocked || role !== "devops"} onClick={() => updateCollectionItem(itemIndex, "use_vendor_image", !(item.use_vendor_image ?? true))}>{(item.use_vendor_image ?? true) ? "TRUE" : "FALSE"}</button></td>
             <td><input className="collections-vendor-image-input" value={item.vendor_image} disabled={!item.selected || !(item.use_vendor_image ?? true) || buildLocked || role !== "devops"} onChange={(event) => updateCollectionItem(itemIndex, "vendor_image", event.target.value)}/></td>
-            <td>{item.pipeline_name}</td>
+            <td><input className="collections-vendor-image-input" value={item.pipeline_name} disabled={!item.selected || buildLocked || role !== "devops"} placeholder="Build pipeline name" onChange={(event) => updateCollectionItem(itemIndex, "pipeline_name", event.target.value)}/>{!item.pipeline_name.trim() && <small>Pipeline mapping required</small>}</td>
           </tr>)}
         </tbody></table></div>
-        {!buildLocked && role === "devops" && <div className="deployment-actions"><button className="secondary-button" onClick={() => action(selected.id, "save-extracted-data", { collections_items: selected.collections_items || [] })}>Save reviewed data</button><button className="primary-button" disabled={!collectionsBuildReady || busy} onClick={() => action(selected.id, "trigger-build", { collections_items: selected.collections_items || [] })}>Trigger build</button></div>}
+        {!buildLocked && role === "devops" && <><div className="deployment-actions"><button className="secondary-button" onClick={() => action(selected.id, "save-extracted-data", { collections_items: selected.collections_items || [] })}>Save reviewed data</button><button className="primary-button" disabled={!collectionsBuildReady || busy} onClick={() => action(selected.id, "trigger-build", { collections_items: selected.collections_items || [] })}>Trigger build</button></div>{!collectionsBuildReady && selectedItems.length > 0 && <small className="auto-refresh-note">Every selected Collections service must have a build pipeline name and, when useVendorImage is TRUE, a vendor image before build can start.</small>}</>}
       </div>}
 
       {step === "Code Pull" && role === "devops" && <div className="wizard-action-panel"><Play/><div><h3>Trigger code pull</h3><button className="primary-button" onClick={() => action(selected.id, "trigger-code-pull")}>Trigger code-pull pipeline</button></div></div>}
