@@ -20,7 +20,8 @@ export interface NamespaceMonitoringSummary {
   name: string;
   services: number;
   ingresses: number;
-  deployments?: number;
+  deployments?: number | null;
+  deployments_available?: boolean;
   service_names: string[];
   ingress_names: string[];
   deployment_details?: DeploymentDetail[];
@@ -46,9 +47,10 @@ export interface ClusterMonitoringSummary {
   namespaces: number;
   services: number;
   ingresses: number;
-  deployments?: number;
-  deployments_healthy?: number;
-  deployments_unhealthy?: number;
+  deployments?: number | null;
+  deployments_healthy?: number | null;
+  deployments_unhealthy?: number | null;
+  deployments_available?: boolean;
   namespace_details: NamespaceMonitoringSummary[];
   persistent_volumes?: PersistentVolumeSummary[];
   storage?: { capacity_gib: number; allocated_gib: number; available_gib: number; available?: boolean; error?: string };
