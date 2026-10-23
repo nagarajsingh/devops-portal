@@ -76,20 +76,77 @@ def build_monitoring_summary() -> dict[str, Any]:
         namespace_rows = []
         service_count = 0
         ingress_count = 0
+        deployment_count = 0
+        deployment_healthy = 0
+        deployment_unhealthy = 0
+        deployments_available = False
 
         for namespace_name, namespace_payload in sorted(namespaces.items()):
             namespace_payload = namespace_payload or {}
             services = namespace_payload.get("services") or []
             ingresses = namespace_payload.get("ingresses") or []
+            raw_deployments = namespace_payload.get("deployments")
+            deployments = raw_deployments if isinstance(raw_deployments, list) else []
+            namespace_deployments_available = isinstance(raw_deployments, list)
+            deployments_available = deployments_available or namespace_deployments_available
+
+            deployment_details = []
+            namespace_healthy = 0
+            namespace_unhealthy = 0
+            for deployment in deployments:
+                if isinstance(deployment, str):
+                    detail = {
+                        "name": deployment,
+                        "desired": None,
+                        "available": None,
+                        "unavailable": None,
+                        "status": "Unknown",
+                    }
+                elif isinstance(deployment, dict):
+                    desired = deployment.get("desired")
+                    available = deployment.get("available")
+                    unavailable = deployment.get("unavailable")
+                    status = str(deployment.get("status") or "").strip()
+                    if not status and desired is not None and available is not None:
+                        status = (
+                            "Healthy"
+                            if int(desired or 0) == int(available or 0)
+                            and int(unavailable or 0) == 0
+                            else "Warning"
+                        )
+                    detail = {
+                        "name": str(deployment.get("name") or ""),
+                        "desired": desired,
+                        "available": available,
+                        "unavailable": unavailable,
+                        "status": status or "Unknown",
+                    }
+                else:
+                    continue
+
+                if not detail["name"]:
+                    continue
+                deployment_details.append(detail)
+                if detail["status"] == "Healthy":
+                    namespace_healthy += 1
+                elif detail["status"] == "Warning":
+                    namespace_unhealthy += 1
+
             service_count += len(services)
             ingress_count += len(ingresses)
+            deployment_count += len(deployment_details)
+            deployment_healthy += namespace_healthy
+            deployment_unhealthy += namespace_unhealthy
             namespace_rows.append(
                 {
                     "name": namespace_name,
                     "services": len(services),
                     "ingresses": len(ingresses),
+                    "deployments": len(deployment_details) if namespace_deployments_available else None,
+                    "deployments_available": namespace_deployments_available,
                     "service_names": [str(service.get("name")) for service in services if isinstance(service, dict) and service.get("name")],
                     "ingress_names": [str(name) for name in ingresses if name],
+                    "deployment_details": deployment_details,
                 }
             )
 
@@ -112,6 +169,10 @@ def build_monitoring_summary() -> dict[str, Any]:
                 "namespaces": namespace_count,
                 "services": service_count,
                 "ingresses": ingress_count,
+                "deployments": deployment_count if deployments_available else None,
+                "deployments_healthy": deployment_healthy if deployments_available else None,
+                "deployments_unhealthy": deployment_unhealthy if deployments_available else None,
+                "deployments_available": deployments_available,
                 "namespace_details": namespace_rows,
             }
         )
