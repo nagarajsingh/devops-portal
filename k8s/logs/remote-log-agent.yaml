@@ -1,0 +1,298 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: devops-portal-log-agent-config
+  namespace: automation
+data:
+  CLUSTER_NAME: "REPLACE_WITH_KUBERNETES_TARGET_NAME"
+  BROKER_DIR: "/shared/devops-portal/kubernetes-log-broker"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: devops-portal-log-agent-script
+  namespace: automation
+data:
+  log_agent.py: |
+    import hashlib
+    import hmac
+    import json
+    import os
+    import re
+    import subprocess
+    import time
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    CLUSTER_NAME = os.environ["CLUSTER_NAME"].strip()
+    BROKER_DIR = Path(os.environ.get("BROKER_DIR", "/shared/devops-portal/kubernetes-log-broker"))
+    BROKER_SECRET = os.environ["BROKER_SECRET"]
+    POLL_SECONDS = float(os.environ.get("POLL_SECONDS", "0.5"))
+    REQUEST_MAX_AGE_SECONDS = int(os.environ.get("REQUEST_MAX_AGE_SECONDS", "120"))
+    SAFE_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$", re.IGNORECASE)
+
+    REQUESTS_DIR = BROKER_DIR / "requests"
+    RESPONSES_DIR = BROKER_DIR / "responses"
+    REQUESTS_DIR.mkdir(parents=True, exist_ok=True)
+    RESPONSES_DIR.mkdir(parents=True, exist_ok=True)
+
+    def utc_now():
+        return datetime.now(timezone.utc).isoformat()
+
+    def validate_name(value, label):
+        text = str(value or "").strip()
+        if not text or len(text) > 253 or not SAFE_NAME.fullmatch(text):
+            raise ValueError(f"Invalid {label}")
+        return text
+
+    def verify_signature(request):
+        signature = str(request.get("signature") or "")
+        unsigned = {key: value for key, value in request.items() if key != "signature"}
+        canonical = json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        expected = hmac.new(BROKER_SECRET.encode("utf-8"), canonical, hashlib.sha256).hexdigest()
+        return bool(signature) and hmac.compare_digest(signature, expected)
+
+    def kubectl_json(*args):
+        command = ["kubectl", *args, "-o", "json"]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or f"kubectl failed: {' '.join(command)}")
+        return json.loads(result.stdout or "{}")
+
+    def list_pods(namespace):
+        namespace = validate_name(namespace, "namespace")
+        payload = kubectl_json("get", "pods", "-n", namespace)
+        rows = []
+        for pod in payload.get("items", []):
+            metadata = pod.get("metadata", {})
+            spec = pod.get("spec", {})
+            status = pod.get("status", {})
+            name = metadata.get("name")
+            if not name:
+                continue
+            container_statuses = status.get("containerStatuses") or []
+            containers = [
+                item.get("name")
+                for item in spec.get("containers", [])
+                if item.get("name")
+            ]
+            rows.append({
+                "name": name,
+                "phase": status.get("phase") or "Unknown",
+                "containers": containers,
+                "restarts": sum(int(item.get("restartCount") or 0) for item in container_statuses),
+                "ready": bool(container_statuses) and all(bool(item.get("ready")) for item in container_statuses),
+                "created_at": metadata.get("creationTimestamp"),
+                "node": spec.get("nodeName") or "",
+            })
+        rows.sort(key=lambda row: (str(row.get("created_at") or ""), row["name"]), reverse=True)
+        return {"pods": rows}
+
+    def run_logs(namespace, pod, container, since_seconds, tail_lines=None, previous=False):
+        namespace = validate_name(namespace, "namespace")
+        pod = validate_name(pod, "pod")
+        container = validate_name(container, "container")
+        command = [
+            "kubectl", "logs", "-n", namespace, pod,
+            "-c", container,
+            "--timestamps=true",
+            f"--since={max(1, int(since_seconds))}s",
+        ]
+        if tail_lines:
+            command.append(f"--tail={max(1, int(tail_lines))}")
+        if previous:
+            command.append("--previous")
+        result = subprocess.run(command, capture_output=True, text=True, timeout=45)
+        if result.returncode != 0:
+            if previous:
+                return ""
+            raise RuntimeError(result.stderr.strip() or f"kubectl logs failed for {namespace}/{pod}")
+        return result.stdout or ""
+
+    def trim_text(value, max_bytes):
+        encoded = value.encode("utf-8")
+        if len(encoded) <= max_bytes:
+            return value, False
+        return encoded[-max_bytes:].decode("utf-8", errors="replace"), True
+
+    def read_logs(payload):
+        namespace = payload.get("namespace")
+        pod = payload.get("pod")
+        container = payload.get("container")
+        since_seconds = max(1, min(int(payload.get("since_seconds") or 120), 7 * 24 * 60 * 60))
+        tail_lines = payload.get("tail_lines")
+        include_previous = bool(payload.get("include_previous", True))
+        max_bytes = max(262144, min(int(payload.get("max_bytes") or 8388608), 16777216))
+
+        current = run_logs(namespace, pod, container, since_seconds, tail_lines=tail_lines)
+        current, current_truncated = trim_text(current, max_bytes)
+        segments = [{"source": "current", "content": current}]
+        truncated = current_truncated
+
+        if include_previous:
+            previous = run_logs(
+                namespace,
+                pod,
+                container,
+                since_seconds,
+                tail_lines=tail_lines,
+                previous=True,
+            )
+            if previous.strip():
+                previous, previous_truncated = trim_text(previous, max_bytes)
+                segments.insert(0, {"source": "previous", "content": previous})
+                truncated = truncated or previous_truncated
+
+        return {"segments": segments, "truncated": truncated}
+
+    def process_request(request):
+        if not verify_signature(request):
+            raise RuntimeError("Invalid broker request signature")
+        if str(request.get("cluster") or "") != CLUSTER_NAME:
+            raise RuntimeError("Request cluster does not match this agent")
+        action = str(request.get("action") or "")
+        payload = request.get("payload") or {}
+        if action == "pods":
+            return list_pods(payload.get("namespace"))
+        if action == "logs":
+            return read_logs(payload)
+        raise RuntimeError(f"Unsupported log agent action: {action}")
+
+    def write_response(request_id, payload):
+        final_path = RESPONSES_DIR / f"{request_id}.json"
+        temporary = RESPONSES_DIR / f".{request_id}.tmp"
+        temporary.write_text(json.dumps(payload), encoding="utf-8")
+        temporary.replace(final_path)
+
+    print(f"DevOps Portal log agent started for {CLUSTER_NAME}", flush=True)
+    print(f"Broker directory: {BROKER_DIR}", flush=True)
+
+    while True:
+        try:
+            for request_path in REQUESTS_DIR.glob("*.json"):
+                try:
+                    request = json.loads(request_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+
+                if str(request.get("cluster") or "") != CLUSTER_NAME:
+                    continue
+
+                request_id = str(request.get("id") or request_path.stem)
+                processing = REQUESTS_DIR / f".{request_id}.{CLUSTER_NAME}.processing"
+                try:
+                    os.replace(request_path, processing)
+                except OSError:
+                    continue
+
+                try:
+                    created_at = request.get("created_at")
+                    if created_at:
+                        try:
+                            age = datetime.now(timezone.utc) - datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+                            if age.total_seconds() > REQUEST_MAX_AGE_SECONDS:
+                                raise RuntimeError("Log broker request expired")
+                        except ValueError:
+                            raise RuntimeError("Invalid broker request timestamp")
+
+                    data = process_request(request)
+                    write_response(request_id, {
+                        "ok": True,
+                        "cluster": CLUSTER_NAME,
+                        "completed_at": utc_now(),
+                        "data": data,
+                    })
+                except Exception as exc:
+                    write_response(request_id, {
+                        "ok": False,
+                        "cluster": CLUSTER_NAME,
+                        "completed_at": utc_now(),
+                        "error": str(exc),
+                    })
+                finally:
+                    try:
+                        processing.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+        except Exception as exc:
+            print(f"Log agent polling error: {exc}", flush=True)
+
+        time.sleep(POLL_SECONDS)
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: devops-portal-log-agent
+  namespace: automation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: devops-portal-log-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: devops-portal-log-reader
+subjects:
+  - kind: ServiceAccount
+    name: devops-portal-log-agent
+    namespace: automation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: devops-portal-log-reader
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devops-portal-log-agent
+  namespace: automation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: devops-portal-log-agent
+  template:
+    metadata:
+      labels:
+        app: devops-portal-log-agent
+    spec:
+      serviceAccountName: devops-portal-log-agent
+      imagePullSecrets:
+        - name: docker-secret
+      containers:
+        - name: log-agent
+          image: mashrequae.azurecr.io/chatapi-baseimage:v2-file
+          imagePullPolicy: IfNotPresent
+          command:
+            - python3
+            - /scripts/log_agent.py
+          envFrom:
+            - configMapRef:
+                name: devops-portal-log-agent-config
+          env:
+            - name: BROKER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: devops-portal-log-agent-secret
+                  key: BROKER_SECRET
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+            - name: broker
+              mountPath: /shared/devops-portal
+      volumes:
+        - name: script
+          configMap:
+            name: devops-portal-log-agent-script
+        - name: broker
+          persistentVolumeClaim:
+            claimName: devops-portal-inventory-pvc
