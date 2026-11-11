@@ -158,10 +158,15 @@ data:
             return read_logs(payload)
         raise RuntimeError(f"Unsupported log agent action: {action}")
 
+    def sign_payload(payload):
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hmac.new(BROKER_SECRET.encode("utf-8"), canonical, hashlib.sha256).hexdigest()
+
     def write_response(request_id, payload):
         final_path = RESPONSES_DIR / f"{request_id}.json"
         temporary = RESPONSES_DIR / f".{request_id}.tmp"
-        temporary.write_text(json.dumps(payload), encoding="utf-8")
+        signed = {**payload, "signature": sign_payload(payload)}
+        temporary.write_text(json.dumps(signed), encoding="utf-8")
         temporary.replace(final_path)
 
     print(f"DevOps Portal log agent started for {CLUSTER_NAME}", flush=True)
