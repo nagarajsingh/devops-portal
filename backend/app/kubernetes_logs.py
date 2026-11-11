@@ -358,10 +358,34 @@ def _format_segments(
     return "\n".join(standard_lines) + ("\n" if standard_lines else ""), "text/plain; charset=utf-8"
 
 
-def _trim_content(content: str) -> tuple[str, bool]:
+def _trim_content(
+    content: str,
+    output_format: Literal["standard", "text", "json"],
+) -> tuple[str, bool]:
     encoded = content.encode("utf-8")
     if len(encoded) <= KUBERNETES_LOG_MAX_BYTES:
         return content, False
+
+    if output_format == "json":
+        try:
+            records = json.loads(content)
+        except json.JSONDecodeError:
+            records = []
+        if isinstance(records, list):
+            kept: list[Any] = []
+            used = 2
+            for record in reversed(records):
+                serialized = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+                size = len(serialized.encode("utf-8")) + 2
+                if kept and used + size > KUBERNETES_LOG_MAX_BYTES:
+                    break
+                if size > KUBERNETES_LOG_MAX_BYTES:
+                    continue
+                kept.append(record)
+                used += size
+            kept.reverse()
+            return json.dumps(kept, indent=2, ensure_ascii=False), True
+
     tail = encoded[-KUBERNETES_LOG_MAX_BYTES :].decode("utf-8", errors="replace")
     return tail, True
 
@@ -421,7 +445,7 @@ def _query_logs(
         segments,
         output_format,
     )
-    content, backend_truncated = _trim_content(content)
+    content, backend_truncated = _trim_content(content, output_format)
     return {
         "content": content,
         "media_type": media_type,
