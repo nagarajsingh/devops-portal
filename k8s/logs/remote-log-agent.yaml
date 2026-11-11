@@ -184,10 +184,19 @@ data:
                     continue
 
                 request_id = str(request.get("id") or request_path.stem)
+                action = str(request.get("action") or "")
+                namespace = str((request.get("payload") or {}).get("namespace") or "")
+                print(
+                    f"Broker request received id={request_id} action={action} namespace={namespace} file={request_path.name}",
+                    flush=True,
+                )
+
                 processing = REQUESTS_DIR / f".{request_id}.{CLUSTER_NAME}.processing"
                 try:
                     os.replace(request_path, processing)
-                except OSError:
+                    print(f"Broker request claimed id={request_id}", flush=True)
+                except OSError as exc:
+                    print(f"Broker request claim failed id={request_id} error={exc}", flush=True)
                     continue
 
                 try:
@@ -207,6 +216,7 @@ data:
                         "completed_at": utc_now(),
                         "data": data,
                     })
+                    print(f"Broker response written id={request_id} ok=true action={action}", flush=True)
                 except Exception as exc:
                     write_response(request_id, {
                         "ok": False,
@@ -214,6 +224,7 @@ data:
                         "completed_at": utc_now(),
                         "error": str(exc),
                     })
+                    print(f"Broker response written id={request_id} ok=false action={action} error={exc}", flush=True)
                 finally:
                     try:
                         processing.unlink(missing_ok=True)
