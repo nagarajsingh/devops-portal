@@ -22,9 +22,6 @@ from .datasource_store import (
 from .logging_config import get_logger
 from .models import UserContext
 
-OBMA_APPLICATIONS = {"OBTFPM", "CMNCORE", "MOCORE", "PLATO", "OBLM", "OBLMIC", "OBVAM", "OBVAMIC"}
-OBMA_VAULT_PATTERN = "__OBMA_VAULT_SCHEMA_PASSWORD__"
-
 router = APIRouter(prefix="/datasources", tags=["datasources"])
 logger = get_logger("datasources")
 
@@ -171,12 +168,11 @@ def preview_datasources(
         else None
     )
 
-    # Explicit password overrides a custom pattern; OBMA defaults to Vault prefix + schema + suffix.
+    # Explicit password overrides a custom pattern. Otherwise the target entity
+    # may reuse its previously encrypted password pattern.
     explicit_password = payload.explicit_password.get_secret_value() if payload.explicit_password else None
     if explicit_password:
         password_pattern = explicit_password
-    elif not password_pattern and environment["application"].upper() in OBMA_APPLICATIONS:
-        password_pattern = OBMA_VAULT_PATTERN
 
     if operation_mode == "create":
         target_entity = payload.target_entity.strip().upper()
