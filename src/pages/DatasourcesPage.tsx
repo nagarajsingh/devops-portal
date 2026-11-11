@@ -596,7 +596,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
         </label>
         <label className="full-width">Schema password pattern (optional for OBMA)
           <input type="password" value={passwordPattern} onChange={(e) => setPasswordPattern(e.target.value)} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder="{username}_TXS1T"/>
-          <small>Use {username} for the schema user, for example {username}_TXS1T. Specify this or an explicit password; the saved pattern can be reused for the same target entity.</small>
+          <small>Use &#123;username&#125; for the schema user, for example &#123;username&#125;_TXS1T. Specify this or an explicit password; the saved pattern can be reused for the same target entity.</small>
         </label>
 
         {datasourceType === "gridlink" && <label className="full-width">ONS nodes<input required={operationMode === "create"} value={onsNodes} onChange={(e) => setOnsNodes(e.target.value)} placeholder="host1:6200,host2:6200"/><small>{operationMode === "update" ? "Leave blank to preserve the datasource's current ONS/FAN settings." : "Required for GridLink datasource creation."}</small></label>}
