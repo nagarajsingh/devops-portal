@@ -150,7 +150,7 @@ def _require_allowed_namespace(cluster: str, namespace: str) -> tuple[str, str]:
 
 
 def _broker_root() -> Path:
-    if str(KUBERNETES_LOG_BROKER_DIR).strip():
+    if KUBERNETES_LOG_BROKER_DIR is not None:
         return KUBERNETES_LOG_BROKER_DIR
     inventory_path = KUBERNETES_INVENTORY_FILE
     base = inventory_path if inventory_path.is_dir() else inventory_path.parent
