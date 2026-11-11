@@ -203,6 +203,14 @@ def _remote_request(cluster: str, action: str, payload: dict[str, Any]) -> dict[
     except OSError as exc:
         raise HTTPException(status_code=503, detail=f"Unable to submit remote log request: {exc}") from exc
 
+    logger.info(
+        "Remote Kubernetes log request submitted id=%s cluster=%s action=%s path=%s",
+        request_id,
+        cluster,
+        action,
+        request_path,
+    )
+
     deadline = time.monotonic() + KUBERNETES_LOG_REMOTE_TIMEOUT_SECONDS
     try:
         while time.monotonic() < deadline:
@@ -219,6 +227,12 @@ def _remote_request(cluster: str, action: str, payload: dict[str, Any]) -> dict[
                 if not response.get("ok"):
                     raise HTTPException(status_code=502, detail=str(response.get("error") or "Remote log agent failed"))
                 data = response.get("data")
+                logger.info(
+                    "Remote Kubernetes log response received id=%s cluster=%s action=%s",
+                    request_id,
+                    cluster,
+                    action,
+                )
                 return data if isinstance(data, dict) else {}
             time.sleep(0.25)
     finally:
@@ -228,6 +242,14 @@ def _remote_request(cluster: str, action: str, payload: dict[str, Any]) -> dict[
             except OSError:
                 pass
 
+    logger.warning(
+        "Remote Kubernetes log request timed out id=%s cluster=%s action=%s broker=%s timeout_seconds=%s",
+        request_id,
+        cluster,
+        action,
+        root,
+        KUBERNETES_LOG_REMOTE_TIMEOUT_SECONDS,
+    )
     raise HTTPException(
         status_code=504,
         detail=f"Timed out waiting for the Kubernetes log agent in {cluster}",
