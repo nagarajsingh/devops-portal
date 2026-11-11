@@ -211,6 +211,11 @@ def _remote_request(cluster: str, action: str, payload: dict[str, Any]) -> dict[
                     response = json.loads(response_path.read_text(encoding="utf-8"))
                 except (OSError, json.JSONDecodeError) as exc:
                     raise HTTPException(status_code=502, detail=f"Remote log agent returned an invalid response: {exc}") from exc
+                response_signature = str(response.get("signature") or "")
+                unsigned_response = {key: value for key, value in response.items() if key != "signature"}
+                expected_response_signature = _request_signature(unsigned_response)
+                if not response_signature or not hmac.compare_digest(response_signature, expected_response_signature):
+                    raise HTTPException(status_code=502, detail="Remote log agent response signature is invalid")
                 if not response.get("ok"):
                     raise HTTPException(status_code=502, detail=str(response.get("error") or "Remote log agent failed"))
                 data = response.get("data")
