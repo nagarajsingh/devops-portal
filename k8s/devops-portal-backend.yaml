@@ -32,6 +32,31 @@ roleRef:
   kind: ClusterRole
   name: devops-portal-provisioner
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: devops-portal-log-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: devops-portal-backend-log-reader
+subjects:
+  - kind: ServiceAccount
+    name: devops-portal-backend
+    namespace: automation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: devops-portal-log-reader
+---
 # File placement uses a ClusterRole but is bound with namespace-scoped RoleBindings.
 # This prevents pods/exec access outside explicitly approved namespaces.
 apiVersion: rbac.authorization.k8s.io/v1
@@ -194,6 +219,10 @@ data:
   KUBERNETES_INVENTORY_ARTIFACT_NAME: "cluster-inventory"
   KUBERNETES_INVENTORY_REFRESH_SECONDS: "300"
   KUBERNETES_INVENTORY_FILE: "/data/cluster-inventory.json"
+  KUBERNETES_LOG_ACCESS_FILE: "/data/kubernetes-log-access.json"
+  KUBERNETES_LOG_BROKER_DIR: ""
+  KUBERNETES_LOG_REMOTE_TIMEOUT_SECONDS: "12"
+  KUBERNETES_LOG_MAX_BYTES: "8388608"
   DATASOURCE_AZURE_DEVOPS_PROJECT: "DevOps"
   DATASOURCE_PIPELINE_ID: "1809"
   DATASOURCE_PIPELINE_TIMEOUT_SECONDS: "900"
@@ -226,6 +255,7 @@ stringData:
   DEVELOPER_PASSWORD: "change-me"
   SMTP_PASSWORD: ""
   KUBERNETES_INVENTORY_PAT: ""
+  KUBERNETES_LOG_BROKER_SECRET: ""
 ---
 apiVersion: apps/v1
 kind: Deployment
