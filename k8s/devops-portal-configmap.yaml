@@ -56,4 +56,3 @@ type: Opaque
 stringData:
   # Leave empty when the SMTP relay does not require authentication.
   SMTP_PASSWORD: ""
-  KUBERNETES_LOG_BROKER_SECRET: ""
