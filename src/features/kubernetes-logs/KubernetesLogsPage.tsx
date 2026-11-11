@@ -174,6 +174,7 @@ export default function KubernetesLogsPage({ token, role }: Props) {
 
   const loadLogs = useCallback(async (silent = false) => {
     if (!cluster || !namespace || !podName || !container) return;
+    if (!selectedPod || !selectedPod.containers.includes(container)) return;
     if (!silent) setLoadingLogs(true);
     if (!silent) setError("");
     try {
@@ -199,7 +200,7 @@ export default function KubernetesLogsPage({ token, role }: Props) {
     } finally {
       if (!silent) setLoadingLogs(false);
     }
-  }, [cluster, namespace, podName, container, windowValue, outputFormat, includePrevious, token]);
+  }, [cluster, namespace, podName, container, selectedPod, windowValue, outputFormat, includePrevious, token]);
 
   useEffect(() => {
     if (!container) {
@@ -338,7 +339,7 @@ export default function KubernetesLogsPage({ token, role }: Props) {
 
     <div className="klog-selector-bar">
       <label><span><Server size={15}/>Cluster</span><select disabled={loadingClusters} value={cluster} onChange={(event) => setCluster(event.target.value)}><option value="">Select cluster</option>{clusters.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
-      <label><span><ShieldCheck size={15}/>Namespace</span><select disabled={!cluster || namespaces.length === 0} value={namespace} onChange={(event) => setNamespace(event.target.value)}><option value="">{namespaces.length ? "Select namespace" : "No enabled namespaces"}</option>{namespaces.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+      <label><span><ShieldCheck size={15}/>Namespace</span><select disabled={!cluster || namespaces.length === 0} value={namespace} onChange={(event) => { setNamespace(event.target.value); setPods([]); setPodName(""); setContainer(""); setLogContent(""); }}><option value="">{namespaces.length ? "Select namespace" : "No enabled namespaces"}</option>{namespaces.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       <label><span><Clock3 size={15}/>Time window</span><select value={windowValue} onChange={(event) => setWindowValue(event.target.value as LogWindow)}>{WINDOWS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
       <label><span><FileText size={15}/>Format</span><select value={outputFormat} onChange={(event) => setOutputFormat(event.target.value as LogOutputFormat)}><option value="standard">Standard logs</option><option value="text">Text</option><option value="json">JSON</option></select></label>
     </div>
@@ -351,7 +352,7 @@ export default function KubernetesLogsPage({ token, role }: Props) {
         </div>
         <div className="klog-pod-search"><Search size={16}/><input value={podSearch} onChange={(event) => setPodSearch(event.target.value)} placeholder="Filter pods..."/></div>
         <div className="klog-pod-list">
-          {!namespace ? <div className="klog-empty"><ShieldCheck size={22}/><span>Select an enabled namespace</span></div> : loadingPods && pods.length === 0 ? <div className="klog-empty">Loading pods...</div> : filteredPods.length === 0 ? <div className="klog-empty">No pods found</div> : filteredPods.map((pod) => <button key={pod.name} className={podName === pod.name ? "selected" : ""} onClick={() => setPodName(pod.name)}><div><Box size={16}/><strong>{pod.name}</strong></div><div><span className={`status ${phaseClass(pod.phase)}`}>{pod.phase}</span><small>{pod.restarts} restart{pod.restarts === 1 ? "" : "s"}</small></div><small>{formatDate(pod.created_at)}</small></button>)}
+          {!namespace ? <div className="klog-empty"><ShieldCheck size={22}/><span>Select an enabled namespace</span></div> : loadingPods && pods.length === 0 ? <div className="klog-empty">Loading pods...</div> : filteredPods.length === 0 ? <div className="klog-empty">No pods found</div> : filteredPods.map((pod) => <button key={pod.name} className={podName === pod.name ? "selected" : ""} onClick={() => { setContainer(""); setLogContent(""); setPodName(pod.name); }}><div><Box size={16}/><strong>{pod.name}</strong></div><div><span className={`status ${phaseClass(pod.phase)}`}>{pod.phase}</span><small>{pod.restarts} restart{pod.restarts === 1 ? "" : "s"}</small></div><small>{formatDate(pod.created_at)}</small></button>)}
         </div>
       </aside>
 
