@@ -214,27 +214,43 @@ def _remote_request(cluster: str, action: str, payload: dict[str, Any]) -> dict[
     deadline = time.monotonic() + KUBERNETES_LOG_REMOTE_TIMEOUT_SECONDS
     try:
         while time.monotonic() < deadline:
-            if response_path.exists():
+            # Read the response path directly instead of checking exists() first.
+            # On NFS, negative directory-entry caching can make exists() remain false
+            # briefly even after the remote agent has created the response.
+            try:
+                raw_response = response_path.read_text(encoding="utf-8")
+            except FileNotFoundError:
                 try:
-                    response = json.loads(response_path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError) as exc:
-                    raise HTTPException(status_code=502, detail=f"Remote log agent returned an invalid response: {exc}") from exc
-                response_signature = str(response.get("signature") or "")
-                unsigned_response = {key: value for key, value in response.items() if key != "signature"}
-                expected_response_signature = _request_signature(unsigned_response)
-                if not response_signature or not hmac.compare_digest(response_signature, expected_response_signature):
-                    raise HTTPException(status_code=502, detail="Remote log agent response signature is invalid")
-                if not response.get("ok"):
-                    raise HTTPException(status_code=502, detail=str(response.get("error") or "Remote log agent failed"))
-                data = response.get("data")
-                logger.info(
-                    "Remote Kubernetes log response received id=%s cluster=%s action=%s",
-                    request_id,
-                    cluster,
-                    action,
-                )
-                return data if isinstance(data, dict) else {}
-            time.sleep(0.25)
+                    # Force a directory read as an additional NFS cache refresh hint.
+                    list(responses_dir.iterdir())
+                except OSError:
+                    pass
+                time.sleep(0.25)
+                continue
+            except OSError:
+                time.sleep(0.25)
+                continue
+
+            try:
+                response = json.loads(raw_response)
+            except json.JSONDecodeError as exc:
+                raise HTTPException(status_code=502, detail=f"Remote log agent returned an invalid response: {exc}") from exc
+
+            response_signature = str(response.get("signature") or "")
+            unsigned_response = {key: value for key, value in response.items() if key != "signature"}
+            expected_response_signature = _request_signature(unsigned_response)
+            if not response_signature or not hmac.compare_digest(response_signature, expected_response_signature):
+                raise HTTPException(status_code=502, detail="Remote log agent response signature is invalid")
+            if not response.get("ok"):
+                raise HTTPException(status_code=502, detail=str(response.get("error") or "Remote log agent failed"))
+            data = response.get("data")
+            logger.info(
+                "Remote Kubernetes log response received id=%s cluster=%s action=%s",
+                request_id,
+                cluster,
+                action,
+            )
+            return data if isinstance(data, dict) else {}
     finally:
         for path in (request_path, temporary_path, response_path):
             try:
