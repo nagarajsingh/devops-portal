@@ -6,6 +6,9 @@ metadata:
 data:
   CLUSTER_NAME: "REPLACE_WITH_KUBERNETES_TARGET_NAME"
   BROKER_DIR: "/shared/devops-portal/kubernetes-log-broker"
+  CLEANUP_INTERVAL_SECONDS: "60"
+  REQUEST_RETENTION_SECONDS: "300"
+  RESPONSE_RETENTION_SECONDS: "600"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -29,6 +32,9 @@ data:
     BROKER_SECRET = os.environ["BROKER_SECRET"]
     POLL_SECONDS = float(os.environ.get("POLL_SECONDS", "0.5"))
     REQUEST_MAX_AGE_SECONDS = int(os.environ.get("REQUEST_MAX_AGE_SECONDS", "120"))
+    CLEANUP_INTERVAL_SECONDS = int(os.environ.get("CLEANUP_INTERVAL_SECONDS", "60"))
+    REQUEST_RETENTION_SECONDS = int(os.environ.get("REQUEST_RETENTION_SECONDS", "300"))
+    RESPONSE_RETENTION_SECONDS = int(os.environ.get("RESPONSE_RETENTION_SECONDS", "600"))
     SAFE_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$", re.IGNORECASE)
 
     REQUESTS_DIR = BROKER_DIR / "requests"
@@ -38,6 +44,39 @@ data:
 
     def utc_now():
         return datetime.now(timezone.utc).isoformat()
+
+    def cleanup_stale_files():
+        now = time.time()
+        removed_requests = 0
+        removed_responses = 0
+
+        for path in REQUESTS_DIR.iterdir():
+            try:
+                if not path.is_file():
+                    continue
+                if now - path.stat().st_mtime <= REQUEST_RETENTION_SECONDS:
+                    continue
+                path.unlink(missing_ok=True)
+                removed_requests += 1
+            except OSError as exc:
+                print(f"Broker cleanup warning path={path} error={exc}", flush=True)
+
+        for path in RESPONSES_DIR.iterdir():
+            try:
+                if not path.is_file():
+                    continue
+                if now - path.stat().st_mtime <= RESPONSE_RETENTION_SECONDS:
+                    continue
+                path.unlink(missing_ok=True)
+                removed_responses += 1
+            except OSError as exc:
+                print(f"Broker cleanup warning path={path} error={exc}", flush=True)
+
+        if removed_requests or removed_responses:
+            print(
+                f"Broker cleanup removed requests={removed_requests} responses={removed_responses}",
+                flush=True,
+            )
 
     def validate_name(value, label):
         text = str(value or "").strip()
@@ -171,9 +210,19 @@ data:
 
     print(f"DevOps Portal log agent started for {CLUSTER_NAME}", flush=True)
     print(f"Broker directory: {BROKER_DIR}", flush=True)
+    print(
+        f"Broker cleanup interval={CLEANUP_INTERVAL_SECONDS}s request_retention={REQUEST_RETENTION_SECONDS}s response_retention={RESPONSE_RETENTION_SECONDS}s",
+        flush=True,
+    )
+
+    last_cleanup = 0.0
 
     while True:
         try:
+            now = time.time()
+            if now - last_cleanup >= CLEANUP_INTERVAL_SECONDS:
+                cleanup_stale_files()
+                last_cleanup = now
             for request_path in REQUESTS_DIR.glob("*.json"):
                 try:
                     request = json.loads(request_path.read_text(encoding="utf-8"))
