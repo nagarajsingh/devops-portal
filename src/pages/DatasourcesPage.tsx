@@ -73,7 +73,9 @@ const emptyEnvironment: WebLogicEnvironmentInput = {
   default_db_port: 1531,
   default_ons_nodes: "",
   weblogic_username: "",
+  weblogic_password: "",
   ssh_username: "",
+  ssh_password: "",
   is_production: false,
   is_active: true,
 };
@@ -237,7 +239,9 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       default_db_port: environment.default_db_port || 1531,
       default_ons_nodes: environment.default_ons_nodes || "",
       weblogic_username: environment.weblogic_username,
+      weblogic_password: "",
       ssh_username: environment.ssh_username,
+      ssh_password: "",
       is_production: environment.is_production,
       is_active: environment.is_active,
     });
@@ -262,7 +266,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       default_db_port: TXCSIT_DB_PORT,
       default_ons_nodes: TXCSIT_ONS_NODES,
     }));
-    setNotice({ variant: "info", message: `Loaded TXCSIT host and database defaults for ${application}. Add/verify BASE, domain and usernames before saving. Passwords come from Ansible Vault.` });
+    setNotice({ variant: "info", message: `Loaded TXCSIT host and database defaults for ${application}. Add/verify BASE, domain and credentials before saving.` });
   }
 
   function changeBasePath(value: string) {
@@ -300,6 +304,8 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
     try {
       const payload = {
         ...environmentForm,
+        weblogic_password: environmentForm.weblogic_password || undefined,
+        ssh_password: environmentForm.ssh_password || undefined,
         admin_port: Number(environmentForm.admin_port),
         ssh_port: Number(environmentForm.ssh_port),
         default_db_port: Number(environmentForm.default_db_port || 1531),
@@ -326,8 +332,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
 
   async function runPreview(patOverride = "") {
     if (!selectedEnvironment) return;
-    const isObma = OBMA_APPS.has(selectedEnvironment.application.toUpperCase());
-    if (!isObma && !explicitPassword && !passwordPattern &&
+    if (!explicitPassword && !passwordPattern &&
         (operationMode === "update" || !existingTargetProfile?.password_pattern_configured)) {
       setNotice({ variant: "error", message: "Provide an explicit schema password or password pattern." });
       return;
@@ -452,7 +457,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
         {environments.map((item) => <button type="button" key={item.id} onClick={() => beginEnvironment(item)}>
           <span><strong>{item.application}</strong><small>{item.environment.toUpperCase()} · {item.instance_name}</small></span>
           <span><strong>{item.admin_host}:{item.admin_port}</strong><small>{item.domain_name}</small></span>
-          <span className="credential-ok">Passwords: Ansible Vault</span>
+          <span className={item.weblogic_password_configured && item.ssh_password_configured ? "credential-ok" : "credential-missing"}>{item.weblogic_password_configured && item.ssh_password_configured ? "Passwords: encrypted in DB" : "Passwords: incomplete"}</span>
         </button>)}
         {environments.length === 0 && <div className="datasource-empty">No application environments configured yet. Add the first environment from this page.</div>}
       </div>
@@ -460,7 +465,7 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
 
     {isAdmin && showConfig && <form className="datasource-config-form form-card" onSubmit={saveEnvironment}>
       <div className="full-width datasource-section-title">
-        <div><Server size={21}/><div><h2>{editingEnvironmentId ? "Update application environment" : "Add application environment"}</h2><p>Non-secret environment configuration is stored in the dashboard database. WebLogic and SSH passwords are read from the application Ansible Vault at runtime.</p></div></div>
+        <div><Server size={21}/><div><h2>{editingEnvironmentId ? "Update application environment" : "Add application environment"}</h2><p>Environment data and encrypted WebLogic/SSH credentials are maintained here. Existing passwords are never displayed.</p></div></div>
       </div>
 
       <label>Application
@@ -493,8 +498,10 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
       <label className="full-width">EAR_PATH<input readOnly value={artifactPreview.ear}/></label>
 
       <label>Azure agent pool<input required value={environmentForm.agent_pool} onChange={(e) => setEnvironmentForm({ ...environmentForm, agent_pool: e.target.value })}/></label>
-      <label>WebLogic user<input required value={environmentForm.weblogic_username} onChange={(e) => setEnvironmentForm({ ...environmentForm, weblogic_username: e.target.value })}/><small>Password source: Ansible Vault</small></label>
-      <label>Ansible / SSH user<input required value={environmentForm.ssh_username} onChange={(e) => setEnvironmentForm({ ...environmentForm, ssh_username: e.target.value })}/><small>Password source: Ansible Vault</small></label>
+      <label>WebLogic user<input required value={environmentForm.weblogic_username} onChange={(e) => setEnvironmentForm({ ...environmentForm, weblogic_username: e.target.value })}/></label>
+      <label>WebLogic password<input type="password" required={!editingEnvironmentId} value={environmentForm.weblogic_password || ""} onChange={(e) => setEnvironmentForm({ ...environmentForm, weblogic_password: e.target.value })} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder={editingEnvironmentId ? "••••••••  Leave blank to keep existing" : "Enter WebLogic password"}/><small>{editingEnvironmentId ? "Existing password stays encrypted unless you replace it." : "Encrypted before database storage."}</small></label>
+      <label>Ansible / SSH user<input required value={environmentForm.ssh_username} onChange={(e) => setEnvironmentForm({ ...environmentForm, ssh_username: e.target.value })}/></label>
+      <label>Ansible / SSH password<input type="password" required={!editingEnvironmentId} value={environmentForm.ssh_password || ""} onChange={(e) => setEnvironmentForm({ ...environmentForm, ssh_password: e.target.value })} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder={editingEnvironmentId ? "••••••••  Leave blank to keep existing" : "Enter SSH password"}/><small>{editingEnvironmentId ? "Existing password stays encrypted unless you replace it." : "Encrypted before database storage."}</small></label>
 
       <label className="datasource-checkbox"><input type="checkbox" checked={environmentForm.is_production} onChange={(e) => setEnvironmentForm({ ...environmentForm, is_production: e.target.checked })}/>Production environment</label>
       <label className="datasource-checkbox"><input type="checkbox" checked={environmentForm.is_active} onChange={(e) => setEnvironmentForm({ ...environmentForm, is_active: e.target.checked })}/>Active</label>
@@ -553,9 +560,9 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
           <div><small>CZ_CONFIG_LOCATION</small><strong>{selectedEnvironment.cz_config_location}</strong></div>
           <div><small>EAR_PATH</small><strong>{selectedEnvironment.ear_path}</strong></div>
           <div><small>WebLogic User</small><strong>{selectedEnvironment.weblogic_username || "Not configured"}</strong></div>
-          <div><small>WebLogic Password Source</small><strong>Ansible Vault</strong></div>
+          <div><small>WebLogic Password</small><strong>{selectedEnvironment.weblogic_password_configured ? "•••••••• (encrypted)" : "Not configured"}</strong></div>
           <div><small>Ansible / SSH User</small><strong>{selectedEnvironment.ssh_username || "Not configured"}</strong></div>
-          <div><small>SSH Password Source</small><strong>Ansible Vault</strong></div>
+          <div><small>SSH Password</small><strong>{selectedEnvironment.ssh_password_configured ? "•••••••• (encrypted)" : "Not configured"}</strong></div>
           <div><small>Default DB Host</small><strong>{selectedEnvironment.default_db_host || "Not configured"}</strong></div>
           <div><small>Default DB Port</small><strong>{selectedEnvironment.default_db_port || "Not configured"}</strong></div>
           <div><small>Default ONS Nodes</small><strong>{selectedEnvironment.default_ons_nodes || "Not configured"}</strong></div>
@@ -588,10 +595,8 @@ export default function DatasourcesPage({ token, isAdmin }: { token: string; isA
           <small>If entered, this takes precedence over the pattern. Stored encrypted for the datasource operation and never displayed again.</small>
         </label>
         <label className="full-width">Schema password pattern (optional for OBMA)
-          <input type="password" value={passwordPattern} onChange={(e) => setPasswordPattern(e.target.value)} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder={OBMA_APPS.has(selectedEnvironment?.application.toUpperCase() || "") ? "Vault: schma_fpwd + {username} + schma_pwd" : "{username}_TXS1T"}/>
-          <small>{OBMA_APPS.has(selectedEnvironment?.application.toUpperCase() || "")
-            ? "Default: schma_fpwd + schema username + schma_pwd, resolved securely from Ansible Vault. A custom pattern overrides this default; {username} is replaced for each datasource."
-            : "Use {username} for the schema user. Specify this or an explicit password; the saved pattern can be reused when creating the same entity."}</small>
+          <input type="password" value={passwordPattern} onChange={(e) => setPasswordPattern(e.target.value)} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder="{username}_TXS1T"/>
+          <small>Use {username} for the schema user, for example {username}_TXS1T. Specify this or an explicit password; the saved pattern can be reused for the same target entity.</small>
         </label>
 
         {datasourceType === "gridlink" && <label className="full-width">ONS nodes<input required={operationMode === "create"} value={onsNodes} onChange={(e) => setOnsNodes(e.target.value)} placeholder="host1:6200,host2:6200"/><small>{operationMode === "update" ? "Leave blank to preserve the datasource's current ONS/FAN settings." : "Required for GridLink datasource creation."}</small></label>}
