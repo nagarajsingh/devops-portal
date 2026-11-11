@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Box,
+  Moon,
   CheckCircle2,
   Clock3,
   Download,
@@ -13,6 +14,7 @@ import {
   Settings2,
   ShieldCheck,
   SquareTerminal,
+  Sun,
 } from "lucide-react";
 import type { Role } from "../../types";
 import {
@@ -36,6 +38,8 @@ interface Props {
   token: string;
   role: Role;
 }
+
+const THEME_STORAGE_KEY = "devops-portal-klog-theme";
 
 const WINDOWS: { value: LogWindow; label: string }[] = [
   { value: "live", label: "Live" },
@@ -83,6 +87,10 @@ export default function KubernetesLogsPage({ token, role }: Props) {
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    return saved === "dark" ? "dark" : "light";
+  });
 
   const [manageOpen, setManageOpen] = useState(false);
   const [manageCluster, setManageCluster] = useState("");
@@ -111,6 +119,10 @@ export default function KubernetesLogsPage({ token, role }: Props) {
   }, [token]);
 
   useEffect(() => { void loadClusters(); }, [loadClusters]);
+
+  useEffect(() => {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
 
   useEffect(() => {
     setNamespaces([]);
@@ -243,9 +255,14 @@ export default function KubernetesLogsPage({ token, role }: Props) {
       setManageMessage(`Saved ${enabledNamespaces.length} enabled namespace${enabledNamespaces.length === 1 ? "" : "s"} for ${manageCluster}.`);
       await loadClusters();
       if (cluster === manageCluster) {
+        setNamespace("");
+        setPods([]);
+        setPodName("");
+        setContainer("");
+        setLogContent("");
         const rows = await getLogNamespaces(cluster, token);
         setNamespaces(rows);
-        if (!rows.includes(namespace)) setNamespace(rows[0] || "");
+        setNamespace(rows[0] || "");
       }
     } catch (reason) {
       setManageMessage(reason instanceof Error ? reason.message : "Unable to save namespace access");
@@ -276,7 +293,7 @@ export default function KubernetesLogsPage({ token, role }: Props) {
     }
   }
 
-  return <section className="klog-page">
+  return <section className="klog-page" data-theme={theme}>
     <div className="klog-hero">
       <div>
         <span className="eyebrow">KUBERNETES OBSERVABILITY</span>
@@ -284,6 +301,15 @@ export default function KubernetesLogsPage({ token, role }: Props) {
         <p>Live and historical pod logs across approved namespaces and Kubernetes clusters.</p>
       </div>
       <div className="klog-hero-actions">
+        <button
+          className="klog-theme-toggle"
+          type="button"
+          onClick={() => setTheme((current) => current === "light" ? "dark" : "light")}
+          title={theme === "light" ? "Switch to dark theme" : "Switch to light theme"}
+        >
+          {theme === "light" ? <Moon size={16}/> : <Sun size={16}/>}
+          <span>{theme === "light" ? "Dark" : "Light"}</span>
+        </button>
         <div className="klog-live-badge"><Activity size={16}/><span>{windowValue === "live" ? "Live refresh" : "Historical view"}</span></div>
         {role === "devops" && <button className="secondary-button" onClick={() => setManageOpen((value) => !value)}><ShieldCheck size={17}/>{manageOpen ? "Close access manager" : "Manage namespace access"}</button>}
       </div>
