@@ -10,6 +10,7 @@ from .datasource_store import (
     create_operation,
     get_entity_runtime,
     get_environment,
+    get_environment_runtime,
     get_operation_runtime,
     list_applications,
     list_environments,
@@ -45,7 +46,9 @@ class DatasourceEnvironmentPayload(BaseModel):
     default_db_port: int = Field(default=1531, ge=1, le=65535)
     default_ons_nodes: str = Field(default="", max_length=1000)
     weblogic_username: str = Field(min_length=1, max_length=255)
+    weblogic_password: SecretStr | None = None
     ssh_username: str = Field(min_length=1, max_length=255)
+    ssh_password: SecretStr | None = None
     is_production: bool = False
     is_active: bool = True
 
@@ -82,7 +85,18 @@ class DatasourceApplyPayload(BaseModel):
 
 
 def _environment_payload(payload: DatasourceEnvironmentPayload) -> dict:
-    return payload.model_dump()
+    data = payload.model_dump(exclude={"weblogic_password", "ssh_password"})
+    data["weblogic_password"] = (
+        payload.weblogic_password.get_secret_value()
+        if payload.weblogic_password
+        else None
+    )
+    data["ssh_password"] = (
+        payload.ssh_password.get_secret_value()
+        if payload.ssh_password
+        else None
+    )
+    return data
 
 
 @router.get("/applications")
@@ -149,7 +163,7 @@ def preview_datasources(
     payload: DatasourcePreviewPayload,
     user: UserContext = Depends(require_devops),
 ):
-    environment = get_environment(payload.environment_instance_id)
+    environment = get_environment_runtime(payload.environment_instance_id)
     operation_mode = payload.operation_mode.strip().lower()
     password_pattern = (
         payload.password_pattern.get_secret_value()
@@ -291,7 +305,7 @@ def apply_datasources(
             detail="Only the requester or a DevOps administrator can apply this datasource change",
         )
 
-    environment = get_environment(operation["environment_instance_id"])
+    environment = get_environment_runtime(operation["environment_instance_id"])
     try:
         update_operation(
             operation_id,
