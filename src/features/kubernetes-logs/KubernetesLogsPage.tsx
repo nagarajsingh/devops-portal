@@ -12,7 +12,7 @@ import {
   Server,
   Settings2,
   ShieldCheck,
-  TerminalSquare,
+  SquareTerminal,
 } from "lucide-react";
 import type { Role } from "../../types";
 import {
@@ -344,7 +344,7 @@ export default function KubernetesLogsPage({ token, role }: Props) {
         </div>
 
         <div className="klog-console-toolbar">
-          <div className="klog-format-chip">{outputFormat === "json" ? <FileJson size={15}/> : <TerminalSquare size={15}/>}<span>{outputFormat.toUpperCase()}</span></div>
+          <div className="klog-format-chip">{outputFormat === "json" ? <FileJson size={15}/> : <SquareTerminal size={15}/>}<span>{outputFormat.toUpperCase()}</span></div>
           <label><input type="checkbox" checked={includePrevious} onChange={(event) => setIncludePrevious(event.target.checked)}/>Include previous container instance</label>
           <label><input type="checkbox" checked={autoScroll} onChange={(event) => setAutoScroll(event.target.checked)}/>Auto-scroll</label>
           <div className="klog-console-meta"><span>{logMeta.lines} lines</span>{logMeta.fetchedAt && <span>Updated {new Date(logMeta.fetchedAt).toLocaleTimeString()}</span>}<span>{logMeta.source || "—"}</span></div>
@@ -353,7 +353,7 @@ export default function KubernetesLogsPage({ token, role }: Props) {
         <div className="klog-console-shell">
           {windowValue === "live" && <div className="klog-live-strip"><span/>LIVE · refreshes every 3 seconds</div>}
           {logMeta.truncated && <div className="klog-truncated">Output exceeded the portal response limit. Showing the newest available content.</div>}
-          {!container ? <div className="klog-console-empty"><TerminalSquare size={34}/><strong>Select a pod and container</strong><span>Logs will load automatically.</span></div> : loadingLogs && !logContent ? <div className="klog-console-empty">Loading logs...</div> : <pre ref={logViewerRef}>{logContent || "No log lines were returned for this time window."}</pre>}
+          {!container ? <div className="klog-console-empty"><SquareTerminal size={34}/><strong>Select a pod and container</strong><span>Logs will load automatically.</span></div> : loadingLogs && !logContent ? <div className="klog-console-empty">Loading logs...</div> : <pre ref={logViewerRef}>{logContent || "No log lines were returned for this time window."}</pre>}
         </div>
 
         <div className="klog-history-note">
