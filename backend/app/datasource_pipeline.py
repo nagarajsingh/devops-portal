@@ -228,10 +228,18 @@ def run_datasource_pipeline(
         {
             "templateParameters": parameters,
             "variables": {
+                "SSH_PASSWORD": {
+                    "value": environment["ssh_password"],
+                    "isSecret": True,
+                },
+                "WEBLOGIC_PASSWORD": {
+                    "value": environment["weblogic_password"],
+                    "isSecret": True,
+                },
                 "DS_PASSWORD_PATTERN": {
                     "value": operation["password_pattern"],
                     "isSecret": True,
-                }
+                },
             },
         },
         project=DATASOURCE_AZURE_DEVOPS_PROJECT,
