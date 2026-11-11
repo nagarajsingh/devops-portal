@@ -17,3 +17,82 @@
 @media(max-width:1200px){.klog-namespace-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.klog-selector-bar{grid-template-columns:repeat(2,minmax(0,1fr))}.klog-access-controls{grid-template-columns:1fr 1fr}.klog-bulk-actions{grid-column:1/-1}.klog-workspace{grid-template-columns:minmax(250px,300px) minmax(0,1fr)}.klog-console-heading{flex-direction:column}.klog-console-actions{width:100%;justify-content:flex-start}}
 @media(max-width:850px){.klog-hero{align-items:flex-start;flex-direction:column}.klog-hero-actions{justify-content:flex-start}.klog-access-controls,.klog-selector-bar{grid-template-columns:1fr}.klog-namespace-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.klog-workspace{grid-template-columns:1fr}.klog-pod-list{height:320px}.klog-console-shell pre,.klog-console-empty{height:55vh}.klog-console-meta{width:100%;margin-left:0}.klog-access-footer{align-items:flex-start;flex-direction:column}.klog-access-footer>div{width:100%;justify-content:space-between}}
 @media(max-width:560px){.klog-namespace-grid{grid-template-columns:1fr}.klog-console-actions{flex-direction:column;align-items:stretch}.klog-container-select{width:100%}.klog-console-actions button{justify-content:center}.klog-console-toolbar{align-items:flex-start;flex-direction:column}.klog-truncated{position:static;border-radius:0}.klog-live-strip{position:static;border-radius:0}.klog-console-shell pre{padding-top:18px}}
+
+
+/* Wider Kubernetes Logs workspace */
+.content-kubernetes-logs{max-width:none;width:100%;padding:24px 26px 32px}
+.content-kubernetes-logs .klog-page{width:100%;max-width:none}
+.content-kubernetes-logs .klog-workspace{grid-template-columns:minmax(300px,360px) minmax(0,1fr)}
+.content-kubernetes-logs .klog-pod-list,
+.content-kubernetes-logs .klog-console-shell pre,
+.content-kubernetes-logs .klog-console-empty{height:clamp(500px,68vh,900px)}
+
+/* Logs theme control */
+.klog-theme-toggle{display:inline-flex;align-items:center;gap:7px;padding:9px 12px;border-radius:999px;border:1px solid #dce3ea;background:#fff;color:#294563;font-size:11px;font-weight:800;cursor:pointer}
+.klog-theme-toggle:hover{border-color:#ef8d52;box-shadow:0 0 0 4px rgba(239,107,37,.08)}
+
+/* Dark theme is intentionally scoped to Kubernetes Logs only */
+.klog-page[data-theme="dark"]{color:#d9e4ef}
+.klog-page[data-theme="dark"] .klog-hero{border-color:#2b3949;background:linear-gradient(135deg,#121b25 0%,#17212d 62%,#111a24 100%);box-shadow:0 18px 44px rgba(0,0,0,.28)}
+.klog-page[data-theme="dark"] .klog-hero h1,
+.klog-page[data-theme="dark"] .klog-access-heading h3,
+.klog-page[data-theme="dark"] .klog-panel-heading h3,
+.klog-page[data-theme="dark"] .klog-console-heading h3{color:#edf5fc}
+.klog-page[data-theme="dark"] .klog-hero p,
+.klog-page[data-theme="dark"] .klog-access-heading p,
+.klog-page[data-theme="dark"] .klog-console-heading p{color:#93a4b5}
+.klog-page[data-theme="dark"] .klog-theme-toggle,
+.klog-page[data-theme="dark"] .secondary-button,
+.klog-page[data-theme="dark"] .klog-icon-button{background:#1a2633;color:#d8e6f2;border-color:#334354}
+.klog-page[data-theme="dark"] .klog-theme-toggle:hover,
+.klog-page[data-theme="dark"] .secondary-button:hover,
+.klog-page[data-theme="dark"] .klog-icon-button:hover{border-color:#ef8d52;background:#202e3d}
+.klog-page[data-theme="dark"] .klog-live-badge{background:#173126;color:#78dca2;border-color:#28513d}
+.klog-page[data-theme="dark"] .klog-access-panel,
+.klog-page[data-theme="dark"] .klog-selector-bar,
+.klog-page[data-theme="dark"] .klog-pod-panel,
+.klog-page[data-theme="dark"] .klog-console-panel{background:#131e29;border-color:#2d3b4a;box-shadow:0 14px 38px rgba(0,0,0,.23)}
+.klog-page[data-theme="dark"] .klog-access-controls label,
+.klog-page[data-theme="dark"] .klog-selector-bar label,
+.klog-page[data-theme="dark"] .klog-container-select{color:#aab9c8}
+.klog-page[data-theme="dark"] .klog-access-controls select,
+.klog-page[data-theme="dark"] .klog-selector-bar select,
+.klog-page[data-theme="dark"] .klog-container-select select,
+.klog-page[data-theme="dark"] .klog-search-field>div,
+.klog-page[data-theme="dark"] .klog-pod-search{background:#182431;border-color:#344454;color:#aab9c8}
+.klog-page[data-theme="dark"] .klog-access-controls select,
+.klog-page[data-theme="dark"] .klog-selector-bar select,
+.klog-page[data-theme="dark"] .klog-container-select select,
+.klog-page[data-theme="dark"] .klog-search-field input,
+.klog-page[data-theme="dark"] .klog-pod-search input{color:#e2edf6}
+.klog-page[data-theme="dark"] .klog-selector-bar select:disabled{background:#111a23;color:#68798a}
+.klog-page[data-theme="dark"] .klog-namespace-grid label{background:#182431;border-color:#2f4050}
+.klog-page[data-theme="dark"] .klog-namespace-grid label.enabled{background:#2a211d;border-color:#81533a;box-shadow:inset 3px 0 0 #f36b21}
+.klog-page[data-theme="dark"] .klog-namespace-grid span,
+.klog-page[data-theme="dark"] .klog-pod-list strong{color:#dce8f3}
+.klog-page[data-theme="dark"] .klog-namespace-grid small,
+.klog-page[data-theme="dark"] .klog-pod-list small,
+.klog-page[data-theme="dark"] .klog-access-footer,
+.klog-page[data-theme="dark"] .klog-empty{color:#8596a8}
+.klog-page[data-theme="dark"] .klog-access-footer{border-color:#2b3948}
+.klog-page[data-theme="dark"] .klog-pod-list>button{background:#17232f;border-color:#2c3c4b}
+.klog-page[data-theme="dark"] .klog-pod-list>button:hover{background:#1d2a37;border-color:#7a513b}
+.klog-page[data-theme="dark"] .klog-pod-list>button.selected{background:linear-gradient(135deg,#2b211c,#17232f);border-color:#8b593c;box-shadow:inset 4px 0 0 #f36b21}
+.klog-page[data-theme="dark"] .klog-console-heading{border-color:#293846}
+.klog-page[data-theme="dark"] .klog-console-toolbar{background:#16222e;border-color:#293846;color:#9fb0c0}
+.klog-page[data-theme="dark"] .klog-format-chip{background:#1d354b;color:#8fc6f0}
+.klog-page[data-theme="dark"] .klog-console-meta{color:#8496a8}
+.klog-page[data-theme="dark"] .klog-history-note{background:#111b25;color:#8fa0b1}
+.klog-page[data-theme="dark"] .form-error{background:#3a1e20;border-color:#6c3437;color:#ffb4b7}
+
+@media(max-width:1200px){
+  .content-kubernetes-logs{padding:22px}
+  .content-kubernetes-logs .klog-workspace{grid-template-columns:minmax(260px,310px) minmax(0,1fr)}
+}
+@media(max-width:850px){
+  .content-kubernetes-logs{padding:16px}
+  .content-kubernetes-logs .klog-workspace{grid-template-columns:1fr}
+  .content-kubernetes-logs .klog-pod-list{height:320px}
+  .content-kubernetes-logs .klog-console-shell pre,
+  .content-kubernetes-logs .klog-console-empty{height:58vh}
+}
