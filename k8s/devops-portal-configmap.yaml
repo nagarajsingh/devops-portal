@@ -12,6 +12,11 @@ data:
   AZURE_DEVOPS_PROJECT: "Titan"
   BOOTSTRAP_BRANCH: "feature/devops"
 
+  KUBERNETES_LOG_ACCESS_FILE: "/data/kubernetes-log-access.json"
+  KUBERNETES_LOG_BROKER_DIR: ""
+  KUBERNETES_LOG_REMOTE_TIMEOUT_SECONDS: "12"
+  KUBERNETES_LOG_MAX_BYTES: "8388608"
+
   # WebLogic datasource preview/apply pipeline. Set the ID after creating
   # an Azure DevOps pipeline from datasource-management-pipeline.yaml.
   DATASOURCE_AZURE_DEVOPS_PROJECT: "DevOps"
@@ -51,3 +56,4 @@ type: Opaque
 stringData:
   # Leave empty when the SMTP relay does not require authentication.
   SMTP_PASSWORD: ""
+  KUBERNETES_LOG_BROKER_SECRET: ""
