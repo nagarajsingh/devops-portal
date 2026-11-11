@@ -91,23 +91,14 @@ def initialize_datasource_database() -> None:
 
         environments = list(db.scalars(select(WebLogicEnvironment)).all())
         for row in environments:
-            # Existing installations stored usernames together with encrypted
-            # passwords in weblogic_credentials. Copy only the usernames into
-            # the environment record; passwords are now sourced exclusively
-            # from the Ansible Vault file at pipeline runtime.
+            # Existing installations may already have encrypted credentials.
+            # Keep them and copy usernames into the environment record when needed.
             legacy_weblogic = _credential(db, row.id, "WEBLOGIC_ADMIN")
             legacy_ssh = _credential(db, row.id, "SSH")
             if not row.weblogic_username and legacy_weblogic:
                 row.weblogic_username = legacy_weblogic.username
             if not row.ssh_username and legacy_ssh:
                 row.ssh_username = legacy_ssh.username
-
-            # Server passwords now live only in Ansible Vault. Remove legacy
-            # encrypted credential rows after retaining their usernames.
-            if legacy_weblogic:
-                db.delete(legacy_weblogic)
-            if legacy_ssh:
-                db.delete(legacy_ssh)
 
             root, common, channel, ear = _derived_paths(
                 row.environment,
@@ -385,6 +376,8 @@ def _entity_views(db, environment_id: int) -> list[dict[str, Any]]:
 
 
 def _environment_view(db, row: WebLogicEnvironment) -> dict[str, Any]:
+    weblogic_credential = _credential(db, row.id, "WEBLOGIC_ADMIN")
+    ssh_credential = _credential(db, row.id, "SSH")
     return {
         "id": row.id,
         "application": row.application,
@@ -408,8 +401,10 @@ def _environment_view(db, row: WebLogicEnvironment) -> dict[str, Any]:
         "is_production": row.is_production,
         "is_active": row.is_active,
         "weblogic_username": row.weblogic_username or "",
+        "weblogic_password_configured": bool(weblogic_credential),
         "ssh_username": row.ssh_username or "",
-        "password_source": "ansible_vault",
+        "ssh_password_configured": bool(ssh_credential),
+        "password_source": "database_encrypted",
         "entities": _entity_views(db, row.id),
         "created_at": row.created_at.isoformat(),
         "updated_at": row.updated_at.isoformat(),
@@ -449,12 +444,18 @@ def get_environment_runtime(environment_id: int) -> dict[str, Any]:
         row = db.get(WebLogicEnvironment, environment_id)
         if not row or not row.is_active:
             raise HTTPException(status_code=404, detail="Active WebLogic environment was not found")
-        if not (row.weblogic_username or "").strip() or not (row.ssh_username or "").strip():
+        weblogic_credential = _credential(db, row.id, "WEBLOGIC_ADMIN")
+        ssh_credential = _credential(db, row.id, "SSH")
+        if not weblogic_credential or not ssh_credential:
             raise HTTPException(
                 status_code=409,
-                detail="WebLogic and SSH usernames must be configured in the dashboard environment",
+                detail="WebLogic and Ansible/SSH passwords must be configured by DevOps Admin for this environment",
             )
-        return _environment_view(db, row)
+        return {
+            **_environment_view(db, row),
+            "weblogic_password": decrypt_secret(weblogic_credential.password_ciphertext),
+            "ssh_password": decrypt_secret(ssh_credential.password_ciphertext),
+        }
 
 
 def create_environment(payload: dict[str, Any]) -> dict[str, Any]:
@@ -502,6 +503,21 @@ def create_environment(payload: dict[str, Any]) -> dict[str, Any]:
             is_active=bool(payload.get("is_active", True)),
         )
         db.add(row)
+        db.flush()
+        _upsert_credential(
+            db,
+            row.id,
+            "WEBLOGIC_ADMIN",
+            row.weblogic_username or "",
+            payload.get("weblogic_password"),
+        )
+        _upsert_credential(
+            db,
+            row.id,
+            "SSH",
+            row.ssh_username or "",
+            payload.get("ssh_password"),
+        )
         db.commit()
         db.refresh(row)
         return _environment_view(db, row)
@@ -541,6 +557,20 @@ def update_environment(environment_id: int, payload: dict[str, Any]) -> dict[str
         row.is_production = bool(payload.get("is_production"))
         row.is_active = bool(payload.get("is_active", True))
         row.updated_at = _utcnow()
+        _upsert_credential(
+            db,
+            row.id,
+            "WEBLOGIC_ADMIN",
+            row.weblogic_username or "",
+            payload.get("weblogic_password"),
+        )
+        _upsert_credential(
+            db,
+            row.id,
+            "SSH",
+            row.ssh_username or "",
+            payload.get("ssh_password"),
+        )
         try:
             db.commit()
         except Exception as exc:
