@@ -96,3 +96,302 @@
   .content-kubernetes-logs .klog-console-shell pre,
   .content-kubernetes-logs .klog-console-empty{height:58vh}
 }
+
+
+/* Fixed viewport premium logs workspace */
+@media(min-width:851px){
+  .content-kubernetes-logs{
+    width:100%;
+    max-width:none;
+    height:calc(100vh - 88px);
+    min-height:0;
+    margin:0;
+    padding:14px 18px 16px;
+    overflow:hidden;
+  }
+
+  .content-kubernetes-logs:has(.klog-page[data-theme="light"]){
+    background:#f4f6fa;
+  }
+
+  .content-kubernetes-logs:has(.klog-page[data-theme="dark"]){
+    background:#0d141c;
+  }
+
+  .content-kubernetes-logs .klog-page{
+    width:100%;
+    max-width:none;
+    height:100%;
+    min-height:0;
+    display:grid;
+    grid-template-rows:auto auto minmax(0,1fr);
+    gap:12px;
+    overflow:hidden;
+  }
+
+  .content-kubernetes-logs .klog-hero{
+    min-height:0;
+    padding:14px 18px;
+    border-radius:16px;
+    flex-shrink:0;
+  }
+
+  .content-kubernetes-logs .klog-hero h1{
+    margin:3px 0 4px;
+    font-size:24px;
+  }
+
+  .content-kubernetes-logs .klog-hero p{
+    font-size:11px;
+  }
+
+  .content-kubernetes-logs .klog-selector-bar{
+    grid-template-columns:minmax(250px,1.3fr) minmax(230px,1.1fr) minmax(150px,.65fr) minmax(160px,.7fr);
+    gap:10px;
+    padding:10px 12px;
+    border-radius:14px;
+    flex-shrink:0;
+  }
+
+  .content-kubernetes-logs .klog-selector-bar label{
+    gap:5px;
+  }
+
+  .content-kubernetes-logs .klog-selector-bar select{
+    height:38px;
+    padding:7px 10px;
+  }
+
+  .content-kubernetes-logs .klog-workspace{
+    width:100%;
+    height:100%;
+    min-height:0;
+    grid-template-columns:minmax(280px,340px) minmax(0,1fr);
+    gap:12px;
+    overflow:hidden;
+  }
+
+  .content-kubernetes-logs .klog-pod-panel,
+  .content-kubernetes-logs .klog-console-panel{
+    height:100%;
+    min-height:0;
+    border-radius:16px;
+  }
+
+  .content-kubernetes-logs .klog-pod-panel{
+    display:grid;
+    grid-template-rows:auto auto minmax(0,1fr);
+    padding:14px;
+    overflow:hidden;
+  }
+
+  .content-kubernetes-logs .klog-panel-heading{
+    min-height:0;
+  }
+
+  .content-kubernetes-logs .klog-pod-search{
+    margin:10px 0 8px;
+    flex-shrink:0;
+  }
+
+  .content-kubernetes-logs .klog-pod-list{
+    height:auto;
+    min-height:0;
+    max-height:none;
+    overflow:auto;
+    overscroll-behavior:contain;
+    scrollbar-gutter:stable;
+    padding-right:4px;
+  }
+
+  .content-kubernetes-logs .klog-console-panel{
+    display:grid;
+    grid-template-rows:auto auto minmax(0,1fr) auto;
+    overflow:hidden;
+  }
+
+  .content-kubernetes-logs .klog-console-heading{
+    min-height:0;
+    padding:12px 14px;
+  }
+
+  .content-kubernetes-logs .klog-console-heading h3{
+    margin:2px 0;
+  }
+
+  .content-kubernetes-logs .klog-console-actions{
+    gap:7px;
+  }
+
+  .content-kubernetes-logs .klog-console-actions button{
+    padding:8px 11px;
+  }
+
+  .content-kubernetes-logs .klog-container-select{
+    min-width:190px;
+  }
+
+  .content-kubernetes-logs .klog-container-select select{
+    height:36px;
+    padding:6px 9px;
+  }
+
+  .content-kubernetes-logs .klog-console-toolbar{
+    min-height:38px;
+    padding:7px 12px;
+    gap:12px;
+    flex-shrink:0;
+  }
+
+  .content-kubernetes-logs .klog-console-shell{
+    height:100%;
+    min-height:0;
+    overflow:hidden;
+  }
+
+  .content-kubernetes-logs .klog-console-shell pre,
+  .content-kubernetes-logs .klog-console-empty{
+    width:100%;
+    height:100%;
+    min-height:0;
+    max-height:none;
+  }
+
+  .content-kubernetes-logs .klog-console-shell pre{
+    overflow:auto;
+    overscroll-behavior:contain;
+    scrollbar-gutter:stable;
+    padding:40px 16px 16px;
+  }
+
+  .content-kubernetes-logs .klog-history-note{
+    padding:8px 12px;
+    min-height:0;
+    flex-shrink:0;
+  }
+
+  /* Access manager floats above the fixed log workspace instead of
+     increasing page height and creating a whole-screen scrollbar. */
+  .content-kubernetes-logs .klog-access-panel{
+    position:fixed;
+    top:100px;
+    right:24px;
+    z-index:120;
+    width:min(1050px,calc(100vw - 72px));
+    max-height:calc(100vh - 124px);
+    overflow:auto;
+    overscroll-behavior:contain;
+    border-radius:18px;
+    box-shadow:0 30px 90px rgba(18,35,55,.25);
+  }
+}
+
+/* Light theme now includes the actual log viewer, not only the surrounding controls. */
+.klog-page[data-theme="light"] .klog-console-shell{
+  background:#f7f9fc;
+  border-top:1px solid #e6ebf1;
+}
+
+.klog-page[data-theme="light"] .klog-console-shell pre{
+  color:#24384f;
+  background:linear-gradient(180deg,#fbfdff 0%,#f4f7fb 100%);
+}
+
+.klog-page[data-theme="light"] .klog-console-empty{
+  color:#7b8998;
+  background:linear-gradient(180deg,#fbfdff 0%,#f4f7fb 100%);
+}
+
+.klog-page[data-theme="light"] .klog-console-empty strong{
+  color:#2a435f;
+}
+
+.klog-page[data-theme="light"] .klog-live-strip{
+  background:rgba(36,128,77,.10);
+  color:#26784b;
+  border:1px solid rgba(36,128,77,.15);
+}
+
+.klog-page[data-theme="light"] .klog-truncated{
+  background:#fff1df;
+  color:#9b5a18;
+  border:1px solid #f1d3ad;
+}
+
+/* Explicit dark log viewer treatment. */
+.klog-page[data-theme="dark"] .klog-console-shell{
+  background:#0c141d;
+  border-top:1px solid #253442;
+}
+
+.klog-page[data-theme="dark"] .klog-console-shell pre{
+  color:#d8e4ee;
+  background:linear-gradient(180deg,#101923,#0d151e);
+}
+
+.klog-page[data-theme="dark"] .klog-console-empty{
+  color:#8294a5;
+  background:linear-gradient(180deg,#101923,#0d151e);
+}
+
+.klog-page[data-theme="dark"] .klog-console-empty strong{
+  color:#d7e1e9;
+}
+
+/* Premium internal scrollbars: the page itself stays still. */
+.klog-pod-list,
+.klog-console-shell pre,
+.klog-access-panel,
+.klog-namespace-grid{
+  scrollbar-width:thin;
+  scrollbar-color:rgba(112,130,148,.45) transparent;
+}
+
+.klog-pod-list::-webkit-scrollbar,
+.klog-console-shell pre::-webkit-scrollbar,
+.klog-access-panel::-webkit-scrollbar,
+.klog-namespace-grid::-webkit-scrollbar{
+  width:7px;
+  height:7px;
+}
+
+.klog-pod-list::-webkit-scrollbar-track,
+.klog-console-shell pre::-webkit-scrollbar-track,
+.klog-access-panel::-webkit-scrollbar-track,
+.klog-namespace-grid::-webkit-scrollbar-track{
+  background:transparent;
+}
+
+.klog-pod-list::-webkit-scrollbar-thumb,
+.klog-console-shell pre::-webkit-scrollbar-thumb,
+.klog-access-panel::-webkit-scrollbar-thumb,
+.klog-namespace-grid::-webkit-scrollbar-thumb{
+  background:rgba(112,130,148,.38);
+  border-radius:999px;
+}
+
+.klog-pod-list::-webkit-scrollbar-thumb:hover,
+.klog-console-shell pre::-webkit-scrollbar-thumb:hover,
+.klog-access-panel::-webkit-scrollbar-thumb:hover,
+.klog-namespace-grid::-webkit-scrollbar-thumb:hover{
+  background:rgba(112,130,148,.60);
+}
+
+@media(max-width:850px){
+  .content-kubernetes-logs{
+    height:auto;
+    overflow:visible;
+  }
+
+  .content-kubernetes-logs .klog-page{
+    height:auto;
+    overflow:visible;
+  }
+
+  .content-kubernetes-logs .klog-access-panel{
+    position:static;
+    width:auto;
+    max-height:none;
+    overflow:visible;
+  }
+}
