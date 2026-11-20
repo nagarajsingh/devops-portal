@@ -423,6 +423,7 @@ def _upsert_credential(db, record_id: int, credential_type: str, password: str |
                 updated_by=actor,
             )
         )
+    _audit(db, record_id, f"{credential_type}_PASSWORD_UPDATED", actor, f"record={record_id}")
 
 
 def create_record(payload: dict[str, Any], actor: str) -> dict[str, Any]:
