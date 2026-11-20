@@ -6,8 +6,6 @@ import re
 from typing import Any
 
 from fastapi import HTTPException
-from openpyxl import load_workbook
-
 from .inventory_store import import_inventory_rows
 
 
@@ -92,6 +90,14 @@ def parse_inventory_workbook(content: bytes) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Excel file is empty")
     if len(content) > MAX_IMPORT_BYTES:
         raise HTTPException(status_code=413, detail="Inventory Excel file must be 15 MB or smaller")
+
+    try:
+        from openpyxl import load_workbook
+    except ModuleNotFoundError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Excel import dependency is unavailable. Rebuild the backend image with openpyxl installed.",
+        ) from exc
 
     try:
         workbook = load_workbook(filename=BytesIO(content), read_only=True, data_only=True)
