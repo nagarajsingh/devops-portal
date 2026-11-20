@@ -12,6 +12,7 @@ from .inventory_store import import_inventory_rows
 
 
 MAX_IMPORT_BYTES = 15 * 1024 * 1024
+MAX_IMPORT_ROWS = 10000
 MAX_PREVIEW_ROWS = 75
 
 _HEADER_ALIASES = {
@@ -167,6 +168,14 @@ def parse_inventory_workbook(content: bytes) -> dict[str, Any]:
 
         record["warnings"] = row_warnings
         rows.append(record)
+        if len(rows) > MAX_IMPORT_ROWS:
+            workbook.close()
+            raise HTTPException(
+                status_code=413,
+                detail=f"Inventory workbook contains more than {MAX_IMPORT_ROWS} data rows",
+            )
+
+    workbook.close()
 
     for record in rows:
         signature = (
