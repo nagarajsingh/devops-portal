@@ -3,8 +3,11 @@ import {
   ArrowLeft,
   Boxes,
   Database,
+  AlertTriangle,
+  CheckCircle2,
   Eye,
   EyeOff,
+  FileSpreadsheet,
   KeyRound,
   Layers3,
   Pencil,
@@ -25,6 +28,8 @@ import {
   getInventoryEnvironments,
   getInventoryRecords,
   getInventorySummary,
+  previewInventoryExcel,
+  commitInventoryExcel,
   revealInventoryCredential,
   updateInventoryRecord,
   type InventoryRecordInput,
@@ -34,6 +39,7 @@ import type {
   InventoryCategory,
   InventoryCategorySummary,
   InventoryEnvironment,
+  InventoryImportPreview,
   InventoryRecord,
 } from "../types";
 
@@ -90,6 +96,11 @@ export default function InventoryPage({ token }: { token: string }) {
   const [catalogCode, setCatalogCode] = useState("");
   const [catalogName, setCatalogName] = useState("");
   const [catalogSaving, setCatalogSaving] = useState(false);
+
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<InventoryImportPreview | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
 
   async function loadBase() {
     setLoading(true);
@@ -316,6 +327,50 @@ export default function InventoryPage({ token }: { token: string }) {
     }
   }
 
+
+  function beginImport() {
+    setImportOpen(true);
+    setImportFile(null);
+    setImportPreview(null);
+    setNotice(null);
+  }
+
+  async function previewImport(event: FormEvent) {
+    event.preventDefault();
+    if (!importFile) return;
+    setImportBusy(true);
+    setNotice(null);
+    try {
+      setImportPreview(await previewInventoryExcel(importFile, token));
+    } catch (error) {
+      setNotice({ variant: "error", message: error instanceof Error ? error.message : "Unable to preview inventory Excel file" });
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  async function commitImport() {
+    if (!importFile || !importPreview) return;
+    setImportBusy(true);
+    setNotice(null);
+    try {
+      const result = await commitInventoryExcel(importFile, token);
+      setImportOpen(false);
+      setImportFile(null);
+      setImportPreview(null);
+      await Promise.all([refreshApplications(), loadBase()]);
+      setEnvironments(await getInventoryEnvironments(token));
+      setNotice({
+        variant: "success",
+        message: `Excel import completed: ${result.created_count} created, ${result.updated_count} updated, ${result.skipped_count} skipped.`,
+      });
+    } catch (error) {
+      setNotice({ variant: "error", message: error instanceof Error ? error.message : "Unable to import inventory Excel file" });
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   function back() {
     if (selectedApplication) {
       setSelectedApplication(null);
@@ -373,6 +428,7 @@ export default function InventoryPage({ token }: { token: string }) {
           <p>Applications and counts are database-driven. New applications appear here automatically.</p>
         </div>
         <div className="inventory-section-actions">
+          {category === "GTB" && <button className="secondary-button" onClick={beginImport}><FileSpreadsheet size={16}/>Import Excel</button>}
           <button className="secondary-button" onClick={() => { setCatalogOpen("environment"); setCatalogCode(""); setCatalogName(""); }}><Layers3 size={16}/>Add environment</button>
           <button className="primary-button" onClick={() => { setCatalogOpen("application"); setCatalogCode(""); setCatalogName(""); }}><Plus size={16}/>Add application</button>
         </div>
@@ -547,6 +603,97 @@ export default function InventoryPage({ token }: { token: string }) {
           <button className="primary-button" onClick={() => beginEditRecord(detailRecord)}><Pencil size={15}/>Edit record</button>
         </div>
       </article>
+    </div>}
+
+    {importOpen && <div className="inventory-modal-backdrop" onMouseDown={() => !importBusy && setImportOpen(false)}>
+      <form className="inventory-modal inventory-import-modal" onSubmit={previewImport} onMouseDown={(event) => event.stopPropagation()}>
+        <button type="button" className="inventory-modal-close" onClick={() => !importBusy && setImportOpen(false)}><X size={19}/></button>
+        <div className="inventory-modal-heading">
+          <div className="inventory-card-icon"><FileSpreadsheet size={22}/></div>
+          <div>
+            <span className="eyebrow">GTB INVENTORY IMPORT</span>
+            <h2>Import Excel inventory</h2>
+            <p>Preview the workbook first. Password values are never shown in preview and are encrypted before database storage.</p>
+          </div>
+        </div>
+
+        <label className="inventory-import-drop">
+          <FileSpreadsheet size={30}/>
+          <strong>{importFile ? importFile.name : "Choose an .xlsx inventory workbook"}</strong>
+          <span>{importFile ? `${(importFile.size / 1024 / 1024).toFixed(2)} MB` : "Maximum file size 15 MB"}</span>
+          <input
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={(event) => {
+              const file = event.target.files?.[0] || null;
+              setImportFile(file);
+              setImportPreview(null);
+            }}
+          />
+        </label>
+
+        {!importPreview && <div className="inventory-import-security">
+          <ShieldCheck size={17}/>
+          <div><strong>Credential-safe import</strong><span>The uploaded workbook is processed in memory and is not stored on NFS. SSH and application passwords are encrypted before persistence.</span></div>
+        </div>}
+
+        {importPreview && <>
+          <div className="inventory-import-stats">
+            <div><strong>{importPreview.total_rows}</strong><span>Total rows</span></div>
+            <div><strong>{importPreview.ready_rows}</strong><span>Ready</span></div>
+            <div><strong>{importPreview.application_count}</strong><span>Applications</span></div>
+            <div><strong>{importPreview.environment_count}</strong><span>Environments</span></div>
+            <div className={importPreview.invalid_rows ? "warning" : ""}><strong>{importPreview.invalid_rows}</strong><span>Invalid</span></div>
+            <div className={importPreview.warning_count ? "warning" : ""}><strong>{importPreview.warning_count}</strong><span>Warnings</span></div>
+          </div>
+
+          <div className="inventory-import-summary">
+            <div><CheckCircle2 size={16}/><span>Sheet <strong>{importPreview.sheet_name}</strong> · header row {importPreview.header_row}</span></div>
+            <div><span>Applications</span><p>{importPreview.applications.join(", ")}</p></div>
+            <div><span>Environments</span><p>{importPreview.environments.join(", ")}</p></div>
+          </div>
+
+          {importPreview.warnings.length > 0 && <div className="inventory-import-warnings">
+            <div className="inventory-import-warning-title"><AlertTriangle size={16}/>Review warnings before import</div>
+            <div className="inventory-import-warning-list">
+              {importPreview.warnings.slice(0, 20).map((warning, index) => <p key={index}>{warning}</p>)}
+              {importPreview.warnings.length > 20 && <p>+ {importPreview.warnings.length - 20} more warnings</p>}
+            </div>
+          </div>}
+
+          <div className="inventory-import-preview-table">
+            <table className="inventory-table">
+              <thead><tr><th>Row</th><th>Environment</th><th>Application</th><th>IP</th><th>Hostname</th><th>Type</th><th>App Name</th><th>Credentials</th></tr></thead>
+              <tbody>
+                {importPreview.preview_rows.map((row) => <tr key={row.source_row}>
+                  <td>{row.source_row}</td>
+                  <td><span className="inventory-env-badge">{row.environment || "—"}</span></td>
+                  <td><strong>{row.application || "—"}</strong></td>
+                  <td>{row.ip_address || "—"}</td>
+                  <td>{row.hostname || "—"}</td>
+                  <td>{row.asset_type || "—"}</td>
+                  <td>{row.app_name || "—"}</td>
+                  <td><div className="inventory-access-flags">
+                    <span className={row.ssh_password_configured ? "configured" : ""}>SSH</span>
+                    <span className={row.application_password_configured ? "configured" : ""}>APP</span>
+                  </div></td>
+                </tr>)}
+              </tbody>
+            </table>
+            {importPreview.preview_truncated && <small>Preview limited to the first {importPreview.preview_rows.length} rows. All validated rows will be processed during import.</small>}
+          </div>
+        </>}
+
+        <div className="inventory-modal-footer">
+          <button type="button" className="secondary-button" disabled={importBusy} onClick={() => setImportOpen(false)}>Cancel</button>
+          {!importPreview
+            ? <button type="submit" className="primary-button" disabled={!importFile || importBusy}>{importBusy ? "Validating..." : "Preview import"}</button>
+            : <>
+              <button type="button" className="secondary-button" disabled={importBusy} onClick={() => setImportPreview(null)}>Choose another file</button>
+              <button type="button" className="primary-button" disabled={importBusy || importPreview.ready_rows === 0} onClick={() => void commitImport()}>{importBusy ? "Importing..." : `Import ${importPreview.ready_rows} ready rows`}</button>
+            </>}
+        </div>
+      </form>
     </div>}
 
     {catalogOpen && <div className="inventory-modal-backdrop" onMouseDown={() => setCatalogOpen(null)}>
