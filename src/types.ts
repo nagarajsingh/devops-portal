@@ -208,3 +208,50 @@ export interface InventoryAudit {
   detail: string;
   created_at: string;
 }
+
+
+export interface InventoryImportPreviewRow {
+  source_row:number;
+  environment:string;
+  ip_address:string;
+  hostname:string;
+  application:string;
+  asset_type:string;
+  app_name:string;
+  ssh_username:string;
+  ssh_password_configured:boolean;
+  application_username:string;
+  application_password_configured:boolean;
+  console_details:string;
+  notes:string;
+  warnings:string[];
+}
+
+export interface InventoryImportPreview {
+  file_sha256:string;
+  sheet_name:string;
+  header_row:number;
+  total_rows:number;
+  ready_rows:number;
+  invalid_rows:number;
+  application_count:number;
+  environment_count:number;
+  applications:string[];
+  environments:string[];
+  warning_count:number;
+  warnings:string[];
+  preview_rows:InventoryImportPreviewRow[];
+  preview_truncated:boolean;
+}
+
+export interface InventoryImportResult {
+  file_sha256:string;
+  sheet_name:string;
+  total_rows:number;
+  created_count:number;
+  updated_count:number;
+  skipped_count:number;
+  created_applications:string[];
+  created_environments:string[];
+  errors:string[];
+}
