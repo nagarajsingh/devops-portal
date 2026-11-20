@@ -1,4 +1,4 @@
-import type { ApplicationType, AuthSession, DatasourceApplication, DatasourceOperation, DevOpsTask, DevOpsTaskPriority, DevOpsTaskStatus, InventoryApplication, InventoryAudit, InventoryCategory, InventoryEnvironment, InventoryRecord, InventorySummary, KubernetesService, KubernetesTarget, PipelineRequest, PipelineRequestInput, PortalUser, ReviewUpdate, Role, WebLogicEnvironment } from "../types";
+import type { ApplicationType, AuthSession, DatasourceApplication, DatasourceOperation, DevOpsTask, DevOpsTaskPriority, DevOpsTaskStatus, InventoryApplication, InventoryAudit, InventoryCategory, InventoryEnvironment, InventoryImportPreview, InventoryImportResult, InventoryRecord, InventorySummary, KubernetesService, KubernetesTarget, PipelineRequest, PipelineRequestInput, PortalUser, ReviewUpdate, Role, WebLogicEnvironment } from "../types";
 const API_BASE="/devops-portal/api";
 export class ApiError extends Error{code?:string;status?:number;payload?:unknown;constructor(message:string,options:{code?:string;status?:number;payload?:unknown}={}){super(message);this.name="ApiError";Object.assign(this,options);}}
 async function request<T>(path:string,options:RequestInit={},token?:string):Promise<T>{const response=await fetch(`${API_BASE}${path}`,{...options,headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{}) ,...options.headers}});if(!response.ok){const body=await response.json().catch(()=>({detail:"Request failed"}));const d=body?.detail;throw new ApiError(typeof d==="string"?d:d?.message??"Request failed",{code:typeof d==="object"&&d?d.code:undefined,status:response.status,payload:d});}if(response.status===204)return undefined as T;return response.json() as Promise<T>;}
@@ -124,3 +124,23 @@ export const updateInventoryRecord=(id:number,payload:InventoryRecordInput,token
 export const deleteInventoryRecord=(id:number,token:string)=>request<void>(`/inventory/records/${id}`,{method:"DELETE"},token);
 export const revealInventoryCredential=(id:number,type:"SSH"|"APPLICATION",token:string)=>request<{password:string}>(`/inventory/records/${id}/credentials/${type}/reveal`,{method:"POST"},token);
 export const getInventoryAudit=(token:string,limit=100)=>request<InventoryAudit[]>(`/inventory/audit?limit=${limit}`,{},token);
+
+
+async function uploadInventoryWorkbook<T>(path:string,file:File,token:string):Promise<T>{
+  const form=new FormData();
+  form.append("upload",file);
+  const response=await fetch(`${API_BASE}${path}`,{
+    method:"POST",
+    headers:{Authorization:`Bearer ${token}`},
+    body:form,
+  });
+  if(!response.ok){
+    const body=await response.json().catch(()=>({detail:"Inventory import failed"}));
+    const detail=body?.detail;
+    throw new ApiError(typeof detail==="string"?detail:"Inventory import failed",{status:response.status,payload:detail});
+  }
+  return response.json() as Promise<T>;
+}
+
+export const previewInventoryExcel=(file:File,token:string)=>uploadInventoryWorkbook<InventoryImportPreview>("/inventory/import/preview",file,token);
+export const commitInventoryExcel=(file:File,token:string)=>uploadInventoryWorkbook<InventoryImportResult>("/inventory/import/commit",file,token);
