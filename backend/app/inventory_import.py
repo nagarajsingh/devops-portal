@@ -86,6 +86,14 @@ def _detect_header_row(sheet) -> tuple[int, dict[int, str]]:
 
 
 def parse_inventory_workbook(content: bytes) -> dict[str, Any]:
+    try:
+        from openpyxl import load_workbook
+    except ModuleNotFoundError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Excel inventory import dependency is unavailable. Rebuild the backend image with backend/requirements.txt.",
+        ) from exc
+
     if not content:
         raise HTTPException(status_code=400, detail="Excel file is empty")
     if len(content) > MAX_IMPORT_BYTES:
