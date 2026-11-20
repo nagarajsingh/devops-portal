@@ -1,5 +1,5 @@
 export type Role = "developer" | "devops";
-export type PageKey = "home"|"dashboard"|"requests"|"file-placement"|"monitoring"|"kubernetes-logs"|"deployment-management"|"ms-portal"|"devops-tasks"|"datasources"|"profile"|"admin";
+export type PageKey = "home"|"dashboard"|"requests"|"file-placement"|"monitoring"|"kubernetes-logs"|"deployment-management"|"ms-portal"|"devops-tasks"|"datasources"|"inventory"|"profile"|"admin";
 export interface NavItem { key:PageKey; label:string; devopsOnly?:boolean; adminOnly?:boolean; href?:string; }
 export interface AuthSession { access_token:string; token_type:string; username:string; role:Role; is_admin:boolean; }
 export interface PortalUser { id:number; email:string; role:Role; is_admin:boolean; is_active:boolean; created_at:string; updated_at:string; }
@@ -136,4 +136,75 @@ export interface DatasourceOperation {
   created_at:string;
   updated_at:string;
   completed_at?:string|null;
+}
+
+
+export type InventoryCategory = "GTB" | "MICROSERVICES";
+
+export interface InventoryCategorySummary {
+  category: InventoryCategory;
+  application_count: number;
+  record_count: number;
+  environment_count: number;
+}
+
+export interface InventorySummary {
+  categories: InventoryCategorySummary[];
+}
+
+export interface InventoryApplication {
+  id: number;
+  category: InventoryCategory;
+  code: string;
+  display_name: string;
+  is_active: boolean;
+  record_count: number;
+  environment_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InventoryEnvironment {
+  id: number;
+  code: string;
+  display_name: string;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InventoryRecord {
+  id: number;
+  application_id: number;
+  application_code: string;
+  application_name: string;
+  category: InventoryCategory;
+  environment_id: number;
+  environment_code: string;
+  environment_name: string;
+  ip_address: string;
+  hostname: string;
+  asset_type: string;
+  app_name: string;
+  ssh_username: string;
+  ssh_password_configured: boolean;
+  application_username: string;
+  application_password_configured: boolean;
+  console_details: string;
+  notes: string;
+  is_active: boolean;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InventoryAudit {
+  id: number;
+  inventory_record_id: number | null;
+  action: string;
+  actor: string;
+  detail: string;
+  created_at: string;
 }
