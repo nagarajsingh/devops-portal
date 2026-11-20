@@ -13,3 +13,37 @@
 @media(max-width:1180px){.inventory-application-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.inventory-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:850px){.inventory-category-grid{grid-template-columns:1fr}.inventory-application-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.inventory-section-bar{align-items:flex-start;flex-direction:column}.inventory-form-grid{grid-template-columns:1fr}.inventory-detail-grid{grid-template-columns:1fr}.inventory-hero{align-items:flex-start;flex-direction:column}.inventory-modal-backdrop{padding:10px}.inventory-modal{padding:20px}.inventory-secret-row{grid-template-columns:90px 1fr}.inventory-secret-row button{grid-column:2}}
 @media(max-width:560px){.inventory-application-grid{grid-template-columns:1fr}.inventory-section-actions{width:100%;flex-direction:column;align-items:stretch}.inventory-section-actions button{justify-content:center}.inventory-card-stats{grid-template-columns:1fr}.inventory-category-card{grid-template-columns:1fr}.inventory-detail-meta{flex-direction:column}}
+
+
+.inventory-import-modal{width:min(1180px,96vw)}
+.inventory-import-drop{position:relative;min-height:150px;border:1.5px dashed #cfd9e3;border-radius:16px;background:linear-gradient(180deg,#fbfcfe,#f6f9fc);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;color:#54708d;cursor:pointer;transition:.18s;padding:22px;text-align:center}
+.inventory-import-drop:hover{border-color:#ee925c;background:#fff9f5}
+.inventory-import-drop svg{color:#f06b21}
+.inventory-import-drop strong{color:#294b6f;font-size:13px}
+.inventory-import-drop span{color:#8a97a4;font-size:10px}
+.inventory-import-drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.inventory-import-security{margin-top:14px;padding:12px 14px;border:1px solid #d8e8de;border-radius:12px;background:#eff8f2;color:#34704f;display:flex;align-items:flex-start;gap:10px}
+.inventory-import-security div{display:flex;flex-direction:column;gap:3px}
+.inventory-import-security strong{font-size:11px}
+.inventory-import-security span{font-size:10px;line-height:1.45;color:#5d806b}
+.inventory-import-stats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-top:16px}
+.inventory-import-stats>div{padding:12px;border:1px solid #e5eaf0;border-radius:12px;background:#fafcfd;display:flex;flex-direction:column;gap:3px}
+.inventory-import-stats>div.warning{border-color:#f0d5af;background:#fff8ee}
+.inventory-import-stats strong{color:#244969;font-size:19px}
+.inventory-import-stats span{color:#8996a3;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em}
+.inventory-import-stats .warning strong{color:#b56b1d}
+.inventory-import-summary{margin-top:12px;padding:13px 14px;border:1px solid #e5eaf0;border-radius:13px;background:#fff;display:grid;gap:8px}
+.inventory-import-summary>div:first-child{display:flex;align-items:center;gap:7px;color:#2c7b50}
+.inventory-import-summary>div:not(:first-child){display:grid;grid-template-columns:100px 1fr;gap:10px}
+.inventory-import-summary span{font-size:10px;color:#7b8997}
+.inventory-import-summary p{margin:0;color:#405b75;font-size:10px;line-height:1.45;word-break:break-word}
+.inventory-import-warnings{margin-top:12px;border:1px solid #efd3ad;border-radius:13px;background:#fff9f0;overflow:hidden}
+.inventory-import-warning-title{padding:10px 12px;display:flex;align-items:center;gap:7px;color:#a9601d;font-size:10px;font-weight:900;border-bottom:1px solid #f0dfc8}
+.inventory-import-warning-list{max-height:120px;overflow:auto;padding:7px 12px}
+.inventory-import-warning-list p{margin:4px 0;color:#886744;font-size:9px}
+.inventory-import-preview-table{margin-top:14px;border:1px solid #e4e9ee;border-radius:13px;overflow:auto;max-height:330px}
+.inventory-import-preview-table .inventory-table{min-width:1040px}
+.inventory-import-preview-table .inventory-table th{top:0}
+.inventory-import-preview-table>small{display:block;padding:9px 12px;background:#f8fafc;color:#7f8c99;font-size:9px;border-top:1px solid #e8edf1}
+@media(max-width:1000px){.inventory-import-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:620px){.inventory-import-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.inventory-import-summary>div:not(:first-child){grid-template-columns:1fr}}
