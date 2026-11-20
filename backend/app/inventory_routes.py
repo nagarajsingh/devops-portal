@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field, SecretStr
 
 from .auth import require_devops
+from .inventory_import import commit_inventory_workbook, preview_inventory_workbook
 from .inventory_store import (
     create_application,
     create_environment,
@@ -150,3 +151,30 @@ def inventory_audit(
     _: UserContext = Depends(require_devops),
 ):
     return list_audit(limit)
+
+
+async def _read_inventory_upload(upload: UploadFile) -> bytes:
+    filename = (upload.filename or "").strip()
+    if not filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Inventory import requires an .xlsx Excel file")
+    content = await upload.read()
+    await upload.close()
+    return content
+
+
+@router.post("/import/preview")
+async def preview_inventory_import(
+    upload: UploadFile = File(...),
+    _: UserContext = Depends(require_devops),
+):
+    content = await _read_inventory_upload(upload)
+    return preview_inventory_workbook(content)
+
+
+@router.post("/import/commit")
+async def commit_inventory_import(
+    upload: UploadFile = File(...),
+    user: UserContext = Depends(require_devops),
+):
+    content = await _read_inventory_upload(upload)
+    return commit_inventory_workbook(content, user.username)
