@@ -1,4 +1,4 @@
-import type { ApplicationType, AuthSession, DatasourceApplication, DatasourceOperation, DevOpsTask, DevOpsTaskPriority, DevOpsTaskStatus, KubernetesService, KubernetesTarget, PipelineRequest, PipelineRequestInput, PortalUser, ReviewUpdate, Role, WebLogicEnvironment } from "../types";
+import type { ApplicationType, AuthSession, DatasourceApplication, DatasourceOperation, DevOpsTask, DevOpsTaskPriority, DevOpsTaskStatus, InventoryApplication, InventoryAudit, InventoryCategory, InventoryEnvironment, InventoryRecord, InventorySummary, KubernetesService, KubernetesTarget, PipelineRequest, PipelineRequestInput, PortalUser, ReviewUpdate, Role, WebLogicEnvironment } from "../types";
 const API_BASE="/devops-portal/api";
 export class ApiError extends Error{code?:string;status?:number;payload?:unknown;constructor(message:string,options:{code?:string;status?:number;payload?:unknown}={}){super(message);this.name="ApiError";Object.assign(this,options);}}
 async function request<T>(path:string,options:RequestInit={},token?:string):Promise<T>{const response=await fetch(`${API_BASE}${path}`,{...options,headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{}) ,...options.headers}});if(!response.ok){const body=await response.json().catch(()=>({detail:"Request failed"}));const d=body?.detail;throw new ApiError(typeof d==="string"?d:d?.message??"Request failed",{code:typeof d==="object"&&d?d.code:undefined,status:response.status,payload:d});}if(response.status===204)return undefined as T;return response.json() as Promise<T>;}
@@ -96,3 +96,31 @@ export const saveDatasourceEntityProfile=(environmentId:number,entityCode:string
 export const getDatasourceOperations=(token:string,limit=50)=>request<DatasourceOperation[]>(`/datasources/operations?limit=${limit}`,{},token);
 export const previewDatasources=(payload:DatasourcePreviewInput,token:string)=>request<DatasourceOperation>("/datasources/preview",{method:"POST",body:JSON.stringify(payload)},token);
 export const applyDatasourceOperation=(id:number,pat:string,token:string)=>request<DatasourceOperation>(`/datasources/operations/${id}/apply`,{method:"POST",body:JSON.stringify({azure_devops_pat:pat})},token);
+
+
+export type InventoryRecordInput = {
+  application_id:number;
+  environment_id:number;
+  ip_address:string;
+  hostname:string;
+  asset_type:string;
+  app_name:string;
+  ssh_username:string;
+  ssh_password?:string;
+  application_username:string;
+  application_password?:string;
+  console_details:string;
+  notes:string;
+};
+
+export const getInventorySummary=(token:string)=>request<InventorySummary>("/inventory/summary",{},token);
+export const getInventoryApplications=(category:InventoryCategory,token:string)=>request<InventoryApplication[]>(`/inventory/applications?category=${encodeURIComponent(category)}`,{},token);
+export const createInventoryApplication=(payload:{category:InventoryCategory;code:string;display_name:string},token:string)=>request<InventoryApplication>("/inventory/applications",{method:"POST",body:JSON.stringify(payload)},token);
+export const getInventoryEnvironments=(token:string)=>request<InventoryEnvironment[]>("/inventory/environments",{},token);
+export const createInventoryEnvironment=(payload:{code:string;display_name:string},token:string)=>request<InventoryEnvironment>("/inventory/environments",{method:"POST",body:JSON.stringify(payload)},token);
+export const getInventoryRecords=(token:string,filters:{application_id?:number;environment_id?:number;q?:string}={})=>{const query=new URLSearchParams();if(filters.application_id)query.set("application_id",String(filters.application_id));if(filters.environment_id)query.set("environment_id",String(filters.environment_id));if(filters.q)query.set("q",filters.q);const suffix=query.toString();return request<InventoryRecord[]>(`/inventory/records${suffix?`?${suffix}`:""}`,{},token);};
+export const createInventoryRecord=(payload:InventoryRecordInput,token:string)=>request<InventoryRecord>("/inventory/records",{method:"POST",body:JSON.stringify(payload)},token);
+export const updateInventoryRecord=(id:number,payload:InventoryRecordInput,token:string)=>request<InventoryRecord>(`/inventory/records/${id}`,{method:"PUT",body:JSON.stringify(payload)},token);
+export const deleteInventoryRecord=(id:number,token:string)=>request<void>(`/inventory/records/${id}`,{method:"DELETE"},token);
+export const revealInventoryCredential=(id:number,type:"SSH"|"APPLICATION",token:string)=>request<{password:string}>(`/inventory/records/${id}/credentials/${type}/reveal`,{method:"POST"},token);
+export const getInventoryAudit=(token:string,limit=100)=>request<InventoryAudit[]>(`/inventory/audit?limit=${limit}`,{},token);
