@@ -19,6 +19,13 @@ DEFAULT_GROUPS = (
     ("SAFENET", "Safenet"),
 )
 
+DEFAULT_SERVICES = (
+    ("API-BANKING", "api-banking", "API Banking"),
+    ("H2H", "h2h-statement-service", "H2H Statement Service"),
+    ("COLLECTIONS", "collections-batch-01-service", "Collections Batch 01 Service"),
+    ("NATIVE-MOBILE-APP", "native-mobile-auth-management", "Native Mobile Auth Management"),
+)
+
 DEFAULT_ENVIRONMENTS = ("DEV", "SIT", "UAT", "PPR", "PRD", "DR", "EG-UAT", "EG-PRD", "EG-DR")
 
 
@@ -101,6 +108,28 @@ def initialize_microservice_inventory() -> None:
         for code, display_name in DEFAULT_GROUPS:
             if not db.scalar(select(InventoryMsGroup).where(InventoryMsGroup.code == code)):
                 db.add(InventoryMsGroup(code=code, display_name=display_name, is_active=True))
+
+        db.flush()
+        group_by_code = {
+            row.code: row
+            for row in db.scalars(select(InventoryMsGroup)).all()
+        }
+        for group_code, service_code, display_name in DEFAULT_SERVICES:
+            group = group_by_code.get(group_code)
+            if group and not db.scalar(
+                select(InventoryMsService).where(
+                    InventoryMsService.group_id == group.id,
+                    InventoryMsService.code == service_code,
+                )
+            ):
+                db.add(
+                    InventoryMsService(
+                        group_id=group.id,
+                        code=service_code,
+                        display_name=display_name,
+                        is_active=True,
+                    )
+                )
 
         max_order = db.scalar(select(func.max(InventoryEnvironment.sort_order))) or 0
         next_order = int(max_order)
