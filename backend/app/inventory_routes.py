@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field, SecretStr
 
@@ -16,6 +18,19 @@ from .inventory_import import (
     preview_inventory_workbook,
     preview_microservice_workbook,
 )
+from .inventory_patching import (
+    create_asset as create_patching_asset,
+    create_cycle as create_patch_cycle,
+    delete_asset as delete_patching_asset,
+    list_assets as list_patching_assets,
+    list_cycles as list_patch_cycles,
+    patching_summary,
+    update_asset as update_patching_asset,
+    upsert_activity as upsert_patch_activity,
+)
+from .inventory_patching_export import export_patching_excel, export_patching_pdf
+from .inventory_patching_import import commit_patching_workbook, preview_patching_workbook
+from .inventory_search import search_inventory
 from .inventory_microservices import (
     create_configuration,
     create_group,
@@ -94,6 +109,32 @@ class InventoryMsConfigurationPayload(BaseModel):
     db_username: str = Field(default="", max_length=255)
     db_password: SecretStr | None = None
     notes: str = Field(default="", max_length=8000)
+
+
+
+
+class InventoryPatchingAssetPayload(BaseModel):
+    asset_identifier: str = Field(default="", max_length=255)
+    hostname: str = Field(default="", max_length=255)
+    application: str = Field(default="", max_length=255)
+    application_owner: str = Field(default="", max_length=255)
+    asset_type: str = Field(default="", max_length=100)
+    environment_name: str = Field(default="", max_length=150)
+    environment_class: str = Field(default="NON_PROD", pattern=r"^(NON_PROD|PROD|DR)$")
+
+
+class InventoryPatchCyclePayload(BaseModel):
+    code: str = Field(min_length=6, max_length=30)
+
+
+class InventoryPatchActivityPayload(BaseModel):
+    previous_patched_date: date | None = None
+    planned_date: date | None = None
+    status: str = Field(default="NOT_STARTED", max_length=30)
+    app_team_approval: str = Field(default="", max_length=255)
+    cr_number: str = Field(default="", max_length=100)
+    comments: str = Field(default="", max_length=8000)
+    patch_role: str = Field(default="", max_length=100)
 
 
 def _ms_configuration_payload(payload: InventoryMsConfigurationPayload) -> dict:
@@ -378,5 +419,129 @@ def download_microservices_pdf(
         content=content,
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="microservices-inventory.pdf"'},
+    )
+
+@router.get("/search")
+def unified_inventory_search(
+    q: str = Query(min_length=2, max_length=255),
+    limit: int = Query(default=50, ge=1, le=100),
+    _: UserContext = Depends(require_devops),
+):
+    return search_inventory(q, limit)
+
+
+@router.get("/patching/summary")
+def patching_inventory_summary(
+    cycle_id: int | None = Query(default=None, ge=1),
+    _: UserContext = Depends(require_devops),
+):
+    return patching_summary(cycle_id)
+
+
+@router.get("/patching/cycles")
+def patching_cycles(_: UserContext = Depends(require_devops)):
+    return list_patch_cycles()
+
+
+@router.post("/patching/cycles", status_code=201)
+def add_patching_cycle(
+    payload: InventoryPatchCyclePayload,
+    user: UserContext = Depends(require_devops),
+):
+    return create_patch_cycle(payload.code, user.username)
+
+
+@router.get("/patching/assets")
+def patching_assets(
+    cycle_id: int | None = Query(default=None, ge=1),
+    environment_class: str = Query(default="", max_length=30),
+    status: str = Query(default="", max_length=30),
+    q: str = Query(default="", max_length=255),
+    _: UserContext = Depends(require_devops),
+):
+    return list_patching_assets(cycle_id, environment_class, status, q)
+
+
+@router.post("/patching/assets", status_code=201)
+def add_patching_asset(
+    payload: InventoryPatchingAssetPayload,
+    user: UserContext = Depends(require_devops),
+):
+    return create_patching_asset(payload.model_dump(), user.username)
+
+
+@router.put("/patching/assets/{asset_id}")
+def edit_patching_asset(
+    asset_id: int,
+    payload: InventoryPatchingAssetPayload,
+    user: UserContext = Depends(require_devops),
+):
+    return update_patching_asset(asset_id, payload.model_dump(), user.username)
+
+
+@router.delete("/patching/assets/{asset_id}", status_code=204)
+def remove_patching_asset(
+    asset_id: int,
+    user: UserContext = Depends(require_devops),
+):
+    delete_patching_asset(asset_id, user.username)
+    return Response(status_code=204)
+
+
+@router.put("/patching/assets/{asset_id}/cycles/{cycle_id}")
+def save_patching_activity(
+    asset_id: int,
+    cycle_id: int,
+    payload: InventoryPatchActivityPayload,
+    user: UserContext = Depends(require_devops),
+):
+    return upsert_patch_activity(asset_id, cycle_id, payload.model_dump(), user.username)
+
+
+@router.post("/patching/import/preview")
+async def preview_patching_import(
+    upload: UploadFile = File(...),
+    _: UserContext = Depends(require_devops),
+):
+    content = await _read_inventory_upload(upload)
+    return preview_patching_workbook(content)
+
+
+@router.post("/patching/import/commit")
+async def commit_patching_import(
+    upload: UploadFile = File(...),
+    user: UserContext = Depends(require_devops),
+):
+    content = await _read_inventory_upload(upload)
+    return commit_patching_workbook(content, user.username)
+
+
+@router.get("/export/patching.xlsx")
+def download_patching_excel(
+    cycle_id: int | None = Query(default=None, ge=1),
+    environment_class: str = Query(default="", max_length=30),
+    status: str = Query(default="", max_length=30),
+    user: UserContext = Depends(require_devops),
+):
+    content = export_patching_excel(user.username, cycle_id, environment_class, status)
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="patching-inventory.xlsx"'},
+    )
+
+
+@router.get("/export/patching.pdf")
+def download_patching_pdf(
+    cycle_id: int | None = Query(default=None, ge=1),
+    environment_class: str = Query(default="", max_length=30),
+    status: str = Query(default="", max_length=30),
+    user: UserContext = Depends(require_devops),
+):
+    content = export_patching_pdf(user.username, cycle_id, environment_class, status)
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="patching-inventory.pdf"'},
     )
 
