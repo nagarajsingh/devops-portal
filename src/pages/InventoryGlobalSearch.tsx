@@ -41,8 +41,8 @@ export default function InventoryGlobalSearch({token}:{token:string}){
           <div className="inventory-search-result-list">
             {result.gtb.map(item=><div className="inventory-search-result-card" key={`gtb-${item.id}`}>
               <div><span className="inventory-result-kicker">{item.application} · {item.environment}</span><strong>{item.hostname||item.ip_address||item.app_name}</strong></div>
-              <dl><div><dt>IP</dt><dd>{item.ip_address||"—"}</dd></div><div><dt>Hostname</dt><dd>{item.hostname||"—"}</dd></div><div><dt>Type</dt><dd>{item.asset_type||"—"}</dd></div><div><dt>App Name</dt><dd>{item.app_name||"—"}</dd></div></dl>
-              {item.console_details&&<p>{item.console_details}</p>}
+              <dl><div><dt>IP</dt><dd>{item.ip_address||"—"}</dd></div><div><dt>Hostname</dt><dd>{item.hostname||"—"}</dd></div><div><dt>Type</dt><dd>{item.asset_type||"—"}</dd></div><div><dt>App Name</dt><dd>{item.app_name||"—"}</dd></div><div><dt>SSH User</dt><dd>{item.ssh_username||"—"}</dd></div><div><dt>Application User</dt><dd>{item.application_username||"—"}</dd></div></dl>
+              {(item.console_details||item.notes)&&<p>{[item.console_details,item.notes].filter(Boolean).join(" · ")}</p>}
             </div>)}
             {!result.gtb.length&&<div className="inventory-search-empty">No GTB matches.</div>}
           </div>
