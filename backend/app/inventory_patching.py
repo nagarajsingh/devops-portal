@@ -308,8 +308,7 @@ def _find_asset_for_import(db, identifier: str, hostname: str, application: str)
     rows = list(db.scalars(query).all())
     if application:
         exact = [row for row in rows if (row.application or "").strip().lower() == application.strip().lower()]
-        if exact:
-            return exact[0]
+        return exact[0] if exact else None
     return rows[0] if rows else None
 
 
