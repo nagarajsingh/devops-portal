@@ -138,7 +138,6 @@ def initialize_patching_inventory() -> None:
 
 
 def _asset_view(db, row: InventoryPatchingAsset, cycle_id: int | None = None) -> dict[str, Any]:
-    activity = None
     if cycle_id:
         activity = db.scalar(
             select(InventoryPatchActivity).where(
@@ -146,7 +145,7 @@ def _asset_view(db, row: InventoryPatchingAsset, cycle_id: int | None = None) ->
                 InventoryPatchActivity.cycle_id == cycle_id,
             )
         )
-    if activity is None:
+    else:
         activity = db.scalar(
             select(InventoryPatchActivity)
             .where(InventoryPatchActivity.patching_asset_id == row.id)
@@ -457,7 +456,10 @@ def list_assets(
         result = [_asset_view(db, row, cycle_id) for row in rows]
         if status:
             wanted = _normalise_status(status)
-            result = [item for item in result if item["activity"] and item["activity"]["status"] == wanted]
+            if wanted == "NOT_STARTED":
+                result = [item for item in result if not item["activity"] or item["activity"]["status"] == wanted]
+            else:
+                result = [item for item in result if item["activity"] and item["activity"]["status"] == wanted]
         return result
 
 
