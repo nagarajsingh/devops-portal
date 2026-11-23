@@ -255,3 +255,100 @@ export interface InventoryImportResult {
   created_environments:string[];
   errors:string[];
 }
+
+
+export interface InventoryMsGroup {
+  id:number;
+  code:string;
+  display_name:string;
+  is_active:boolean;
+  service_count:number;
+  configuration_count:number;
+  environment_count:number;
+  created_at:string;
+  updated_at:string;
+}
+
+export interface InventoryMsService {
+  id:number;
+  group_id:number;
+  group_code:string;
+  group_name:string;
+  code:string;
+  display_name:string;
+  is_active:boolean;
+  configuration_count:number;
+  environment_count:number;
+  created_at:string;
+  updated_at:string;
+}
+
+export interface InventoryMsConfiguration {
+  id:number;
+  group_id:number;
+  group_code:string;
+  group_name:string;
+  service_id:number;
+  service_code:string;
+  service_name:string;
+  environment_id:number;
+  environment_code:string;
+  environment_name:string;
+  connection_name:string;
+  db_url:string;
+  db_name:string;
+  db_username:string;
+  db_password_configured:boolean;
+  notes:string;
+  is_active:boolean;
+  created_by:string;
+  updated_by:string;
+  created_at:string;
+  updated_at:string;
+}
+
+export interface InventoryMsImportPreviewRow {
+  source_row:number;
+  group:string;
+  service:string;
+  environment:string;
+  connection_name:string;
+  db_url:string;
+  db_name:string;
+  db_username:string;
+  db_password_configured:boolean;
+  notes:string;
+  warnings:string[];
+}
+
+export interface InventoryMsImportPreview {
+  file_sha256:string;
+  sheet_name:string;
+  header_row:number;
+  total_rows:number;
+  ready_rows:number;
+  invalid_rows:number;
+  group_count:number;
+  service_count:number;
+  environment_count:number;
+  groups:string[];
+  services:string[];
+  environments:string[];
+  warning_count:number;
+  warnings:string[];
+  preview_rows:InventoryMsImportPreviewRow[];
+  preview_truncated:boolean;
+}
+
+export interface InventoryMsImportResult {
+  file_sha256:string;
+  sheet_name:string;
+  total_rows:number;
+  created_count:number;
+  updated_count:number;
+  skipped_count:number;
+  created_groups:string[];
+  created_services:string[];
+  created_environments:string[];
+  errors:string[];
+}
