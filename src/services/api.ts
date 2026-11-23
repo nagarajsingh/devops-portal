@@ -1,4 +1,4 @@
-import type { ApplicationType, AuthSession, DatasourceApplication, DatasourceOperation, DevOpsTask, DevOpsTaskPriority, DevOpsTaskStatus, InventoryApplication, InventoryAudit, InventoryCategory, InventoryEnvironment, InventoryImportPreview, InventoryImportResult, InventoryMsConfiguration, InventoryMsGroup, InventoryMsImportPreview, InventoryMsImportResult, InventoryMsService, InventoryRecord, InventorySummary, KubernetesService, KubernetesTarget, PipelineRequest, PipelineRequestInput, PortalUser, ReviewUpdate, Role, WebLogicEnvironment } from "../types";
+import type { ApplicationType, AuthSession, DatasourceApplication, DatasourceOperation, DevOpsTask, DevOpsTaskPriority, DevOpsTaskStatus, InventoryApplication, InventoryAudit, InventoryCategory, InventoryEnvironment, InventoryImportPreview, InventoryImportResult, InventoryMsConfiguration, InventoryMsGroup, InventoryMsImportPreview, InventoryMsImportResult, InventoryMsService, InventoryPatchCycle, InventoryPatchingAsset, InventoryPatchingImportPreview, InventoryPatchingImportResult, InventoryPatchingSummary, InventoryRecord, InventorySearchResult, InventorySummary, KubernetesService, KubernetesTarget, PipelineRequest, PipelineRequestInput, PortalUser, ReviewUpdate, Role, WebLogicEnvironment } from "../types";
 const API_BASE="/devops-portal/api";
 export class ApiError extends Error{code?:string;status?:number;payload?:unknown;constructor(message:string,options:{code?:string;status?:number;payload?:unknown}={}){super(message);this.name="ApiError";Object.assign(this,options);}}
 async function request<T>(path:string,options:RequestInit={},token?:string):Promise<T>{const response=await fetch(`${API_BASE}${path}`,{...options,headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{}) ,...options.headers}});if(!response.ok){const body=await response.json().catch(()=>({detail:"Request failed"}));const d=body?.detail;throw new ApiError(typeof d==="string"?d:d?.message??"Request failed",{code:typeof d==="object"&&d?d.code:undefined,status:response.status,payload:d});}if(response.status===204)return undefined as T;return response.json() as Promise<T>;}
@@ -170,10 +170,10 @@ export const previewInventoryMsExcel=(file:File,token:string)=>uploadInventoryWo
 export const commitInventoryMsExcel=(file:File,token:string)=>uploadInventoryWorkbook<InventoryMsImportResult>("/inventory/microservices/import/commit",file,token);
 
 export async function downloadInventoryExport(
-  kind:"gtb"|"microservices",
+  kind:"gtb"|"microservices"|"patching",
   format:"xlsx"|"pdf",
   token:string,
-  filters:{application_id?:number;group_id?:number;service_id?:number;environment_id?:number}={}
+  filters:{application_id?:number;group_id?:number;service_id?:number;environment_id?:number;cycle_id?:number;environment_class?:string;status?:string}={}
 ){
   const query=new URLSearchParams();
   Object.entries(filters).forEach(([key,value])=>{if(value)query.set(key,String(value));});
@@ -196,3 +196,36 @@ export async function downloadInventoryExport(
   anchor.remove();
   URL.revokeObjectURL(url);
 }
+
+
+export type InventoryPatchingAssetInput={
+  asset_identifier:string;
+  hostname:string;
+  application:string;
+  application_owner:string;
+  asset_type:string;
+  environment_name:string;
+  environment_class:"NON_PROD"|"PROD"|"DR";
+};
+
+export type InventoryPatchActivityInput={
+  previous_patched_date?:string|null;
+  planned_date?:string|null;
+  status:"NOT_STARTED"|"SCHEDULED"|"IN_PROGRESS"|"COMPLETED"|"BLOCKED";
+  app_team_approval:string;
+  cr_number:string;
+  comments:string;
+  patch_role:string;
+};
+
+export const searchInventory=(q:string,token:string)=>request<InventorySearchResult>(`/inventory/search?q=${encodeURIComponent(q)}`,{},token);
+export const getInventoryPatchCycles=(token:string)=>request<InventoryPatchCycle[]>("/inventory/patching/cycles",{},token);
+export const createInventoryPatchCycle=(code:string,token:string)=>request<InventoryPatchCycle>("/inventory/patching/cycles",{method:"POST",body:JSON.stringify({code})},token);
+export const getInventoryPatchingSummary=(token:string,cycleId?:number)=>request<InventoryPatchingSummary>(`/inventory/patching/summary${cycleId?`?cycle_id=${cycleId}`:""}`,{},token);
+export const getInventoryPatchingAssets=(token:string,filters:{cycle_id?:number;environment_class?:string;status?:string;q?:string}={})=>{const p=new URLSearchParams();Object.entries(filters).forEach(([k,v])=>{if(v!==undefined&&v!==null&&v!=="")p.set(k,String(v));});const s=p.toString();return request<InventoryPatchingAsset[]>(`/inventory/patching/assets${s?`?${s}`:""}`,{},token);};
+export const createInventoryPatchingAsset=(payload:InventoryPatchingAssetInput,token:string)=>request<InventoryPatchingAsset>("/inventory/patching/assets",{method:"POST",body:JSON.stringify(payload)},token);
+export const updateInventoryPatchingAsset=(id:number,payload:InventoryPatchingAssetInput,token:string)=>request<InventoryPatchingAsset>(`/inventory/patching/assets/${id}`,{method:"PUT",body:JSON.stringify(payload)},token);
+export const deleteInventoryPatchingAsset=(id:number,token:string)=>request<void>(`/inventory/patching/assets/${id}`,{method:"DELETE"},token);
+export const saveInventoryPatchActivity=(assetId:number,cycleId:number,payload:InventoryPatchActivityInput,token:string)=>request<InventoryPatchingAsset>(`/inventory/patching/assets/${assetId}/cycles/${cycleId}`,{method:"PUT",body:JSON.stringify(payload)},token);
+export const previewInventoryPatchingExcel=(file:File,token:string)=>uploadInventoryWorkbook<InventoryPatchingImportPreview>("/inventory/patching/import/preview",file,token);
+export const commitInventoryPatchingExcel=(file:File,token:string)=>uploadInventoryWorkbook<InventoryPatchingImportResult>("/inventory/patching/import/commit",file,token);
