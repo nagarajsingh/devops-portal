@@ -5,9 +5,11 @@ import {
   Database,
   AlertTriangle,
   CheckCircle2,
+  Download,
   Eye,
   EyeOff,
   FileSpreadsheet,
+  FileText,
   KeyRound,
   Layers3,
   Pencil,
@@ -28,12 +30,14 @@ import {
   getInventoryEnvironments,
   getInventoryRecords,
   getInventorySummary,
+  downloadInventoryExport,
   previewInventoryExcel,
   commitInventoryExcel,
   revealInventoryCredential,
   updateInventoryRecord,
   type InventoryRecordInput,
 } from "../services/api";
+import MicroservicesInventory from "./MicroservicesInventory";
 import type {
   InventoryApplication,
   InventoryCategory,
@@ -101,6 +105,7 @@ export default function InventoryPage({ token }: { token: string }) {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importPreview, setImportPreview] = useState<InventoryImportPreview | null>(null);
   const [importBusy, setImportBusy] = useState(false);
+  const [exportBusy, setExportBusy] = useState<"xlsx" | "pdf" | null>(null);
 
   async function loadBase() {
     setLoading(true);
@@ -127,8 +132,13 @@ export default function InventoryPage({ token }: { token: string }) {
     setEnvironmentId(0);
     setSearch("");
     setRecords([]);
-    setLoading(true);
     setNotice(null);
+    if (nextCategory === "MICROSERVICES") {
+      setApplications([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     try {
       setApplications(await getInventoryApplications(nextCategory, token));
     } catch (error) {
@@ -383,6 +393,20 @@ export default function InventoryPage({ token }: { token: string }) {
     setApplications([]);
   }
 
+  async function exportGtb(format: "xlsx" | "pdf", applicationId?: number) {
+    setExportBusy(format);
+    try {
+      await downloadInventoryExport("gtb", format, token, {
+        application_id: applicationId,
+        environment_id: environmentId || undefined,
+      });
+    } catch (error) {
+      setNotice({ variant: "error", message: error instanceof Error ? error.message : "Unable to export GTB inventory" });
+    } finally {
+      setExportBusy(null);
+    }
+  }
+
   if (loading && !category) {
     return <div className="inventory-loading">Loading DevOps inventory...</div>;
   }
@@ -411,7 +435,7 @@ export default function InventoryPage({ token }: { token: string }) {
             <p>{item === "GTB" ? "Server, application, database, access and console inventory." : "H2H, Collections, Native Mobile and Safenet inventory."}</p>
           </div>
           <div className="inventory-card-stats">
-            <span><strong>{summary?.application_count ?? 0}</strong> Applications</span>
+            <span><strong>{summary?.application_count ?? 0}</strong> {item === "GTB" ? "Applications" : "Groups"}</span>
             <span><strong>{summary?.record_count ?? 0}</strong> Records</span>
             <span><strong>{summary?.environment_count ?? 0}</strong> Active envs</span>
           </div>
@@ -419,7 +443,14 @@ export default function InventoryPage({ token }: { token: string }) {
       })}
     </section>}
 
-    {category && !selectedApplication && <>
+    {category === "MICROSERVICES" && <MicroservicesInventory
+      token={token}
+      environments={environments}
+      onBack={() => { setCategory(null); setApplications([]); }}
+      onEnvironmentsChange={setEnvironments}
+    />}
+
+    {category === "GTB" && !selectedApplication && <>
       <section className="inventory-section-bar">
         <div>
           <button className="inventory-back" onClick={back}><ArrowLeft size={16}/>Inventory</button>
@@ -428,7 +459,9 @@ export default function InventoryPage({ token }: { token: string }) {
           <p>Applications and counts are database-driven. New applications appear here automatically.</p>
         </div>
         <div className="inventory-section-actions">
-          {category === "GTB" && <button className="secondary-button" onClick={beginImport}><FileSpreadsheet size={16}/>Import Excel</button>}
+          <button className="secondary-button" disabled={!!exportBusy} onClick={() => void exportGtb("xlsx")}><Download size={16}/>{exportBusy === "xlsx" ? "Exporting..." : "Excel"}</button>
+          <button className="secondary-button" disabled={!!exportBusy} onClick={() => void exportGtb("pdf")}><FileText size={16}/>{exportBusy === "pdf" ? "Exporting..." : "PDF"}</button>
+          <button className="secondary-button" onClick={beginImport}><FileSpreadsheet size={16}/>Import Excel</button>
           <button className="secondary-button" onClick={() => { setCatalogOpen("environment"); setCatalogCode(""); setCatalogName(""); }}><Layers3 size={16}/>Add environment</button>
           <button className="primary-button" onClick={() => { setCatalogOpen("application"); setCatalogCode(""); setCatalogName(""); }}><Plus size={16}/>Add application</button>
         </div>
@@ -450,7 +483,7 @@ export default function InventoryPage({ token }: { token: string }) {
       </section>
     </>}
 
-    {category && selectedApplication && <>
+    {category === "GTB" && selectedApplication && <>
       <section className="inventory-section-bar inventory-app-heading">
         <div>
           <button className="inventory-back" onClick={back}><ArrowLeft size={16}/>{categoryTitle(category)}</button>
@@ -459,6 +492,8 @@ export default function InventoryPage({ token }: { token: string }) {
           <p>{records.length} active record{records.length === 1 ? "" : "s"} across {environmentCounts.size} configured environment{environmentCounts.size === 1 ? "" : "s"}.</p>
         </div>
         <div className="inventory-section-actions">
+          <button className="secondary-button" disabled={!!exportBusy} onClick={() => void exportGtb("xlsx", selectedApplication.id)}><Download size={16}/>{exportBusy === "xlsx" ? "Exporting..." : "Excel"}</button>
+          <button className="secondary-button" disabled={!!exportBusy} onClick={() => void exportGtb("pdf", selectedApplication.id)}><FileText size={16}/>{exportBusy === "pdf" ? "Exporting..." : "PDF"}</button>
           <button className="secondary-button" disabled={recordsLoading} onClick={() => void refreshRecords()}><RefreshCw size={16} className={recordsLoading ? "spin" : ""}/>Refresh</button>
           <button className="primary-button" onClick={beginCreateRecord}><Plus size={16}/>Add record</button>
         </div>
