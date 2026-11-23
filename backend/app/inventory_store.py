@@ -581,3 +581,194 @@ def summary() -> dict[str, Any]:
             },
         ]
     }
+
+
+def _normalise_import_value(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _record_signature(
+    application_id: int,
+    environment_id: int,
+    ip_address: str,
+    hostname: str,
+    asset_type: str,
+    app_name: str,
+) -> tuple[Any, ...]:
+    return (
+        application_id,
+        environment_id,
+        _normalise_import_value(ip_address).lower(),
+        _normalise_import_value(hostname).lower(),
+        _normalise_import_value(asset_type).lower(),
+        _normalise_import_value(app_name).lower(),
+    )
+
+
+def import_inventory_rows(rows: list[dict[str, Any]], actor: str) -> dict[str, Any]:
+    """Import GTB inventory rows from a validated workbook.
+
+    Existing rows are matched by application + environment + IP + hostname +
+    type + app name. Matching rows are updated; different applications or
+    environments remain independent even when they use the same host/IP.
+    """
+    factory = session_factory()
+    with factory() as db:
+        application_cache = {
+            (row.category.upper(), row.code.upper()): row
+            for row in db.scalars(select(InventoryApplication)).all()
+        }
+        environment_cache = {
+            row.code.upper(): row
+            for row in db.scalars(select(InventoryEnvironment)).all()
+        }
+
+        existing_records = list(
+            db.scalars(select(InventoryRecord).where(InventoryRecord.is_active == 1)).all()
+        )
+        record_cache: dict[tuple[Any, ...], InventoryRecord] = {}
+        for record in existing_records:
+            record_cache[
+                _record_signature(
+                    record.application_id,
+                    record.environment_id,
+                    record.ip_address or "",
+                    record.hostname or "",
+                    record.asset_type or "",
+                    record.app_name or "",
+                )
+            ] = record
+
+        created = 0
+        updated = 0
+        skipped = 0
+        created_applications: list[str] = []
+        created_environments: list[str] = []
+        row_errors: list[str] = []
+
+        for source in rows:
+            source_row = int(source.get("source_row") or 0)
+            environment_code = _normalise_import_value(source.get("environment")).upper()
+            application_code = _normalise_import_value(source.get("application")).upper() or "UNASSIGNED"
+            ip_address = _normalise_import_value(source.get("ip_address"))
+            hostname = _normalise_import_value(source.get("hostname"))
+
+            if not environment_code:
+                skipped += 1
+                row_errors.append(f"Row {source_row}: missing ENV")
+                continue
+            if not ip_address and not hostname:
+                skipped += 1
+                row_errors.append(f"Row {source_row}: both IP and HOSTNAME are blank")
+                continue
+
+            app_key = ("GTB", application_code)
+            application = application_cache.get(app_key)
+            if not application:
+                application = InventoryApplication(
+                    category="GTB",
+                    code=application_code,
+                    display_name=application_code,
+                    is_active=True,
+                )
+                db.add(application)
+                db.flush()
+                application_cache[app_key] = application
+                created_applications.append(application_code)
+                _audit(db, None, "APPLICATION_CREATED_BY_IMPORT", actor, f"GTB/{application_code}")
+
+            environment = environment_cache.get(environment_code)
+            if not environment:
+                max_order = max(
+                    (item.sort_order for item in environment_cache.values()),
+                    default=0,
+                )
+                environment = InventoryEnvironment(
+                    code=environment_code,
+                    display_name=environment_code,
+                    sort_order=max_order + 10,
+                    is_active=True,
+                )
+                db.add(environment)
+                db.flush()
+                environment_cache[environment_code] = environment
+                created_environments.append(environment_code)
+                _audit(db, None, "ENVIRONMENT_CREATED_BY_IMPORT", actor, environment_code)
+
+            signature = _record_signature(
+                application.id,
+                environment.id,
+                ip_address,
+                hostname,
+                _normalise_import_value(source.get("asset_type")),
+                _normalise_import_value(source.get("app_name")),
+            )
+            record = record_cache.get(signature)
+
+            if record:
+                record.ssh_username = _normalise_import_value(source.get("ssh_username")) or None
+                record.application_username = _normalise_import_value(source.get("application_username")) or None
+                record.console_details = _normalise_import_value(source.get("console_details")) or None
+                record.notes = _normalise_import_value(source.get("notes")) or None
+                record.updated_by = actor
+                record.updated_at = _utcnow()
+                _upsert_credential(db, record.id, "SSH", _normalise_import_value(source.get("ssh_password")) or None, actor)
+                _upsert_credential(
+                    db,
+                    record.id,
+                    "APPLICATION",
+                    _normalise_import_value(source.get("application_password")) or None,
+                    actor,
+                )
+                _audit(db, record.id, "RECORD_UPDATED_BY_IMPORT", actor, f"source_row={source_row}")
+                updated += 1
+            else:
+                record = InventoryRecord(
+                    application_id=application.id,
+                    environment_id=environment.id,
+                    ip_address=ip_address or None,
+                    hostname=hostname or None,
+                    asset_type=_normalise_import_value(source.get("asset_type")) or None,
+                    app_name=_normalise_import_value(source.get("app_name")) or None,
+                    ssh_username=_normalise_import_value(source.get("ssh_username")) or None,
+                    application_username=_normalise_import_value(source.get("application_username")) or None,
+                    console_details=_normalise_import_value(source.get("console_details")) or None,
+                    notes=_normalise_import_value(source.get("notes")) or None,
+                    is_active=True,
+                    created_by=actor,
+                    updated_by=actor,
+                )
+                db.add(record)
+                db.flush()
+                _upsert_credential(db, record.id, "SSH", _normalise_import_value(source.get("ssh_password")) or None, actor)
+                _upsert_credential(
+                    db,
+                    record.id,
+                    "APPLICATION",
+                    _normalise_import_value(source.get("application_password")) or None,
+                    actor,
+                )
+                _audit(db, record.id, "RECORD_CREATED_BY_IMPORT", actor, f"source_row={source_row}")
+                record_cache[signature] = record
+                created += 1
+
+        _audit(
+            db,
+            None,
+            "EXCEL_IMPORT",
+            actor,
+            (
+                f"rows={len(rows)} created={created} updated={updated} skipped={skipped} "
+                f"applications_created={len(created_applications)} environments_created={len(created_environments)}"
+            ),
+        )
+        db.commit()
+
+        return {
+            "created_count": created,
+            "updated_count": updated,
+            "skipped_count": skipped,
+            "created_applications": created_applications,
+            "created_environments": created_environments,
+            "errors": row_errors[:100],
+        }
