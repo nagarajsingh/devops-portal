@@ -1,4 +1,4 @@
-import type { ApplicationType, AuthSession, DatasourceApplication, DatasourceOperation, DevOpsTask, DevOpsTaskPriority, DevOpsTaskStatus, InventoryApplication, InventoryAudit, InventoryCategory, InventoryEnvironment, InventoryImportPreview, InventoryImportResult, InventoryRecord, InventorySummary, KubernetesService, KubernetesTarget, PipelineRequest, PipelineRequestInput, PortalUser, ReviewUpdate, Role, WebLogicEnvironment } from "../types";
+import type { ApplicationType, AuthSession, DatasourceApplication, DatasourceOperation, DevOpsTask, DevOpsTaskPriority, DevOpsTaskStatus, InventoryApplication, InventoryAudit, InventoryCategory, InventoryEnvironment, InventoryImportPreview, InventoryImportResult, InventoryMsConfiguration, InventoryMsGroup, InventoryMsImportPreview, InventoryMsImportResult, InventoryMsService, InventoryRecord, InventorySummary, KubernetesService, KubernetesTarget, PipelineRequest, PipelineRequestInput, PortalUser, ReviewUpdate, Role, WebLogicEnvironment } from "../types";
 const API_BASE="/devops-portal/api";
 export class ApiError extends Error{code?:string;status?:number;payload?:unknown;constructor(message:string,options:{code?:string;status?:number;payload?:unknown}={}){super(message);this.name="ApiError";Object.assign(this,options);}}
 async function request<T>(path:string,options:RequestInit={},token?:string):Promise<T>{const response=await fetch(`${API_BASE}${path}`,{...options,headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{}) ,...options.headers}});if(!response.ok){const body=await response.json().catch(()=>({detail:"Request failed"}));const d=body?.detail;throw new ApiError(typeof d==="string"?d:d?.message??"Request failed",{code:typeof d==="object"&&d?d.code:undefined,status:response.status,payload:d});}if(response.status===204)return undefined as T;return response.json() as Promise<T>;}
@@ -144,3 +144,55 @@ async function uploadInventoryWorkbook<T>(path:string,file:File,token:string):Pr
 
 export const previewInventoryExcel=(file:File,token:string)=>uploadInventoryWorkbook<InventoryImportPreview>("/inventory/import/preview",file,token);
 export const commitInventoryExcel=(file:File,token:string)=>uploadInventoryWorkbook<InventoryImportResult>("/inventory/import/commit",file,token);
+
+
+export type InventoryMsConfigurationInput={
+  service_id:number;
+  environment_id:number;
+  connection_name:string;
+  db_url:string;
+  db_name:string;
+  db_username:string;
+  db_password?:string;
+  notes:string;
+};
+
+export const getInventoryMsGroups=(token:string)=>request<InventoryMsGroup[]>("/inventory/microservices/groups",{},token);
+export const createInventoryMsGroup=(payload:{code:string;display_name:string},token:string)=>request<InventoryMsGroup>("/inventory/microservices/groups",{method:"POST",body:JSON.stringify(payload)},token);
+export const getInventoryMsServices=(token:string,groupId?:number,q="")=>{const p=new URLSearchParams();if(groupId)p.set("group_id",String(groupId));if(q)p.set("q",q);const s=p.toString();return request<InventoryMsService[]>(`/inventory/microservices/services${s?`?${s}`:""}`,{},token);};
+export const createInventoryMsService=(payload:{group_id:number;code:string;display_name:string},token:string)=>request<InventoryMsService>("/inventory/microservices/services",{method:"POST",body:JSON.stringify(payload)},token);
+export const getInventoryMsConfigurations=(token:string,filters:{service_id?:number;environment_id?:number;q?:string}={})=>{const p=new URLSearchParams();if(filters.service_id)p.set("service_id",String(filters.service_id));if(filters.environment_id)p.set("environment_id",String(filters.environment_id));if(filters.q)p.set("q",filters.q);const s=p.toString();return request<InventoryMsConfiguration[]>(`/inventory/microservices/configurations${s?`?${s}`:""}`,{},token);};
+export const createInventoryMsConfiguration=(payload:InventoryMsConfigurationInput,token:string)=>request<InventoryMsConfiguration>("/inventory/microservices/configurations",{method:"POST",body:JSON.stringify(payload)},token);
+export const updateInventoryMsConfiguration=(id:number,payload:InventoryMsConfigurationInput,token:string)=>request<InventoryMsConfiguration>(`/inventory/microservices/configurations/${id}`,{method:"PUT",body:JSON.stringify(payload)},token);
+export const deleteInventoryMsConfiguration=(id:number,token:string)=>request<void>(`/inventory/microservices/configurations/${id}`,{method:"DELETE"},token);
+export const revealInventoryMsPassword=(id:number,token:string)=>request<{password:string}>(`/inventory/microservices/configurations/${id}/credential/reveal`,{method:"POST"},token);
+export const previewInventoryMsExcel=(file:File,token:string)=>uploadInventoryWorkbook<InventoryMsImportPreview>("/inventory/microservices/import/preview",file,token);
+export const commitInventoryMsExcel=(file:File,token:string)=>uploadInventoryWorkbook<InventoryMsImportResult>("/inventory/microservices/import/commit",file,token);
+
+export async function downloadInventoryExport(
+  kind:"gtb"|"microservices",
+  format:"xlsx"|"pdf",
+  token:string,
+  filters:{application_id?:number;group_id?:number;service_id?:number;environment_id?:number}={}
+){
+  const query=new URLSearchParams();
+  Object.entries(filters).forEach(([key,value])=>{if(value)query.set(key,String(value));});
+  const suffix=query.toString();
+  const response=await fetch(`${API_BASE}/inventory/export/${kind}.${format}${suffix?`?${suffix}`:""}`,{headers:{Authorization:`Bearer ${token}`}});
+  if(!response.ok){
+    const body=await response.json().catch(()=>({detail:"Inventory export failed"}));
+    throw new ApiError(typeof body?.detail==="string"?body.detail:"Inventory export failed",{status:response.status,payload:body?.detail});
+  }
+  const blob=await response.blob();
+  const disposition=response.headers.get("Content-Disposition")||"";
+  const match=disposition.match(/filename="?([^";]+)"?/i);
+  const filename=match?.[1]||`${kind}-inventory.${format}`;
+  const url=URL.createObjectURL(blob);
+  const anchor=document.createElement("a");
+  anchor.href=url;
+  anchor.download=filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
