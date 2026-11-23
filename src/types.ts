@@ -352,3 +352,144 @@ export interface InventoryMsImportResult {
   created_environments:string[];
   errors:string[];
 }
+
+
+export type InventoryPatchEnvironmentClass="NON_PROD"|"PROD"|"DR";
+export type InventoryPatchStatus="NOT_STARTED"|"SCHEDULED"|"IN_PROGRESS"|"COMPLETED"|"BLOCKED";
+
+export interface InventoryPatchActivity {
+  id:number;
+  cycle_id:number;
+  cycle_code:string;
+  previous_patched_date:string;
+  planned_date:string;
+  status:InventoryPatchStatus;
+  app_team_approval:string;
+  cr_number:string;
+  comments:string;
+  patch_role:string;
+  updated_by:string;
+  updated_at:string;
+}
+
+export interface InventoryPatchingAsset {
+  id:number;
+  source_type:"GTB"|"MANUAL"|"IMPORT"|string;
+  source_id:number|null;
+  asset_identifier:string;
+  hostname:string;
+  application:string;
+  application_owner:string;
+  asset_type:string;
+  environment_name:string;
+  environment_class:InventoryPatchEnvironmentClass;
+  is_active:boolean;
+  activity:InventoryPatchActivity|null;
+  created_by:string;
+  updated_by:string;
+  created_at:string;
+  updated_at:string;
+}
+
+export interface InventoryPatchCycle {
+  id:number;
+  code:string;
+  quarter:number;
+  year:number;
+  start_date:string;
+  end_date:string;
+  is_active:boolean;
+}
+
+export interface InventoryPatchingSummary {
+  total_assets:number;
+  environment_counts:Record<InventoryPatchEnvironmentClass,number>;
+  status_counts:Record<InventoryPatchStatus,number>;
+}
+
+export interface InventoryPatchingImportPreviewRow {
+  source_row:number;
+  environment_class:InventoryPatchEnvironmentClass;
+  environment_name:string;
+  asset_identifier:string;
+  hostname:string;
+  application:string;
+  application_owner:string;
+  asset_type:string;
+  previous_patched_date:string;
+  planned_date:string;
+  status:string;
+  app_team_approval:string;
+  cr_number:string;
+  comments:string;
+  patch_role:string;
+  warnings:string[];
+}
+
+export interface InventoryPatchingImportPreview {
+  file_sha256:string;
+  sheet_name:string;
+  cycle_code:string;
+  total_rows:number;
+  environment_counts:Record<string,number>;
+  status_counts:Record<string,number>;
+  warning_count:number;
+  warnings:string[];
+  preview_rows:InventoryPatchingImportPreviewRow[];
+  preview_truncated:boolean;
+}
+
+export interface InventoryPatchingImportResult {
+  file_sha256:string;
+  sheet_name:string;
+  total_rows:number;
+  cycle_id:number;
+  cycle_code:string;
+  created_assets:number;
+  updated_assets:number;
+  updated_activities:number;
+  errors:string[];
+}
+
+export interface InventorySearchResult {
+  query:string;
+  total:number;
+  gtb:Array<{
+    id:number;
+    application_id:number;
+    application:string;
+    environment:string;
+    ip_address:string;
+    hostname:string;
+    asset_type:string;
+    app_name:string;
+    console_details:string;
+  }>;
+  microservices:Array<{
+    id:number;
+    group_id:number;
+    group:string;
+    service_id:number;
+    service:string;
+    environment:string;
+    connection_name:string;
+    db_url:string;
+    db_name:string;
+    db_username:string;
+  }>;
+  patching:Array<{
+    id:number;
+    asset_identifier:string;
+    hostname:string;
+    application:string;
+    application_owner:string;
+    asset_type:string;
+    environment_name:string;
+    environment_class:InventoryPatchEnvironmentClass;
+    source_type:string;
+    status:InventoryPatchStatus;
+    cr_number:string;
+    planned_date:string;
+    comments:string;
+  }>;
+}
