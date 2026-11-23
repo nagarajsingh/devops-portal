@@ -463,7 +463,10 @@ export interface InventorySearchResult {
     hostname:string;
     asset_type:string;
     app_name:string;
+    ssh_username:string;
+    application_username:string;
     console_details:string;
+    notes:string;
   }>;
   microservices:Array<{
     id:number;
