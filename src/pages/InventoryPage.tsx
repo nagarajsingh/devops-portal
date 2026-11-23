@@ -19,6 +19,7 @@ import {
   Server,
   ShieldCheck,
   Trash2,
+  Wrench,
   X,
 } from "lucide-react";
 import {
@@ -30,6 +31,7 @@ import {
   getInventoryEnvironments,
   getInventoryRecords,
   getInventorySummary,
+  getInventoryPatchingSummary,
   downloadInventoryExport,
   previewInventoryExcel,
   commitInventoryExcel,
@@ -37,13 +39,16 @@ import {
   updateInventoryRecord,
   type InventoryRecordInput,
 } from "../services/api";
+import InventoryGlobalSearch from "./InventoryGlobalSearch";
 import MicroservicesInventory from "./MicroservicesInventory";
+import PatchingInventory from "./PatchingInventory";
 import type {
   InventoryApplication,
   InventoryCategory,
   InventoryCategorySummary,
   InventoryEnvironment,
   InventoryImportPreview,
+  InventoryPatchingSummary,
   InventoryRecord,
 } from "../types";
 
@@ -78,6 +83,8 @@ export default function InventoryPage({ token }: { token: string }) {
   const [summaries, setSummaries] = useState<InventoryCategorySummary[]>([]);
   const [environments, setEnvironments] = useState<InventoryEnvironment[]>([]);
   const [category, setCategory] = useState<InventoryCategory | null>(null);
+  const [patchingOpen, setPatchingOpen] = useState(false);
+  const [patchingSummary, setPatchingSummary] = useState<InventoryPatchingSummary | null>(null);
   const [applications, setApplications] = useState<InventoryApplication[]>([]);
   const [selectedApplication, setSelectedApplication] = useState<InventoryApplication | null>(null);
   const [records, setRecords] = useState<InventoryRecord[]>([]);
@@ -111,12 +118,14 @@ export default function InventoryPage({ token }: { token: string }) {
     setLoading(true);
     setNotice(null);
     try {
-      const [summaryResult, environmentRows] = await Promise.all([
+      const [summaryResult, environmentRows, patchSummary] = await Promise.all([
         getInventorySummary(token),
         getInventoryEnvironments(token),
+        getInventoryPatchingSummary(token),
       ]);
       setSummaries(summaryResult.categories);
       setEnvironments(environmentRows);
+      setPatchingSummary(patchSummary);
     } catch (error) {
       setNotice({ variant: "error", message: error instanceof Error ? error.message : "Unable to load inventory" });
     } finally {
@@ -407,7 +416,7 @@ export default function InventoryPage({ token }: { token: string }) {
     }
   }
 
-  if (loading && !category) {
+  if (loading && !category && !patchingOpen) {
     return <div className="inventory-loading">Loading DevOps inventory...</div>;
   }
 
@@ -416,32 +425,50 @@ export default function InventoryPage({ token }: { token: string }) {
       <div>
         <span className="eyebrow">DEVOPS ASSET CATALOG</span>
         <h1>Inventory</h1>
-        <p>Application-centric infrastructure and access inventory. Select an application, choose an environment, and retrieve the exact operational details you need.</p>
+        <p>One operational catalog for GTB infrastructure, Microservices database configuration and patching lifecycle. Search once across every inventory source.</p>
       </div>
       <div className="inventory-hero-shield"><ShieldCheck size={30}/><span>DevOps only</span></div>
     </section>
 
     {notice && <div className={`inventory-notice ${notice.variant}`}>{notice.message}</div>}
 
-    {!category && <section className="inventory-category-grid">
-      {(["GTB", "MICROSERVICES"] as InventoryCategory[]).map((item) => {
-        const summary = summaries.find((row) => row.category === item);
-        const Icon = item === "GTB" ? Database : Boxes;
-        return <button className="inventory-category-card" key={item} onClick={() => void openCategory(item)}>
-          <div className="inventory-card-icon"><Icon size={27}/></div>
+    {!category && !patchingOpen && <>
+      <InventoryGlobalSearch token={token}/>
+      <section className="inventory-category-grid inventory-category-grid-three">
+        {(["GTB", "MICROSERVICES"] as InventoryCategory[]).map((item) => {
+          const summary = summaries.find((row) => row.category === item);
+          const Icon = item === "GTB" ? Database : Boxes;
+          return <button className="inventory-category-card" key={item} onClick={() => void openCategory(item)}>
+            <div className="inventory-card-icon"><Icon size={27}/></div>
+            <div className="inventory-category-copy">
+              <span className="eyebrow">{item === "GTB" ? "GLOBAL TRANSACTION BANKING" : "PLATFORM WORKLOADS"}</span>
+              <h2>{categoryTitle(item)}</h2>
+              <p>{item === "GTB" ? "Server, application, database, access and console inventory." : "Group, service, environment and database connection inventory."}</p>
+            </div>
+            <div className="inventory-card-stats">
+              <span><strong>{summary?.application_count ?? 0}</strong> {item === "GTB" ? "Applications" : "Groups"}</span>
+              <span><strong>{summary?.record_count ?? 0}</strong> Records</span>
+              <span><strong>{summary?.environment_count ?? 0}</strong> Active envs</span>
+            </div>
+          </button>;
+        })}
+        <button className="inventory-category-card patching-category-card" onClick={() => setPatchingOpen(true)}>
+          <div className="inventory-card-icon"><Wrench size={27}/></div>
           <div className="inventory-category-copy">
-            <span className="eyebrow">{item === "GTB" ? "GLOBAL TRANSACTION BANKING" : "PLATFORM WORKLOADS"}</span>
-            <h2>{categoryTitle(item)}</h2>
-            <p>{item === "GTB" ? "Server, application, database, access and console inventory." : "H2H, Collections, Native Mobile and Safenet inventory."}</p>
+            <span className="eyebrow">PATCH MANAGEMENT</span>
+            <h2>Patching</h2>
+            <p>Quarterly server and cluster patch scope, scheduling, approvals, CR tracking and historical activity.</p>
           </div>
           <div className="inventory-card-stats">
-            <span><strong>{summary?.application_count ?? 0}</strong> {item === "GTB" ? "Applications" : "Groups"}</span>
-            <span><strong>{summary?.record_count ?? 0}</strong> Records</span>
-            <span><strong>{summary?.environment_count ?? 0}</strong> Active envs</span>
+            <span><strong>{patchingSummary?.total_assets ?? 0}</strong> Assets</span>
+            <span><strong>{patchingSummary?.environment_counts.PROD ?? 0}</strong> Production</span>
+            <span><strong>{patchingSummary?.environment_counts.DR ?? 0}</strong> DR</span>
           </div>
-        </button>;
-      })}
-    </section>}
+        </button>
+      </section>
+    </>}
+
+    {patchingOpen && <PatchingInventory token={token} onBack={() => { setPatchingOpen(false); void loadBase(); }}/>}
 
     {category === "MICROSERVICES" && <MicroservicesInventory
       token={token}
