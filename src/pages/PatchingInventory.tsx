@@ -176,9 +176,7 @@ export default function PatchingInventory({token,onBack}:Props){
     try{
       let saved:InventoryPatchingAsset;
       if(editingAsset){
-        saved=editingAsset.source_type==="GTB"
-          ?editingAsset
-          :await updateInventoryPatchingAsset(editingAsset.id,assetForm,token);
+        saved=await updateInventoryPatchingAsset(editingAsset.id,assetForm,token);
       }else{
         saved=await createInventoryPatchingAsset(assetForm,token);
       }
