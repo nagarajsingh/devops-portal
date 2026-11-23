@@ -4,9 +4,6 @@ from io import BytesIO
 from typing import Any
 
 from fastapi import HTTPException
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill
-
 from .inventory_microservices import list_configurations
 from .inventory_store import _audit, list_records
 from .user_store import session_factory
@@ -52,6 +49,15 @@ def _audit_export(actor: str, action: str, detail: str) -> None:
 
 
 def _workbook_bytes(title: str, headers: list[str], rows: list[list[Any]]) -> bytes:
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill
+    except ModuleNotFoundError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Excel export dependency is unavailable. Rebuild the backend image with backend/requirements.txt.",
+        ) from exc
+
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = title[:31]
