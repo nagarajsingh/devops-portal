@@ -21,7 +21,7 @@ from .monitoring import build_monitoring_summary
 from .request_service import approve_pipeline_request, close_pipeline_request, confirm_existing_build_pipeline, confirm_existing_repository_bootstrap, create_pipeline_request, get_pipeline_request, list_pipeline_requests, process_app_owner_action, provision_remote_kubernetes_request, reject_pipeline_request, update_pipeline_request
 from .user_store import initialize_user_database
 logger=get_logger("api")
-app=FastAPI(title="DevOps Portal API",version="4.7.0")
+app=FastAPI(title="DevOps Portal API",version="4.8.0")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
 app.include_router(deployment_management_router); app.include_router(admin_router); app.include_router(devops_tasks_router); app.include_router(file_placement_router); app.include_router(datasource_router); app.include_router(kubernetes_logs_router); app.include_router(inventory_router)
 @app.on_event("startup")
