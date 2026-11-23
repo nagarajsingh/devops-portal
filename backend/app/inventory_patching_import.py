@@ -134,6 +134,10 @@ def parse_patching_workbook(content: bytes) -> dict[str, Any]:
     mapping: dict[int, str] = {}
 
     for row_number, values in enumerate(sheet.iter_rows(values_only=True), start=1):
+        joined_upper = " ".join(_text(value).upper() for value in values if _text(value))
+        if "STATUS LEGEND" in joined_upper or "ENVIRONMENT COLORS" in joined_upper:
+            break
+
         section = _section_from_row(values)
         if section:
             current_section = section
