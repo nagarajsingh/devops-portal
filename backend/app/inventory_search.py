@@ -54,7 +54,10 @@ def search_inventory(query_text: str, limit: int = 50) -> dict[str, Any]:
                 "hostname": record.hostname or "",
                 "asset_type": record.asset_type or "",
                 "app_name": record.app_name or "",
+                "ssh_username": record.ssh_username or "",
+                "application_username": record.application_username or "",
                 "console_details": record.console_details or "",
+                "notes": record.notes or "",
             }
             for record, app, env in gtb_rows
         ]
