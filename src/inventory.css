@@ -47,3 +47,15 @@
 .inventory-import-preview-table>small{display:block;padding:9px 12px;background:#f8fafc;color:#7f8c99;font-size:9px;border-top:1px solid #e8edf1}
 @media(max-width:1000px){.inventory-import-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:620px){.inventory-import-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.inventory-import-summary>div:not(:first-child){grid-template-columns:1fr}}
+
+
+.ms-inventory{display:flex;flex-direction:column;gap:18px;min-width:0}
+.ms-group-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.ms-group-card{min-height:190px}
+.ms-service-search{max-width:720px}
+.ms-config-table{min-width:1120px}
+.ms-secret-status{display:inline-flex;padding:5px 8px;border-radius:999px;background:#f2f4f6;color:#8d99a4;font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}
+.ms-secret-status.configured{background:#e9f7ef;color:#2b7d4d}
+.ms-inventory .inventory-section-actions{flex-wrap:wrap;justify-content:flex-end}
+.ms-inventory .inventory-detail-block pre{max-height:150px;overflow:auto}
+@media(max-width:1050px){.ms-group-grid{grid-template-columns:1fr}.ms-inventory .inventory-section-actions{justify-content:flex-start}}
