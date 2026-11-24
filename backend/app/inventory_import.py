@@ -306,30 +306,145 @@ _MS_HEADER_ALIASES = {
 }
 
 _MS_REQUIRED_COLUMNS = {"group", "service", "environment"}
+_MS_STATIC_FIELDS = {"group", "service", "environment"}
+_MS_CONNECTION_FIELDS = {
+    "connection_name",
+    "db_url",
+    "db_name",
+    "db_username",
+    "db_password",
+    "notes",
+}
 
 
-def _detect_header_row_with_aliases(sheet, aliases: dict[str, str], required: set[str]) -> tuple[int, dict[int, str]]:
+def _match_microservice_header(value: Any) -> tuple[str | None, str | None]:
+    """Return (field, slot) for Microservices import headers.
+
+    Static fields use slot=None. Database fields use a slot key so repeated
+    column groups in the same Excel row can be expanded into separate DB
+    configurations.
+
+    Supported examples:
+      DB URL / DB NAME / DB USERNAME / DB PASSWORD
+      DB URL 1 / DB NAME 1 / ...
+      DB URL 2 / DB NAME 2 / ...
+      DB2 URL / DB2 NAME / DB2 USER / DB2 PASSWORD
+      DB URL REPORTING / DB NAME REPORTING / ...
+    """
+    normalised = _normalise_header(value)
+    if not normalised:
+        return None, None
+
+    direct = _MS_HEADER_ALIASES.get(normalised)
+    if direct:
+        if direct in _MS_STATIC_FIELDS:
+            return direct, None
+        return direct, "1"
+
+    # Prefix form: DBURL2, DBNAME2, DBUSERNAME2, DBPASSWORD2,
+    # CONNECTION2, NOTES2, or named suffixes such as DBURLREPORTING.
+    prefix_aliases = (
+        ("DATABASEUSERNAME", "db_username"),
+        ("DATABASEPASSWORD", "db_password"),
+        ("DATABASEURL", "db_url"),
+        ("DATABASENAME", "db_name"),
+        ("CONNECTIONNAME", "connection_name"),
+        ("DBCONNECTION", "connection_name"),
+        ("DBUSERNAME", "db_username"),
+        ("DBPASSWORD", "db_password"),
+        ("DBURL", "db_url"),
+        ("DBNAME", "db_name"),
+        ("DBUSER", "db_username"),
+        ("CONNECTION", "connection_name"),
+        ("COMMENTS", "notes"),
+        ("NOTES", "notes"),
+    )
+    for prefix, field in prefix_aliases:
+        if normalised.startswith(prefix) and len(normalised) > len(prefix):
+            suffix = normalised[len(prefix):]
+            if suffix:
+                return field, suffix
+
+    # Infix form: DB2URL, DB2NAME, DB2USERNAME, DB2USER, DB2PASSWORD.
+    match = re.fullmatch(r"DB([A-Z0-9]+)(URL|NAME|USERNAME|USER|PASSWORD)", normalised)
+    if match:
+        slot, suffix = match.groups()
+        field = {
+            "URL": "db_url",
+            "NAME": "db_name",
+            "USERNAME": "db_username",
+            "USER": "db_username",
+            "PASSWORD": "db_password",
+        }[suffix]
+        return field, slot
+
+    return None, None
+
+
+def _detect_microservice_header_row(sheet) -> tuple[int, dict[int, tuple[str, str | None]]]:
     best_row = 0
-    best_mapping: dict[int, str] = {}
-    best_score = 0
-    for row_number, row in enumerate(sheet.iter_rows(min_row=1, max_row=min(sheet.max_row, 20), values_only=True), start=1):
-        mapping: dict[int, str] = {}
+    best_mapping: dict[int, tuple[str, str | None]] = {}
+    best_score = -1
+
+    for row_number, row in enumerate(
+        sheet.iter_rows(min_row=1, max_row=min(sheet.max_row, 20), values_only=True),
+        start=1,
+    ):
+        mapping: dict[int, tuple[str, str | None]] = {}
+        direct_occurrences: dict[str, int] = {}
+
         for index, value in enumerate(row):
-            field = aliases.get(_normalise_header(value))
-            if field:
-                mapping[index] = field
-        score = len(set(mapping.values()))
+            field, slot = _match_microservice_header(value)
+            if not field:
+                continue
+
+            # When identical unnumbered database headers are repeated, assign
+            # occurrence slots consistently: first DB URL -> 1, second -> 2,
+            # and the same for DB NAME / USERNAME / PASSWORD.
+            if field in _MS_CONNECTION_FIELDS and slot == "1":
+                normalised = _normalise_header(value)
+                if normalised in _MS_HEADER_ALIASES:
+                    occurrence = direct_occurrences.get(field, 0) + 1
+                    direct_occurrences[field] = occurrence
+                    slot = str(occurrence)
+
+            mapping[index] = (field, slot)
+
+        static_fields = {field for field, slot in mapping.values() if slot is None}
+        connection_fields = {field for field, slot in mapping.values() if slot is not None}
+        score = (len(static_fields) * 20) + len(connection_fields) + len(mapping)
+
         if score > best_score:
             best_row = row_number
             best_mapping = mapping
             best_score = score
-    missing = required - set(best_mapping.values())
+
+    static_fields = {field for field, slot in best_mapping.values() if slot is None}
+    missing = _MS_REQUIRED_COLUMNS - static_fields
     if not best_row or missing:
         raise HTTPException(
             status_code=400,
-            detail=f"Unable to detect the Microservices inventory header row. Missing: {', '.join(sorted(missing)) or 'unknown'}",
+            detail=(
+                "Unable to detect the Microservices inventory header row. "
+                f"Missing: {', '.join(sorted(missing)) or 'unknown'}"
+            ),
         )
     return best_row, best_mapping
+
+
+def _microservice_slot_sort_key(slot: str) -> tuple[int, Any]:
+    if str(slot).isdigit():
+        return (0, int(slot))
+    return (1, str(slot))
+
+
+def _default_connection_name(slot: str) -> str:
+    cleaned = str(slot or "1").strip().upper()
+    if cleaned in {"", "1", "PRIMARY"}:
+        return "PRIMARY"
+    if cleaned.isdigit():
+        return f"DB{cleaned}"
+    return cleaned[:100]
 
 
 def parse_microservice_workbook(content: bytes) -> dict[str, Any]:
@@ -352,59 +467,145 @@ def parse_microservice_workbook(content: bytes) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"Unable to read Excel workbook: {exc}") from exc
 
     sheet = workbook.active
-    header_row, mapping = _detect_header_row_with_aliases(sheet, _MS_HEADER_ALIASES, _MS_REQUIRED_COLUMNS)
+    header_row, mapping = _detect_microservice_header_row(sheet)
     rows: list[dict[str, Any]] = []
     warnings: list[str] = []
     seen: dict[tuple[str, ...], int] = {}
 
-    for row_number, values in enumerate(sheet.iter_rows(min_row=header_row + 1, values_only=True), start=header_row + 1):
-        record = {
-            "source_row": row_number,
+    for row_number, values in enumerate(
+        sheet.iter_rows(min_row=header_row + 1, values_only=True),
+        start=header_row + 1,
+    ):
+        static_values = {
             "group": "",
             "service": "",
             "environment": "",
-            "connection_name": "PRIMARY",
-            "db_url": "",
-            "db_name": "",
-            "db_username": "",
-            "db_password": "",
-            "notes": "",
         }
-        for column_index, field in mapping.items():
-            if column_index < len(values):
-                record[field] = _cell_text(values[column_index])
+        connection_values: dict[str, dict[str, str]] = {}
 
-        if not any(str(record[key]).strip() for key in ("group", "service", "environment", "db_url", "db_name", "db_username", "notes")):
+        for column_index, (field, slot) in mapping.items():
+            if column_index >= len(values):
+                continue
+            value = _cell_text(values[column_index])
+            if slot is None:
+                static_values[field] = value
+                continue
+            connection_values.setdefault(
+                slot,
+                {
+                    "connection_name": "",
+                    "db_url": "",
+                    "db_name": "",
+                    "db_username": "",
+                    "db_password": "",
+                    "notes": "",
+                },
+            )
+            connection_values[slot][field] = value
+
+        if not any(str(value).strip() for value in static_values.values()) and not any(
+            any(str(value).strip() for value in connection.values())
+            for connection in connection_values.values()
+        ):
             continue
 
-        row_warnings: list[str] = []
-        if not record["group"]:
-            row_warnings.append("Missing GROUP")
-        if not record["service"]:
-            row_warnings.append("Missing SERVICE")
-        if not record["environment"]:
-            row_warnings.append("Missing ENV")
-        if not record["db_url"]:
-            row_warnings.append("DB URL is blank")
-        if not record["db_name"]:
-            row_warnings.append("DB NAME is blank")
-        if not record["db_username"]:
-            row_warnings.append("DB USERNAME is blank")
-        if not record["connection_name"]:
-            record["connection_name"] = "PRIMARY"
+        # If there are no DB-specific columns at all, preserve the old parser
+        # behavior and emit one PRIMARY row so validation can show the blanks.
+        if not connection_values:
+            connection_values["1"] = {
+                "connection_name": "",
+                "db_url": "",
+                "db_name": "",
+                "db_username": "",
+                "db_password": "",
+                "notes": "",
+            }
 
-        signature = (
-            str(record["group"]).strip().upper(),
-            str(record["service"]).strip().lower(),
-            str(record["environment"]).strip().upper(),
-            str(record["connection_name"]).strip().upper(),
-        )
-        seen[signature] = seen.get(signature, 0) + 1
-        record["warnings"] = row_warnings
-        rows.append(record)
-        if len(rows) > MAX_IMPORT_ROWS:
-            workbook.close()
-            raise HTTPException(status_code=413, detail=f"Inventory workbook contains more than {MAX_IMPORT_ROWS} data rows")
+        emitted_for_source_row = 0
+        for slot in sorted(connection_values, key=_microservice_slot_sort_key):
+            connection = connection_values[slot]
+
+            # Ignore completely empty secondary DB blocks. The first block is
+            # retained for backward compatibility and validation warnings.
+            has_connection_data = any(
+                str(connection.get(field) or "").strip()
+                for field in _MS_CONNECTION_FIELDS
+            )
+            if not has_connection_data and slot != "1":
+                continue
+
+            record = {
+                "source_row": row_number,
+                "source_connection": slot,
+                "group": static_values["group"],
+                "service": static_values["service"],
+                "environment": static_values["environment"],
+                "connection_name": (
+                    str(connection.get("connection_name") or "").strip()
+                    or _default_connection_name(slot)
+                ),
+                "db_url": connection.get("db_url", ""),
+                "db_name": connection.get("db_name", ""),
+                "db_username": connection.get("db_username", ""),
+                "db_password": connection.get("db_password", ""),
+                "notes": connection.get("notes", ""),
+            }
+
+            row_warnings: list[str] = []
+            if not record["group"]:
+                row_warnings.append("Missing GROUP")
+            if not record["service"]:
+                row_warnings.append("Missing SERVICE")
+            if not record["environment"]:
+                row_warnings.append("Missing ENV")
+            if not record["db_url"]:
+                row_warnings.append(f"{record['connection_name']}: DB URL is blank")
+            if not record["db_name"]:
+                row_warnings.append(f"{record['connection_name']}: DB NAME is blank")
+            if not record["db_username"]:
+                row_warnings.append(f"{record['connection_name']}: DB USERNAME is blank")
+
+            signature = (
+                str(record["group"]).strip().upper(),
+                str(record["service"]).strip().lower(),
+                str(record["environment"]).strip().upper(),
+                str(record["connection_name"]).strip().upper(),
+            )
+            seen[signature] = seen.get(signature, 0) + 1
+            record["warnings"] = row_warnings
+            rows.append(record)
+            emitted_for_source_row += 1
+
+            if len(rows) > MAX_IMPORT_ROWS:
+                workbook.close()
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Inventory workbook expands to more than {MAX_IMPORT_ROWS} database connections",
+                )
+
+        if emitted_for_source_row == 0 and any(str(value).strip() for value in static_values.values()):
+            record = {
+                "source_row": row_number,
+                "source_connection": "1",
+                "group": static_values["group"],
+                "service": static_values["service"],
+                "environment": static_values["environment"],
+                "connection_name": "PRIMARY",
+                "db_url": "",
+                "db_name": "",
+                "db_username": "",
+                "db_password": "",
+                "notes": "",
+                "warnings": ["No populated database connection block was found"],
+            }
+            signature = (
+                str(record["group"]).strip().upper(),
+                str(record["service"]).strip().lower(),
+                str(record["environment"]).strip().upper(),
+                "PRIMARY",
+            )
+            seen[signature] = seen.get(signature, 0) + 1
+            rows.append(record)
 
     workbook.close()
 
@@ -421,7 +622,9 @@ def parse_microservice_workbook(content: bytes) -> dict[str, Any]:
         if seen.get(signature, 0) > 1:
             record["warnings"].append("Possible duplicate group/service/environment/connection row in workbook")
         for warning in record["warnings"]:
-            warnings.append(f"Row {record['source_row']}: {warning}")
+            warnings.append(
+                f"Row {record['source_row']} / {record['connection_name']}: {warning}"
+            )
 
     return {
         "sheet_name": sheet.title,
