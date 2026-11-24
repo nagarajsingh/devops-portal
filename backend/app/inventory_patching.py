@@ -8,7 +8,7 @@ from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Tex
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .inventory_history import record_changes, record_history
-from .inventory_store import InventoryApplication, InventoryEnvironment, InventoryRecord, _audit
+from .inventory_store import InventoryApplication, InventoryEnvironment, InventoryRecord, _audit, _environment_scope
 from .user_store import Base, session_factory
 
 
@@ -243,6 +243,8 @@ def sync_gtb_record(record_id: int, actor: str = "system") -> None:
             return
         app = db.get(InventoryApplication, record.application_id)
         env = db.get(InventoryEnvironment, record.environment_id)
+        env_scope = _environment_scope(db, record.environment_id, "GTB") if env else None
+        env_name = env_scope.display_name if env_scope else (env.display_name if env else "")
         if not app or app.category != "GTB":
             return
         identifier = (record.ip_address or record.hostname or "").strip()
@@ -259,8 +261,8 @@ def sync_gtb_record(record_id: int, actor: str = "system") -> None:
                 application=app.display_name,
                 application_owner=None,
                 asset_type=record.asset_type or None,
-                environment_name=env.display_name if env else None,
-                environment_class=infer_environment_class(env.display_name if env else ""),
+                environment_name=env_name or None,
+                environment_class=infer_environment_class(env_name),
                 is_active=True,
                 created_by=actor,
                 updated_by=actor,
@@ -274,8 +276,8 @@ def sync_gtb_record(record_id: int, actor: str = "system") -> None:
             row.hostname = record.hostname or None
             row.application = app.display_name
             row.asset_type = record.asset_type or None
-            row.environment_name = env.display_name if env else None
-            row.environment_class = infer_environment_class(env.display_name if env else "")
+            row.environment_name = env_name or None
+            row.environment_class = infer_environment_class(env_name)
             row.is_active = True
             row.updated_by = actor
             row.updated_at = _utcnow()
