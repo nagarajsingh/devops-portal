@@ -81,6 +81,7 @@ class InventoryApplicationPayload(BaseModel):
 
 
 class InventoryEnvironmentPayload(BaseModel):
+    category: str = Field(pattern=r"^(GTB|MICROSERVICES)$")
     code: str = Field(min_length=1, max_length=100)
     display_name: str = Field(default="", max_length=150)
 
@@ -216,10 +217,11 @@ def restore_inventory_application(
 
 @router.get("/environments")
 def inventory_environments(
+    category: str | None = Query(default=None, pattern=r"^(GTB|MICROSERVICES)$"),
     include_inactive: bool = Query(default=False),
     _: UserContext = Depends(require_devops),
 ):
-    return list_environments(include_inactive)
+    return list_environments(category, include_inactive)
 
 
 @router.post("/environments", status_code=201)
@@ -227,7 +229,7 @@ def add_inventory_environment(
     payload: InventoryEnvironmentPayload,
     user: UserContext = Depends(require_devops),
 ):
-    return create_environment(payload.code, payload.display_name, user.username)
+    return create_environment(payload.category, payload.code, payload.display_name, user.username)
 
 
 @router.put("/environments/{environment_id}")
@@ -236,23 +238,25 @@ def edit_inventory_environment(
     payload: InventoryEnvironmentPayload,
     user: UserContext = Depends(require_devops),
 ):
-    return update_environment(environment_id, payload.code, payload.display_name, user.username)
+    return update_environment(environment_id, payload.category, payload.code, payload.display_name, user.username)
 
 
 @router.delete("/environments/{environment_id}")
 def remove_inventory_environment(
     environment_id: int,
+    category: str = Query(pattern=r"^(GTB|MICROSERVICES)$"),
     user: UserContext = Depends(require_devops),
 ):
-    return archive_environment(environment_id, user.username)
+    return archive_environment(environment_id, category, user.username)
 
 
 @router.post("/environments/{environment_id}/restore")
 def restore_inventory_environment(
     environment_id: int,
+    category: str = Query(pattern=r"^(GTB|MICROSERVICES)$"),
     user: UserContext = Depends(require_devops),
 ):
-    return restore_environment(environment_id, user.username)
+    return restore_environment(environment_id, category, user.username)
 
 
 @router.get("/records")
