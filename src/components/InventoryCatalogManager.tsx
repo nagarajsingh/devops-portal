@@ -25,13 +25,14 @@ import {
 import type { InventoryApplication, InventoryEnvironment, InventoryMsGroup, InventoryMsService } from "../types";
 import InventoryHistoryModal from "./InventoryHistoryModal";
 
-type Tab="environment"|"application"|"group"|"service";
+type Tab="gtb_environment"|"ms_environment"|"application"|"group"|"service";
 type EditTarget={kind:Tab;id?:number;code:string;display_name:string;group_id?:number};
 type HistoryTarget={type:string;id:number;name:string};
 
 export default function InventoryCatalogManager({token,onClose,onChanged}:{token:string;onClose:()=>void;onChanged?:()=>void}){
-  const [tab,setTab]=useState<Tab>("environment");
-  const [environments,setEnvironments]=useState<InventoryEnvironment[]>([]);
+  const [tab,setTab]=useState<Tab>("gtb_environment");
+  const [gtbEnvironments,setGtbEnvironments]=useState<InventoryEnvironment[]>([]);
+  const [msEnvironments,setMsEnvironments]=useState<InventoryEnvironment[]>([]);
   const [applications,setApplications]=useState<InventoryApplication[]>([]);
   const [groups,setGroups]=useState<InventoryMsGroup[]>([]);
   const [services,setServices]=useState<InventoryMsService[]>([]);
@@ -43,22 +44,24 @@ export default function InventoryCatalogManager({token,onClose,onChanged}:{token
 
   async function load(){
     const data=await Promise.all([
-      getInventoryEnvironments(token,true),
+      getInventoryEnvironments(token,"GTB",true),
+      getInventoryEnvironments(token,"MICROSERVICES",true),
       getInventoryApplications("GTB",token,true),
       getInventoryMsGroups(token,true),
       getInventoryMsServices(token,undefined,"",true),
     ]);
-    setEnvironments(data[0]);setApplications(data[1]);setGroups(data[2]);setServices(data[3]);
+    setGtbEnvironments(data[0]);setMsEnvironments(data[1]);setApplications(data[2]);setGroups(data[3]);setServices(data[4]);
   }
 
   useEffect(()=>{load().catch(e=>setError(e instanceof Error?e.message:"Unable to load inventory catalog"));},[token]);
 
   const rows=useMemo(()=>{
-    if(tab==="environment")return environments;
+    if(tab==="gtb_environment")return gtbEnvironments;
+    if(tab==="ms_environment")return msEnvironments;
     if(tab==="application")return applications;
     if(tab==="group")return groups;
     return services;
-  },[tab,environments,applications,groups,services]);
+  },[tab,gtbEnvironments,msEnvironments,applications,groups,services]);
 
   function startAdd(){
     setEditing({kind:tab,code:"",display_name:"",group_id:tab==="service"?(groups.find(g=>g.is_active)?.id||0):undefined});
@@ -75,8 +78,9 @@ export default function InventoryCatalogManager({token,onClose,onChanged}:{token
     if(!editing||!editing.code.trim())return;
     setBusy(true);setError("");setNotice("");
     try{
-      if(editing.kind==="environment"){
-        const payload={code:editing.code,display_name:editing.display_name||editing.code};
+      if(editing.kind==="gtb_environment"||editing.kind==="ms_environment"){
+        const category=editing.kind==="gtb_environment"?"GTB":"MICROSERVICES";
+        const payload={category:category as const,code:editing.code,display_name:editing.display_name||editing.code};
         if(editing.id)await updateInventoryEnvironment(editing.id,payload,token);else await createInventoryEnvironment(payload,token);
       }else if(editing.kind==="application"){
         const payload={category:"GTB" as const,code:editing.code,display_name:editing.display_name||editing.code};
@@ -101,7 +105,8 @@ export default function InventoryCatalogManager({token,onClose,onChanged}:{token
     if(!window.confirm("Remove "+row.display_name+" from active inventory? History will be retained."))return;
     setBusy(true);setError("");setNotice("");
     try{
-      if(tab==="environment")await archiveInventoryEnvironment(row.id,token);
+      if(tab==="gtb_environment")await archiveInventoryEnvironment(row.id,"GTB",token);
+      else if(tab==="ms_environment")await archiveInventoryEnvironment(row.id,"MICROSERVICES",token);
       else if(tab==="application")await archiveInventoryApplication(row.id,token);
       else if(tab==="group")await archiveInventoryMsGroup(row.id,token);
       else await archiveInventoryMsService(row.id,token);
@@ -115,7 +120,8 @@ export default function InventoryCatalogManager({token,onClose,onChanged}:{token
   async function restore(row:any){
     setBusy(true);setError("");setNotice("");
     try{
-      if(tab==="environment")await restoreInventoryEnvironment(row.id,token);
+      if(tab==="gtb_environment")await restoreInventoryEnvironment(row.id,"GTB",token);
+      else if(tab==="ms_environment")await restoreInventoryEnvironment(row.id,"MICROSERVICES",token);
       else if(tab==="application")await restoreInventoryApplication(row.id,token);
       else if(tab==="group")await restoreInventoryMsGroup(row.id,token);
       else await restoreInventoryMsService(row.id,token);
@@ -126,7 +132,7 @@ export default function InventoryCatalogManager({token,onClose,onChanged}:{token
     finally{setBusy(false);}
   }
 
-  const historyType=tab==="environment"?"ENVIRONMENT":tab==="application"?"APPLICATION":tab==="group"?"MS_GROUP":"MS_SERVICE";
+  const historyType=tab==="gtb_environment"?"GTB_ENVIRONMENT":tab==="ms_environment"?"MICROSERVICES_ENVIRONMENT":tab==="application"?"APPLICATION":tab==="group"?"MS_GROUP":"MS_SERVICE";
 
   return <div className="inventory-modal-backdrop" onMouseDown={onClose}>
     <article className="inventory-modal inventory-catalog-manager" onMouseDown={e=>e.stopPropagation()}>
@@ -140,8 +146,8 @@ export default function InventoryCatalogManager({token,onClose,onChanged}:{token
       </div>
 
       <div className="inventory-catalog-tabs">
-        {(["environment","application","group","service"] as Tab[]).map(t=><button type="button" key={t} className={tab===t?"active":""} onClick={()=>{setTab(t);setEditing(null);setError("");setNotice("");}}>
-          {t==="environment"?"Environments":t==="application"?"GTB Applications":t==="group"?"Microservices Groups":"Microservices Services"}
+        {(["gtb_environment","ms_environment","application","group","service"] as Tab[]).map(t=><button type="button" key={t} className={tab===t?"active":""} onClick={()=>{setTab(t);setEditing(null);setError("");setNotice("");}}>
+          {t==="gtb_environment"?"GTB Environments":t==="ms_environment"?"Microservices Environments":t==="application"?"GTB Applications":t==="group"?"Microservices Groups":"Microservices Services"}
         </button>)}
       </div>
 
@@ -161,7 +167,7 @@ export default function InventoryCatalogManager({token,onClose,onChanged}:{token
             <td>{row.code}</td>
             {tab==="service"&&<td>{row.group_name}</td>}
             <td><span className={"inventory-master-status "+(row.is_active?"active":"archived")}>{row.is_active?"Active":"Archived"}</span></td>
-            <td>{tab==="environment"?"—":tab==="application"?row.record_count+" records":tab==="group"?row.service_count+" services":row.configuration_count+" configs"}</td>
+            <td>{tab==="gtb_environment"||tab==="ms_environment"?"—":tab==="application"?row.record_count+" records":tab==="group"?row.service_count+" services":row.configuration_count+" configs"}</td>
             <td><small>{new Date(row.updated_at).toLocaleString()}</small></td>
             <td><div className="inventory-master-actions">
               <button type="button" onClick={()=>setHistory({type:historyType,id:row.id,name:row.display_name})}><History size={14}/>History</button>
@@ -172,7 +178,7 @@ export default function InventoryCatalogManager({token,onClose,onChanged}:{token
       </div>
 
       {editing&&<form className="inventory-catalog-editor" onSubmit={save}>
-        <div className="inventory-catalog-editor-heading"><strong>{editing.id?"Edit":"Add"} {editing.kind}</strong><button type="button" onClick={()=>setEditing(null)}><X size={15}/></button></div>
+        <div className="inventory-catalog-editor-heading"><strong>{editing.id?"Edit":"Add"} {editing.kind==="gtb_environment"?"GTB environment":editing.kind==="ms_environment"?"Microservices environment":editing.kind}</strong><button type="button" onClick={()=>setEditing(null)}><X size={15}/></button></div>
         {editing.kind==="service"&&<label>Group<select required value={editing.group_id||0} onChange={e=>setEditing({...editing,group_id:Number(e.target.value)})}><option value={0}>Select group</option>{groups.filter(g=>g.is_active).map(g=><option key={g.id} value={g.id}>{g.display_name}</option>)}</select></label>}
         <label>Code / Name<input required value={editing.code} onChange={e=>setEditing({...editing,code:e.target.value})}/></label>
         <label>Display name<input value={editing.display_name} onChange={e=>setEditing({...editing,display_name:e.target.value})}/></label>
