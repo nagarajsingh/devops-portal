@@ -307,7 +307,7 @@ export default function MicroservicesInventory({token,environments,onBack,onEnvi
         <button className="secondary-button" disabled={!!exportBusy} onClick={()=>void runExport("xlsx")}><Download size={15}/>{exportBusy==="xlsx"?"Exporting...":"Excel"}</button>
         <button className="secondary-button" disabled={!!exportBusy} onClick={()=>void runExport("pdf")}><FileText size={15}/>{exportBusy==="pdf"?"Exporting...":"PDF"}</button>
         {!selectedGroup&&<button className="secondary-button" onClick={beginImport}><FileSpreadsheet size={15}/>Import Excel</button>}
-        <button className="secondary-button" onClick={()=>{setCatalogMode("environment");setCatalogCode("");setCatalogName("");}}><Layers3 size={15}/>Add environment</button>
+        <button className="secondary-button" onClick={()=>{setCatalogMode("environment");setCatalogCode("");setCatalogName("");}}><Layers3 size={15}/>Add Microservices environment</button>
         {!selectedGroup&&<button className="primary-button" onClick={()=>{setCatalogMode("group");setCatalogCode("");setCatalogName("");}}><Plus size={15}/>Add group</button>}
         {selectedGroup&&!selectedService&&<button className="primary-button" onClick={()=>{setCatalogMode("service");setCatalogCode("");setCatalogName("");}}><Plus size={15}/>Add service</button>}
         {selectedService&&<button className="primary-button" onClick={beginCreateConfig}><Plus size={15}/>Add DB configuration</button>}
@@ -359,7 +359,7 @@ export default function MicroservicesInventory({token,environments,onBack,onEnvi
 
     {catalogMode&&<div className="inventory-modal-backdrop" onMouseDown={()=>setCatalogMode(null)}><form className="inventory-modal inventory-catalog-form" onSubmit={saveCatalog} onMouseDown={e=>e.stopPropagation()}>
       <button type="button" className="inventory-modal-close" onClick={()=>setCatalogMode(null)}><X size={18}/></button>
-      <span className="eyebrow">MICROSERVICES CATALOG</span><h2>Add {catalogMode}</h2><p>New catalog entries are immediately available without a code deployment.</p>
+      <span className="eyebrow">MICROSERVICES CATALOG</span><h2>{catalogMode==="environment"?"Add Microservices environment":`Add ${catalogMode}`}</h2><p>New catalog entries are immediately available without a code deployment.</p>
       <label>Code / name<input required autoFocus value={catalogCode} onChange={e=>setCatalogCode(e.target.value)} placeholder={catalogMode==="group"?"Example: PAYMENTS":catalogMode==="service"?"Example: h2h-statement-service":"Example: R2UAT"}/></label>
       <label>Display name <small>(optional)</small><input value={catalogName} onChange={e=>setCatalogName(e.target.value)}/></label>
       <div className="inventory-modal-footer"><button type="button" className="secondary-button" onClick={()=>setCatalogMode(null)}>Cancel</button><button className="primary-button" disabled={catalogBusy}>{catalogBusy?"Adding...":"Add"}</button></div>
