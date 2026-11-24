@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, or_, select
 from sqlalchemy.orm import Mapped, mapped_column
 
+from .inventory_history import record_changes, record_history
 from .inventory_store import InventoryApplication, InventoryEnvironment, InventoryRecord, _audit
 from .user_store import Base, session_factory
 
@@ -124,7 +125,9 @@ def ensure_cycle(code: str, actor: str = "system") -> InventoryPatchCycle:
             return row
         row = InventoryPatchCycle(code=cleaned, quarter=quarter, year=year, is_active=True)
         db.add(row)
+        db.flush()
         _audit(db, None, "PATCH_CYCLE_CREATED", actor, cleaned)
+        record_history(db, entity_type="PATCH_CYCLE", entity_id=row.id, entity_name=cleaned, action="CREATE", actor=actor, field_name="record", new_value={"code": cleaned, "quarter": quarter, "year": year})
         db.commit()
         db.refresh(row)
         return row
@@ -265,6 +268,7 @@ def sync_gtb_record(record_id: int, actor: str = "system") -> None:
             db.add(row)
             db.flush()
             _audit(db, None, "PATCH_ASSET_LINKED_FROM_GTB", actor, f"record={record.id} asset={row.id}")
+            record_history(db, entity_type="PATCH_ASSET", entity_id=row.id, entity_name=row.hostname or row.asset_identifier, action="CREATE", actor=actor, field_name="record", new_value={"source_type": "GTB", "source_id": record.id, "asset_identifier": row.asset_identifier, "hostname": row.hostname, "application": row.application, "asset_type": row.asset_type, "environment_name": row.environment_name, "environment_class": row.environment_class}, source="gtb_sync")
         else:
             row.asset_identifier = identifier
             row.hostname = record.hostname or None
@@ -343,6 +347,7 @@ def create_asset(payload: dict[str, Any], actor: str) -> dict[str, Any]:
         db.add(row)
         db.flush()
         _audit(db, None, "PATCH_ASSET_CREATED", actor, f"asset={row.id}")
+        record_history(db, entity_type="PATCH_ASSET", entity_id=row.id, entity_name=row.hostname or row.asset_identifier, action="CREATE", actor=actor, field_name="record", new_value={"asset_identifier": row.asset_identifier, "hostname": row.hostname, "application": row.application, "application_owner": row.application_owner, "asset_type": row.asset_type, "environment_name": row.environment_name, "environment_class": row.environment_class})
         db.commit()
         db.refresh(row)
         return _asset_view(db, row)
@@ -358,6 +363,7 @@ def update_asset(asset_id: int, payload: dict[str, Any], actor: str) -> dict[str
         hostname = str(payload.get("hostname") or "").strip()
         if not identifier and not hostname:
             raise HTTPException(status_code=400, detail="IP / Cluster Name or hostname is required")
+        old_values = {"asset_identifier": row.asset_identifier, "hostname": row.hostname or "", "application": row.application or "", "application_owner": row.application_owner or "", "asset_type": row.asset_type or "", "environment_name": row.environment_name or "", "environment_class": row.environment_class}
         env_class = str(payload.get("environment_class") or row.environment_class).strip().upper().replace("-", "_")
         if env_class not in ENVIRONMENT_CLASSES:
             raise HTTPException(status_code=400, detail="Environment class must be NON_PROD, PROD or DR")
@@ -370,6 +376,7 @@ def update_asset(asset_id: int, payload: dict[str, Any], actor: str) -> dict[str
         row.environment_class = env_class
         row.updated_by = actor
         row.updated_at = _utcnow()
+        record_changes(db, entity_type="PATCH_ASSET", entity_id=row.id, entity_name=row.hostname or row.asset_identifier, actor=actor, old_values=old_values, new_values={"asset_identifier": row.asset_identifier, "hostname": row.hostname or "", "application": row.application or "", "application_owner": row.application_owner or "", "asset_type": row.asset_type or "", "environment_name": row.environment_name or "", "environment_class": row.environment_class})
         _audit(db, None, "PATCH_ASSET_UPDATED", actor, f"asset={row.id}")
         db.commit()
         db.refresh(row)
@@ -388,6 +395,7 @@ def delete_asset(asset_id: int, actor: str) -> None:
         row.updated_by = actor
         row.updated_at = _utcnow()
         _audit(db, None, "PATCH_ASSET_DELETED", actor, f"asset={row.id}")
+        record_history(db, entity_type="PATCH_ASSET", entity_id=row.id, entity_name=row.hostname or row.asset_identifier, action="ARCHIVE", actor=actor, field_name="is_active", old_value=True, new_value=False)
         db.commit()
 
 
@@ -406,6 +414,7 @@ def upsert_activity(asset_id: int, cycle_id: int, payload: dict[str, Any], actor
                 InventoryPatchActivity.cycle_id == cycle_id,
             )
         )
+        created = row is None
         if not row:
             row = InventoryPatchActivity(
                 patching_asset_id=asset_id,
@@ -414,6 +423,7 @@ def upsert_activity(asset_id: int, cycle_id: int, payload: dict[str, Any], actor
             )
             db.add(row)
             db.flush()
+        old_values = {"previous_patched_date": row.previous_patched_date, "planned_date": row.planned_date, "status": row.status, "app_team_approval": row.app_team_approval or "", "cr_number": row.cr_number or "", "comments": row.comments or "", "patch_role": row.patch_role or ""}
 
         row.previous_patched_date = payload.get("previous_patched_date")
         row.planned_date = payload.get("planned_date")
@@ -424,6 +434,11 @@ def upsert_activity(asset_id: int, cycle_id: int, payload: dict[str, Any], actor
         row.patch_role = str(payload.get("patch_role") or "").strip() or None
         row.updated_by = actor
         row.updated_at = _utcnow()
+        new_values = {"previous_patched_date": row.previous_patched_date, "planned_date": row.planned_date, "status": row.status, "app_team_approval": row.app_team_approval or "", "cr_number": row.cr_number or "", "comments": row.comments or "", "patch_role": row.patch_role or ""}
+        if created:
+            record_history(db, entity_type="PATCH_ACTIVITY", entity_id=row.id, entity_name=f"{asset.hostname or asset.asset_identifier} / {cycle.code}", action="CREATE", actor=actor, field_name="record", new_value=new_values)
+        else:
+            record_changes(db, entity_type="PATCH_ACTIVITY", entity_id=row.id, entity_name=f"{asset.hostname or asset.asset_identifier} / {cycle.code}", actor=actor, old_values=old_values, new_values=new_values)
         _audit(db, None, "PATCH_ACTIVITY_UPDATED", actor, f"asset={asset_id} cycle={cycle.code}")
         db.commit()
         db.refresh(asset)
