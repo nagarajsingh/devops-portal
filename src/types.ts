@@ -326,6 +326,7 @@ export interface InventoryMsConfiguration {
 
 export interface InventoryMsImportPreviewRow {
   source_row:number;
+  source_connection?:string;
   group:string;
   service:string;
   environment:string;
