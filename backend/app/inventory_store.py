@@ -37,6 +37,8 @@ MICROSERVICE_APPLICATIONS = (
     "SAFENET",
 )
 
+ENVIRONMENT_CATEGORIES = {"GTB", "MICROSERVICES"}
+
 DEFAULT_ENVIRONMENTS = (
     "CIT",
     "DEV",
@@ -88,6 +90,103 @@ class InventoryEnvironment(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class InventoryEnvironmentScope(Base):
+    __tablename__ = "inventory_environment_scopes"
+    __table_args__ = (
+        UniqueConstraint("category", "environment_id", name="uq_inventory_environment_scope_environment"),
+        UniqueConstraint("category", "code", name="uq_inventory_environment_scope_code"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    environment_id: Mapped[int] = mapped_column(Integer, ForeignKey("inventory_environments.id", ondelete="CASCADE"), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+def _environment_category(value: str) -> str:
+    category = str(value or "").strip().upper()
+    if category not in ENVIRONMENT_CATEGORIES:
+        raise HTTPException(status_code=400, detail="Environment category must be GTB or MICROSERVICES")
+    return category
+
+
+def _environment_scope(db, environment_id: int, category: str) -> InventoryEnvironmentScope | None:
+    return db.scalar(
+        select(InventoryEnvironmentScope).where(
+            InventoryEnvironmentScope.environment_id == environment_id,
+            InventoryEnvironmentScope.category == _environment_category(category),
+        )
+    )
+
+
+def ensure_environment_scope(
+    db,
+    environment: InventoryEnvironment,
+    category: str,
+    *,
+    code: str | None = None,
+    display_name: str | None = None,
+    sort_order: int | None = None,
+    active: bool = True,
+) -> InventoryEnvironmentScope:
+    category = _environment_category(category)
+    row = _environment_scope(db, environment.id, category)
+    if row:
+        if active and not row.is_active:
+            row.is_active = True
+            row.updated_at = _utcnow()
+        return row
+
+    scope_code = (code or environment.code).strip().upper()
+    duplicate = db.scalar(
+        select(InventoryEnvironmentScope).where(
+            InventoryEnvironmentScope.category == category,
+            InventoryEnvironmentScope.code == scope_code,
+        )
+    )
+    if duplicate:
+        return duplicate
+
+    if sort_order is None:
+        sort_order = db.scalar(
+            select(func.max(InventoryEnvironmentScope.sort_order)).where(
+                InventoryEnvironmentScope.category == category
+            )
+        ) or 0
+        sort_order = int(sort_order) + 10
+
+    row = InventoryEnvironmentScope(
+        environment_id=environment.id,
+        category=category,
+        code=scope_code,
+        display_name=(display_name or environment.display_name or scope_code).strip(),
+        sort_order=int(sort_order),
+        is_active=active,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def find_environment_for_category(db, code: str, category: str) -> tuple[InventoryEnvironment | None, InventoryEnvironmentScope | None]:
+    category = _environment_category(category)
+    cleaned = str(code or "").strip().upper()
+    scope = db.scalar(
+        select(InventoryEnvironmentScope).where(
+            InventoryEnvironmentScope.category == category,
+            InventoryEnvironmentScope.code == cleaned,
+        )
+    )
+    if scope:
+        return db.get(InventoryEnvironment, scope.environment_id), scope
+    return None, None
 
 
 class InventoryRecord(Base):
@@ -189,14 +288,37 @@ def initialize_inventory_database() -> None:
         for index, name in enumerate(DEFAULT_ENVIRONMENTS, start=1):
             row = db.scalar(select(InventoryEnvironment).where(InventoryEnvironment.code == name))
             if not row:
-                db.add(
-                    InventoryEnvironment(
-                        code=name,
-                        display_name=name,
-                        sort_order=index * 10,
-                        is_active=True,
-                    )
+                row = InventoryEnvironment(
+                    code=name,
+                    display_name=name,
+                    sort_order=index * 10,
+                    is_active=True,
                 )
+                db.add(row)
+                db.flush()
+            ensure_environment_scope(
+                db,
+                row,
+                "GTB",
+                code=name,
+                display_name=name,
+                sort_order=index * 10,
+            )
+
+        # Preserve environments already used by GTB records even if they are not
+        # part of the default seed list.
+        for environment_id in db.scalars(
+            select(InventoryRecord.environment_id)
+            .join(InventoryApplication, InventoryApplication.id == InventoryRecord.application_id)
+            .where(
+                InventoryApplication.category == "GTB",
+                InventoryRecord.is_active == 1,
+            )
+            .distinct()
+        ).all():
+            environment = db.get(InventoryEnvironment, int(environment_id))
+            if environment:
+                ensure_environment_scope(db, environment, "GTB")
         db.commit()
 
 
@@ -359,165 +481,221 @@ def restore_application(application_id: int, actor: str) -> dict[str, Any]:
         return _application_view(db, row)
 
 
-def list_environments(include_inactive: bool = False) -> list[dict[str, Any]]:
+def _environment_view(environment: InventoryEnvironment, scope: InventoryEnvironmentScope | None, category: str | None = None) -> dict[str, Any]:
+    return {
+        "id": environment.id,
+        "scope_id": scope.id if scope else None,
+        "category": category or (scope.category if scope else ""),
+        "code": scope.code if scope else environment.code,
+        "display_name": scope.display_name if scope else environment.display_name,
+        "sort_order": scope.sort_order if scope else environment.sort_order,
+        "is_active": scope.is_active if scope else environment.is_active,
+        "created_at": (scope.created_at if scope else environment.created_at).isoformat(),
+        "updated_at": (scope.updated_at if scope else environment.updated_at).isoformat(),
+    }
+
+
+def list_environments(category: str | None = None, include_inactive: bool = False) -> list[dict[str, Any]]:
     factory = session_factory()
     with factory() as db:
-        rows = list(
-            db.scalars(
-                (select(InventoryEnvironment) if include_inactive else select(InventoryEnvironment).where(InventoryEnvironment.is_active == 1))
-                .order_by(InventoryEnvironment.sort_order, InventoryEnvironment.display_name)
+        if category:
+            category = _environment_category(category)
+            query = (
+                select(InventoryEnvironment, InventoryEnvironmentScope)
+                .join(InventoryEnvironmentScope, InventoryEnvironmentScope.environment_id == InventoryEnvironment.id)
+                .where(InventoryEnvironmentScope.category == category)
+            )
+            if not include_inactive:
+                query = query.where(InventoryEnvironmentScope.is_active == 1)
+            rows = db.execute(
+                query.order_by(InventoryEnvironmentScope.sort_order, InventoryEnvironmentScope.display_name)
             ).all()
+            return [_environment_view(environment, scope, category) for environment, scope in rows]
+
+        query = select(InventoryEnvironment)
+        if not include_inactive:
+            query = query.where(InventoryEnvironment.is_active == 1)
+        rows = list(db.scalars(query.order_by(InventoryEnvironment.sort_order, InventoryEnvironment.display_name)).all())
+        return [_environment_view(row, None, None) for row in rows]
+
+
+def create_environment(category: str, code: str, display_name: str, actor: str) -> dict[str, Any]:
+    category = _environment_category(category)
+    code = code.strip().upper()
+    display_name = display_name.strip() or code
+    factory = session_factory()
+    with factory() as db:
+        existing_environment, existing_scope = find_environment_for_category(db, code, category)
+        if existing_scope:
+            if existing_scope.is_active:
+                raise HTTPException(status_code=409, detail=f"{category} environment already exists")
+            raise HTTPException(status_code=409, detail=f"{category} environment is archived. Restore it instead.")
+
+        environment = db.scalar(select(InventoryEnvironment).where(InventoryEnvironment.code == code))
+        if not environment:
+            environment = InventoryEnvironment(
+                code=code,
+                display_name=display_name,
+                sort_order=(db.scalar(select(func.max(InventoryEnvironment.sort_order))) or 0) + 10,
+                is_active=True,
+            )
+            db.add(environment)
+            db.flush()
+
+        scope = ensure_environment_scope(
+            db,
+            environment,
+            category,
+            code=code,
+            display_name=display_name,
+            active=True,
         )
-        return [
-            {
-                "id": row.id,
-                "code": row.code,
-                "display_name": row.display_name,
-                "sort_order": row.sort_order,
-                "is_active": row.is_active,
-                "created_at": row.created_at.isoformat(),
-                "updated_at": row.updated_at.isoformat(),
-            }
-            for row in rows
-        ]
-
-
-def create_environment(code: str, display_name: str, actor: str) -> dict[str, Any]:
-    code = code.strip().upper()
-    display_name = display_name.strip() or code
-    factory = session_factory()
-    with factory() as db:
-        if db.scalar(select(InventoryEnvironment).where(InventoryEnvironment.code == code)):
-            raise HTTPException(status_code=409, detail="Inventory environment already exists")
-        max_order = db.scalar(select(func.max(InventoryEnvironment.sort_order))) or 0
-        row = InventoryEnvironment(code=code, display_name=display_name, sort_order=int(max_order) + 10, is_active=True)
-        db.add(row)
-        db.flush()
-        _audit(db, None, "ENVIRONMENT_CREATED", actor, code)
-        record_history(db, entity_type="ENVIRONMENT", entity_id=row.id, entity_name=display_name, action="CREATE", actor=actor, field_name="record", new_value={"code": code, "display_name": display_name, "sort_order": row.sort_order})
+        record_history(
+            db,
+            entity_type=f"{category}_ENVIRONMENT",
+            entity_id=environment.id,
+            entity_name=display_name,
+            action="CREATE",
+            actor=actor,
+            field_name="record",
+            new_value={"category": category, "code": code, "display_name": display_name},
+        )
+        _audit(db, None, f"{category}_ENVIRONMENT_CREATED", actor, code)
         db.commit()
-        db.refresh(row)
-        return {
-            "id": row.id,
-            "code": row.code,
-            "display_name": row.display_name,
-            "sort_order": row.sort_order,
-            "is_active": row.is_active,
-            "created_at": row.created_at.isoformat(),
-            "updated_at": row.updated_at.isoformat(),
-        }
+        db.refresh(environment)
+        db.refresh(scope)
+        return _environment_view(environment, scope, category)
 
 
-def update_environment(environment_id: int, code: str, display_name: str, actor: str) -> dict[str, Any]:
+def update_environment(environment_id: int, category: str, code: str, display_name: str, actor: str) -> dict[str, Any]:
+    category = _environment_category(category)
     code = code.strip().upper()
     display_name = display_name.strip() or code
     factory = session_factory()
     with factory() as db:
-        row = db.get(InventoryEnvironment, environment_id)
-        if not row:
-            raise HTTPException(status_code=404, detail="Inventory environment was not found")
+        environment = db.get(InventoryEnvironment, environment_id)
+        scope = _environment_scope(db, environment_id, category)
+        if not environment or not scope:
+            raise HTTPException(status_code=404, detail=f"{category} inventory environment was not found")
+
         duplicate = db.scalar(
-            select(InventoryEnvironment).where(
-                InventoryEnvironment.code == code,
-                InventoryEnvironment.id != environment_id,
+            select(InventoryEnvironmentScope).where(
+                InventoryEnvironmentScope.category == category,
+                InventoryEnvironmentScope.code == code,
+                InventoryEnvironmentScope.id != scope.id,
             )
         )
         if duplicate:
-            raise HTTPException(status_code=409, detail="Inventory environment already exists")
-        old_values = {"code": row.code, "display_name": row.display_name}
-        row.code = code
-        row.display_name = display_name
-        row.updated_at = _utcnow()
+            raise HTTPException(status_code=409, detail=f"{category} environment already exists")
+
+        old_values = {"code": scope.code, "display_name": scope.display_name}
+        scope.code = code
+        scope.display_name = display_name
+        scope.updated_at = _utcnow()
         record_changes(
             db,
-            entity_type="ENVIRONMENT",
-            entity_id=row.id,
-            entity_name=row.display_name,
+            entity_type=f"{category}_ENVIRONMENT",
+            entity_id=environment.id,
+            entity_name=scope.display_name,
             actor=actor,
             old_values=old_values,
-            new_values={"code": row.code, "display_name": row.display_name},
+            new_values={"code": scope.code, "display_name": scope.display_name},
         )
-        _audit(db, None, "ENVIRONMENT_UPDATED", actor, code)
+        _audit(db, None, f"{category}_ENVIRONMENT_UPDATED", actor, code)
         db.commit()
-        db.refresh(row)
-        return {
-            "id": row.id,
-            "code": row.code,
-            "display_name": row.display_name,
-            "sort_order": row.sort_order,
-            "is_active": row.is_active,
-            "created_at": row.created_at.isoformat(),
-            "updated_at": row.updated_at.isoformat(),
-        }
+        db.refresh(scope)
+        return _environment_view(environment, scope, category)
 
 
-def archive_environment(environment_id: int, actor: str) -> dict[str, Any]:
-    from .inventory_microservices import InventoryMsConfiguration
-
+def archive_environment(environment_id: int, category: str, actor: str) -> dict[str, Any]:
+    category = _environment_category(category)
     factory = session_factory()
     with factory() as db:
-        row = db.get(InventoryEnvironment, environment_id)
-        if not row:
-            raise HTTPException(status_code=404, detail="Inventory environment was not found")
-        if not row.is_active:
-            return {
-                "id": row.id, "code": row.code, "display_name": row.display_name,
-                "sort_order": row.sort_order, "is_active": row.is_active,
-                "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat(),
-            }
-        record_count = db.scalar(
-            select(func.count()).select_from(InventoryRecord).where(
-                InventoryRecord.environment_id == row.id,
-                InventoryRecord.is_active == 1,
-            )
-        ) or 0
-        configuration_count = db.scalar(
-            select(func.count()).select_from(InventoryMsConfiguration).where(
-                InventoryMsConfiguration.environment_id == row.id,
-                InventoryMsConfiguration.is_active == 1,
-            )
-        ) or 0
-        if record_count or configuration_count:
+        environment = db.get(InventoryEnvironment, environment_id)
+        scope = _environment_scope(db, environment_id, category)
+        if not environment or not scope:
+            raise HTTPException(status_code=404, detail=f"{category} inventory environment was not found")
+        if not scope.is_active:
+            return _environment_view(environment, scope, category)
+
+        if category == "GTB":
+            active_usage = db.scalar(
+                select(func.count()).select_from(InventoryRecord)
+                .join(InventoryApplication, InventoryApplication.id == InventoryRecord.application_id)
+                .where(
+                    InventoryRecord.environment_id == environment.id,
+                    InventoryRecord.is_active == 1,
+                    InventoryApplication.category == "GTB",
+                )
+            ) or 0
+            usage_label = "GTB record"
+        else:
+            from .inventory_microservices import InventoryMsConfiguration
+            active_usage = db.scalar(
+                select(func.count()).select_from(InventoryMsConfiguration).where(
+                    InventoryMsConfiguration.environment_id == environment.id,
+                    InventoryMsConfiguration.is_active == 1,
+                )
+            ) or 0
+            usage_label = "Microservices configuration"
+
+        if active_usage:
             raise HTTPException(
                 status_code=409,
-                detail=f"Environment is still used by {record_count} GTB record(s) and {configuration_count} Microservices configuration(s). Remove or move those items first.",
+                detail=f"{scope.display_name} is still used by {active_usage} active {usage_label}(s). Remove or move those items before removing the environment from {category}.",
             )
-        row.is_active = False
-        row.updated_at = _utcnow()
-        record_history(db, entity_type="ENVIRONMENT", entity_id=row.id, entity_name=row.display_name, action="ARCHIVE", actor=actor, field_name="is_active", old_value=True, new_value=False)
-        _audit(db, None, "ENVIRONMENT_ARCHIVED", actor, row.code)
+
+        scope.is_active = False
+        scope.updated_at = _utcnow()
+        record_history(
+            db,
+            entity_type=f"{category}_ENVIRONMENT",
+            entity_id=environment.id,
+            entity_name=scope.display_name,
+            action="ARCHIVE",
+            actor=actor,
+            field_name="is_active",
+            old_value=True,
+            new_value=False,
+        )
+        _audit(db, None, f"{category}_ENVIRONMENT_ARCHIVED", actor, scope.code)
         db.commit()
-        db.refresh(row)
-        return {
-            "id": row.id, "code": row.code, "display_name": row.display_name,
-            "sort_order": row.sort_order, "is_active": row.is_active,
-            "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat(),
-        }
+        db.refresh(scope)
+        return _environment_view(environment, scope, category)
 
 
-def restore_environment(environment_id: int, actor: str) -> dict[str, Any]:
+def restore_environment(environment_id: int, category: str, actor: str) -> dict[str, Any]:
+    category = _environment_category(category)
     factory = session_factory()
     with factory() as db:
-        row = db.get(InventoryEnvironment, environment_id)
-        if not row:
-            raise HTTPException(status_code=404, detail="Inventory environment was not found")
-        if not row.is_active:
-            row.is_active = True
-            row.updated_at = _utcnow()
-            record_history(db, entity_type="ENVIRONMENT", entity_id=row.id, entity_name=row.display_name, action="RESTORE", actor=actor, field_name="is_active", old_value=False, new_value=True)
-            _audit(db, None, "ENVIRONMENT_RESTORED", actor, row.code)
+        environment = db.get(InventoryEnvironment, environment_id)
+        scope = _environment_scope(db, environment_id, category)
+        if not environment or not scope:
+            raise HTTPException(status_code=404, detail=f"{category} inventory environment was not found")
+        if not scope.is_active:
+            scope.is_active = True
+            scope.updated_at = _utcnow()
+            record_history(
+                db,
+                entity_type=f"{category}_ENVIRONMENT",
+                entity_id=environment.id,
+                entity_name=scope.display_name,
+                action="RESTORE",
+                actor=actor,
+                field_name="is_active",
+                old_value=False,
+                new_value=True,
+            )
+            _audit(db, None, f"{category}_ENVIRONMENT_RESTORED", actor, scope.code)
             db.commit()
-            db.refresh(row)
-        return {
-            "id": row.id, "code": row.code, "display_name": row.display_name,
-            "sort_order": row.sort_order, "is_active": row.is_active,
-            "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat(),
-        }
+            db.refresh(scope)
+        return _environment_view(environment, scope, category)
 
 
 def _record_view(db, row: InventoryRecord) -> dict[str, Any]:
     app = db.get(InventoryApplication, row.application_id)
     env = db.get(InventoryEnvironment, row.environment_id)
+    env_scope = _environment_scope(db, row.environment_id, app.category if app else "GTB") if env else None
     ssh = _credential(db, row.id, "SSH")
     application = _credential(db, row.id, "APPLICATION")
     return {
@@ -527,8 +705,8 @@ def _record_view(db, row: InventoryRecord) -> dict[str, Any]:
         "application_name": app.display_name if app else "",
         "category": app.category if app else "",
         "environment_id": row.environment_id,
-        "environment_code": env.code if env else "",
-        "environment_name": env.display_name if env else "",
+        "environment_code": env_scope.code if env_scope else (env.code if env else ""),
+        "environment_name": env_scope.display_name if env_scope else (env.display_name if env else ""),
         "ip_address": row.ip_address or "",
         "hostname": row.hostname or "",
         "asset_type": row.asset_type or "",
@@ -589,8 +767,9 @@ def _validate_refs(db, application_id: int, environment_id: int) -> None:
     env = db.get(InventoryEnvironment, environment_id)
     if not app or not app.is_active:
         raise HTTPException(status_code=400, detail="Selected inventory application is not active")
-    if not env or not env.is_active:
-        raise HTTPException(status_code=400, detail="Selected inventory environment is not active")
+    env_scope = _environment_scope(db, environment_id, app.category)
+    if not env or not env.is_active or not env_scope or not env_scope.is_active:
+        raise HTTPException(status_code=400, detail=f"Selected environment is not active for {app.category}")
 
 
 def _upsert_credential(db, record_id: int, credential_type: str, password: str | None, actor: str) -> None:
@@ -817,8 +996,10 @@ def import_inventory_rows(rows: list[dict[str, Any]], actor: str) -> dict[str, A
             for row in db.scalars(select(InventoryApplication)).all()
         }
         environment_cache = {
-            row.code.upper(): row
-            for row in db.scalars(select(InventoryEnvironment)).all()
+            scope.code.upper(): db.get(InventoryEnvironment, scope.environment_id)
+            for scope in db.scalars(
+                select(InventoryEnvironmentScope).where(InventoryEnvironmentScope.category == "GTB")
+            ).all()
         }
 
         existing_records = list(
@@ -881,17 +1062,27 @@ def import_inventory_rows(rows: list[dict[str, Any]], actor: str) -> dict[str, A
                     (item.sort_order for item in environment_cache.values()),
                     default=0,
                 )
-                environment = InventoryEnvironment(
+                environment = db.scalar(select(InventoryEnvironment).where(InventoryEnvironment.code == environment_code))
+                if not environment:
+                    environment = InventoryEnvironment(
+                        code=environment_code,
+                        display_name=environment_code,
+                        sort_order=max_order + 10,
+                        is_active=True,
+                    )
+                    db.add(environment)
+                    db.flush()
+                ensure_environment_scope(
+                    db,
+                    environment,
+                    "GTB",
                     code=environment_code,
                     display_name=environment_code,
                     sort_order=max_order + 10,
-                    is_active=True,
                 )
-                db.add(environment)
-                db.flush()
                 environment_cache[environment_code] = environment
                 created_environments.append(environment_code)
-                _audit(db, None, "ENVIRONMENT_CREATED_BY_IMPORT", actor, environment_code)
+                _audit(db, None, "GTB_ENVIRONMENT_CREATED_BY_IMPORT", actor, environment_code)
 
             signature = _record_signature(
                 application.id,
