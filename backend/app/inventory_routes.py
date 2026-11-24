@@ -30,8 +30,11 @@ from .inventory_patching import (
 )
 from .inventory_patching_export import export_patching_excel, export_patching_pdf
 from .inventory_patching_import import commit_patching_workbook, preview_patching_workbook
+from .inventory_history import list_history
 from .inventory_search import search_inventory
 from .inventory_microservices import (
+    archive_group,
+    archive_service,
     create_configuration,
     create_group,
     create_service,
@@ -39,10 +42,16 @@ from .inventory_microservices import (
     list_configurations,
     list_groups,
     list_services,
+    restore_group,
+    restore_service,
     reveal_configuration_password,
     update_configuration,
+    update_group,
+    update_service,
 )
 from .inventory_store import (
+    archive_application,
+    archive_environment,
     create_application,
     create_environment,
     create_record,
@@ -52,8 +61,12 @@ from .inventory_store import (
     list_audit,
     list_environments,
     list_records,
+    restore_application,
+    restore_environment,
     reveal_credential,
     summary,
+    update_application,
+    update_environment,
     update_record,
 )
 from .models import UserContext
@@ -162,9 +175,10 @@ def inventory_summary(_: UserContext = Depends(require_devops)):
 @router.get("/applications")
 def inventory_applications(
     category: str | None = Query(default=None),
+    include_inactive: bool = Query(default=False),
     _: UserContext = Depends(require_devops),
 ):
-    return list_applications(category)
+    return list_applications(category, include_inactive)
 
 
 @router.post("/applications", status_code=201)
@@ -175,9 +189,37 @@ def add_inventory_application(
     return create_application(payload.category, payload.code, payload.display_name, user.username)
 
 
+@router.put("/applications/{application_id}")
+def edit_inventory_application(
+    application_id: int,
+    payload: InventoryApplicationPayload,
+    user: UserContext = Depends(require_devops),
+):
+    return update_application(application_id, payload.category, payload.code, payload.display_name, user.username)
+
+
+@router.delete("/applications/{application_id}")
+def remove_inventory_application(
+    application_id: int,
+    user: UserContext = Depends(require_devops),
+):
+    return archive_application(application_id, user.username)
+
+
+@router.post("/applications/{application_id}/restore")
+def restore_inventory_application(
+    application_id: int,
+    user: UserContext = Depends(require_devops),
+):
+    return restore_application(application_id, user.username)
+
+
 @router.get("/environments")
-def inventory_environments(_: UserContext = Depends(require_devops)):
-    return list_environments()
+def inventory_environments(
+    include_inactive: bool = Query(default=False),
+    _: UserContext = Depends(require_devops),
+):
+    return list_environments(include_inactive)
 
 
 @router.post("/environments", status_code=201)
@@ -186,6 +228,31 @@ def add_inventory_environment(
     user: UserContext = Depends(require_devops),
 ):
     return create_environment(payload.code, payload.display_name, user.username)
+
+
+@router.put("/environments/{environment_id}")
+def edit_inventory_environment(
+    environment_id: int,
+    payload: InventoryEnvironmentPayload,
+    user: UserContext = Depends(require_devops),
+):
+    return update_environment(environment_id, payload.code, payload.display_name, user.username)
+
+
+@router.delete("/environments/{environment_id}")
+def remove_inventory_environment(
+    environment_id: int,
+    user: UserContext = Depends(require_devops),
+):
+    return archive_environment(environment_id, user.username)
+
+
+@router.post("/environments/{environment_id}/restore")
+def restore_inventory_environment(
+    environment_id: int,
+    user: UserContext = Depends(require_devops),
+):
+    return restore_environment(environment_id, user.username)
 
 
 @router.get("/records")
@@ -246,6 +313,26 @@ def inventory_audit(
     return list_audit(limit)
 
 
+@router.get("/history")
+def inventory_history(
+    entity_type: str = Query(default="", max_length=80),
+    entity_id: int | None = Query(default=None, ge=1),
+    actor: str = Query(default="", max_length=255),
+    action: str = Query(default="", max_length=40),
+    q: str = Query(default="", max_length=255),
+    limit: int = Query(default=300, ge=1, le=1000),
+    _: UserContext = Depends(require_devops),
+):
+    return list_history(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        actor=actor,
+        action=action,
+        query_text=q,
+        limit=limit,
+    )
+
+
 async def _read_inventory_upload(upload: UploadFile) -> bytes:
     filename = (upload.filename or "").strip()
     if not filename.lower().endswith(".xlsx"):
@@ -273,8 +360,11 @@ async def commit_inventory_import(
     return commit_inventory_workbook(content, user.username)
 
 @router.get("/microservices/groups")
-def microservice_groups(_: UserContext = Depends(require_devops)):
-    return list_groups()
+def microservice_groups(
+    include_inactive: bool = Query(default=False),
+    _: UserContext = Depends(require_devops),
+):
+    return list_groups(include_inactive)
 
 
 @router.post("/microservices/groups", status_code=201)
@@ -285,13 +375,39 @@ def add_microservice_group(
     return create_group(payload.code, payload.display_name, user.username)
 
 
+@router.put("/microservices/groups/{group_id}")
+def edit_microservice_group(
+    group_id: int,
+    payload: InventoryMsGroupPayload,
+    user: UserContext = Depends(require_devops),
+):
+    return update_group(group_id, payload.code, payload.display_name, user.username)
+
+
+@router.delete("/microservices/groups/{group_id}")
+def remove_microservice_group(
+    group_id: int,
+    user: UserContext = Depends(require_devops),
+):
+    return archive_group(group_id, user.username)
+
+
+@router.post("/microservices/groups/{group_id}/restore")
+def restore_microservice_group(
+    group_id: int,
+    user: UserContext = Depends(require_devops),
+):
+    return restore_group(group_id, user.username)
+
+
 @router.get("/microservices/services")
 def microservice_services(
     group_id: int | None = Query(default=None, ge=1),
     q: str = Query(default="", max_length=255),
+    include_inactive: bool = Query(default=False),
     _: UserContext = Depends(require_devops),
 ):
-    return list_services(group_id, q)
+    return list_services(group_id, q, include_inactive)
 
 
 @router.post("/microservices/services", status_code=201)
@@ -300,6 +416,31 @@ def add_microservice_service(
     user: UserContext = Depends(require_devops),
 ):
     return create_service(payload.group_id, payload.code, payload.display_name, user.username)
+
+
+@router.put("/microservices/services/{service_id}")
+def edit_microservice_service(
+    service_id: int,
+    payload: InventoryMsServicePayload,
+    user: UserContext = Depends(require_devops),
+):
+    return update_service(service_id, payload.group_id, payload.code, payload.display_name, user.username)
+
+
+@router.delete("/microservices/services/{service_id}")
+def remove_microservice_service(
+    service_id: int,
+    user: UserContext = Depends(require_devops),
+):
+    return archive_service(service_id, user.username)
+
+
+@router.post("/microservices/services/{service_id}/restore")
+def restore_microservice_service(
+    service_id: int,
+    user: UserContext = Depends(require_devops),
+):
+    return restore_service(service_id, user.username)
 
 
 @router.get("/microservices/configurations")
