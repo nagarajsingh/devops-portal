@@ -9,6 +9,7 @@ import {
   EyeOff,
   FileSpreadsheet,
   FileText,
+  History,
   Layers3,
   Pencil,
   Plus,
@@ -36,6 +37,7 @@ import {
   updateInventoryMsConfiguration,
   type InventoryMsConfigurationInput,
 } from "../services/api";
+import InventoryHistoryModal from "../components/InventoryHistoryModal";
 import type {
   InventoryEnvironment,
   InventoryMsConfiguration,
@@ -92,6 +94,7 @@ export default function MicroservicesInventory({token,environments,onBack,onEnvi
   const [configBusy,setConfigBusy]=useState(false);
 
   const [detail,setDetail]=useState<InventoryMsConfiguration|null>(null);
+  const [historyDetail,setHistoryDetail]=useState<InventoryMsConfiguration|null>(null);
   const [revealedPassword,setRevealedPassword]=useState("");
   const [revealBusy,setRevealBusy]=useState(false);
 
@@ -385,8 +388,10 @@ export default function MicroservicesInventory({token,environments,onBack,onEnvi
       <section className="inventory-secret-section"><h3><ShieldCheck size={16}/>Database credential</h3><div className="inventory-secret-row"><span>Password</span><code>{revealedPassword||(detail.db_password_configured?"••••••••••••":"Not configured")}</code>{detail.db_password_configured&&<button onClick={()=>void revealPassword()}>{revealedPassword?<EyeOff size={14}/>:<Eye size={14}/>} {revealBusy?"Loading...":revealedPassword?"Hide":"Reveal"}</button>}</div>{revealedPassword&&<small className="inventory-secret-warning">Automatically hidden after 30 seconds. Reveal is audit logged.</small>}</section>
       <section className="inventory-detail-block"><span>Notes</span><p>{detail.notes||"—"}</p></section>
       <div className="inventory-detail-meta"><span>Updated by <strong>{detail.updated_by}</strong></span><span>{formatDate(detail.updated_at)}</span></div>
-      <div className="inventory-modal-footer"><button className="danger-button" onClick={()=>void removeConfig(detail)}><Trash2 size={14}/>Remove</button><button className="primary-button" onClick={()=>beginEditConfig(detail)}><Pencil size={14}/>Edit</button></div>
+      <div className="inventory-modal-footer"><button className="secondary-button" onClick={()=>setHistoryDetail(detail)}><History size={14}/>History</button><button className="danger-button" onClick={()=>void removeConfig(detail)}><Trash2 size={14}/>Remove</button><button className="primary-button" onClick={()=>beginEditConfig(detail)}><Pencil size={14}/>Edit</button></div>
     </article></div>}
+
+    {historyDetail&&<InventoryHistoryModal token={token} entityType="MS_CONFIGURATION" entityId={historyDetail.id} entityName={historyDetail.service_name+" / "+historyDetail.environment_name+" / "+historyDetail.connection_name} onClose={()=>setHistoryDetail(null)}/>}
 
     {importOpen&&<div className="inventory-modal-backdrop" onMouseDown={()=>!importBusy&&setImportOpen(false)}><form className="inventory-modal inventory-import-modal" onSubmit={previewImport} onMouseDown={e=>e.stopPropagation()}>
       <button type="button" className="inventory-modal-close" onClick={()=>setImportOpen(false)}><X size={18}/></button>
