@@ -97,6 +97,8 @@ export default function MicroservicesInventory({token,environments,onBack,onEnvi
   const [historyDetail,setHistoryDetail]=useState<InventoryMsConfiguration|null>(null);
   const [revealedPassword,setRevealedPassword]=useState("");
   const [revealBusy,setRevealBusy]=useState(false);
+  const [tablePasswords,setTablePasswords]=useState<Record<number,string>>({});
+  const [tableRevealBusy,setTableRevealBusy]=useState<number|null>(null);
 
   const [importOpen,setImportOpen]=useState(false);
   const [importFile,setImportFile]=useState<File|null>(null);
@@ -117,6 +119,7 @@ export default function MicroservicesInventory({token,environments,onBack,onEnvi
     setSelectedGroup(group);
     setSelectedService(null);
     setConfigurations([]);
+    setTablePasswords({});
     setEnvironmentId(0);
     setSearch("");
     setLoading(true);
@@ -129,6 +132,7 @@ export default function MicroservicesInventory({token,environments,onBack,onEnvi
     setSelectedService(service);
     setEnvironmentId(0);
     setSearch("");
+    setTablePasswords({});
     setLoading(true);
     try{setConfigurations(await getInventoryMsConfigurations(token,{service_id:service.id}));}
     catch(error){setNotice({variant:"error",message:error instanceof Error?error.message:"Unable to load service configurations"});}
@@ -249,6 +253,35 @@ export default function MicroservicesInventory({token,environments,onBack,onEnvi
     finally{setRevealBusy(false);}
   }
 
+  async function toggleTablePassword(item:InventoryMsConfiguration){
+    if(tablePasswords[item.id]){
+      setTablePasswords(current=>{
+        const next={...current};
+        delete next[item.id];
+        return next;
+      });
+      return;
+    }
+    if(!item.db_password_configured)return;
+    setTableRevealBusy(item.id);
+    try{
+      const result=await revealInventoryMsPassword(item.id,token);
+      setTablePasswords(current=>({...current,[item.id]:result.password}));
+      window.setTimeout(()=>{
+        setTablePasswords(current=>{
+          if(!current[item.id])return current;
+          const next={...current};
+          delete next[item.id];
+          return next;
+        });
+      },30000);
+    }catch(error){
+      setNotice({variant:"error",message:error instanceof Error?error.message:"Unable to reveal database password"});
+    }finally{
+      setTableRevealBusy(current=>current===item.id?null:current);
+    }
+  }
+
   function beginImport(){
     setImportOpen(true);setImportFile(null);setImportPreview(null);setNotice(null);
   }
@@ -288,7 +321,7 @@ export default function MicroservicesInventory({token,environments,onBack,onEnvi
   }
 
   function back(){
-    if(selectedService){setSelectedService(null);setConfigurations([]);setEnvironmentId(0);setSearch("");return;}
+    if(selectedService){setSelectedService(null);setConfigurations([]);setTablePasswords({});setEnvironmentId(0);setSearch("");return;}
     if(selectedGroup){setSelectedGroup(null);setServices([]);return;}
     onBack();
   }
@@ -347,9 +380,14 @@ export default function MicroservicesInventory({token,environments,onBack,onEnvi
           <tbody>
             {filteredConfigs.map(item=><tr key={item.id}>
               <td><span className="inventory-env-badge">{item.environment_name}</span></td><td><strong>{item.connection_name}</strong></td><td>{item.db_url||"—"}</td><td>{item.db_name||"—"}</td><td>{item.db_username||"—"}</td>
-              <td><span className={item.db_password_configured?"ms-secret-status configured":"ms-secret-status"}>{item.db_password_configured?"Configured":"Not configured"}</span></td>
+              <td><div className="inventory-inline-secret">
+  <code>{tablePasswords[item.id]||(item.db_password_configured?"••••••••":"Not configured")}</code>
+  {item.db_password_configured&&<button type="button" title={tablePasswords[item.id]?"Hide password":"Reveal password"} aria-label={tablePasswords[item.id]?"Hide password":"Reveal password"} disabled={tableRevealBusy===item.id} onClick={()=>void toggleTablePassword(item)}>
+    {tableRevealBusy===item.id?<RefreshCw size={15} className="spin"/>:tablePasswords[item.id]?<EyeOff size={15}/>:<Eye size={15}/>}
+  </button>}
+</div></td>
               <td><small>{formatDate(item.updated_at)}</small></td>
-              <td><button className="inventory-row-action" onClick={()=>{setDetail(item);setRevealedPassword("");}}><Eye size={15}/>View</button></td>
+              <td><button className="inventory-row-action" onClick={()=>{setDetail(item);setRevealedPassword("");}}><Database size={15}/>View</button></td>
             </tr>)}
             {filteredConfigs.length===0&&<tr><td colSpan={8}><div className="inventory-empty">No database configurations for this selection.</div></td></tr>}
           </tbody>
