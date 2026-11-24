@@ -9,6 +9,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, Uni
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .config import CREDENTIAL_ENCRYPTION_KEY
+from .inventory_history import record_changes, record_history
 from .user_store import Base, session_factory
 
 
@@ -245,10 +246,12 @@ def _application_view(db, row: InventoryApplication) -> dict[str, Any]:
     }
 
 
-def list_applications(category: str | None = None) -> list[dict[str, Any]]:
+def list_applications(category: str | None = None, include_inactive: bool = False) -> list[dict[str, Any]]:
     factory = session_factory()
     with factory() as db:
-        query = select(InventoryApplication).where(InventoryApplication.is_active == 1)
+        query = select(InventoryApplication)
+        if not include_inactive:
+            query = query.where(InventoryApplication.is_active == 1)
         if category:
             query = query.where(InventoryApplication.category == category.strip().upper())
         rows = list(db.scalars(query.order_by(InventoryApplication.category, InventoryApplication.display_name)).all())
@@ -273,19 +276,95 @@ def create_application(category: str, code: str, display_name: str, actor: str) 
             raise HTTPException(status_code=409, detail="Inventory application already exists")
         row = InventoryApplication(category=category, code=code, display_name=display_name, is_active=True)
         db.add(row)
+        db.flush()
         _audit(db, None, "APPLICATION_CREATED", actor, f"{category}/{code}")
+        record_history(db, entity_type="APPLICATION", entity_id=row.id, entity_name=display_name, action="CREATE", actor=actor, field_name="record", new_value={"category": category, "code": code, "display_name": display_name})
         db.commit()
         db.refresh(row)
         return _application_view(db, row)
 
 
-def list_environments() -> list[dict[str, Any]]:
+def update_application(application_id: int, category: str, code: str, display_name: str, actor: str) -> dict[str, Any]:
+    category = category.strip().upper()
+    code = code.strip().upper()
+    display_name = display_name.strip() or code
+    if category not in {"GTB", "MICROSERVICES"}:
+        raise HTTPException(status_code=400, detail="Category must be GTB or MICROSERVICES")
+    factory = session_factory()
+    with factory() as db:
+        row = db.get(InventoryApplication, application_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Inventory application was not found")
+        duplicate = db.scalar(
+            select(InventoryApplication).where(
+                InventoryApplication.category == category,
+                InventoryApplication.code == code,
+                InventoryApplication.id != application_id,
+            )
+        )
+        if duplicate:
+            raise HTTPException(status_code=409, detail="Inventory application already exists")
+        old_values = {"category": row.category, "code": row.code, "display_name": row.display_name}
+        row.category = category
+        row.code = code
+        row.display_name = display_name
+        row.updated_at = _utcnow()
+        new_values = {"category": row.category, "code": row.code, "display_name": row.display_name}
+        record_changes(db, entity_type="APPLICATION", entity_id=row.id, entity_name=row.display_name, actor=actor, old_values=old_values, new_values=new_values)
+        _audit(db, None, "APPLICATION_UPDATED", actor, f"{category}/{code}")
+        db.commit()
+        db.refresh(row)
+        return _application_view(db, row)
+
+
+def archive_application(application_id: int, actor: str) -> dict[str, Any]:
+    factory = session_factory()
+    with factory() as db:
+        row = db.get(InventoryApplication, application_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Inventory application was not found")
+        if not row.is_active:
+            return _application_view(db, row)
+        active_records = db.scalar(
+            select(func.count()).select_from(InventoryRecord).where(
+                InventoryRecord.application_id == row.id,
+                InventoryRecord.is_active == 1,
+            )
+        ) or 0
+        if active_records:
+            raise HTTPException(status_code=409, detail=f"Application has {active_records} active inventory record(s). Remove or move them before archiving the application.")
+        row.is_active = False
+        row.updated_at = _utcnow()
+        record_history(db, entity_type="APPLICATION", entity_id=row.id, entity_name=row.display_name, action="ARCHIVE", actor=actor, field_name="is_active", old_value=True, new_value=False)
+        _audit(db, None, "APPLICATION_ARCHIVED", actor, f"{row.category}/{row.code}")
+        db.commit()
+        db.refresh(row)
+        return _application_view(db, row)
+
+
+def restore_application(application_id: int, actor: str) -> dict[str, Any]:
+    factory = session_factory()
+    with factory() as db:
+        row = db.get(InventoryApplication, application_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Inventory application was not found")
+        if row.is_active:
+            return _application_view(db, row)
+        row.is_active = True
+        row.updated_at = _utcnow()
+        record_history(db, entity_type="APPLICATION", entity_id=row.id, entity_name=row.display_name, action="RESTORE", actor=actor, field_name="is_active", old_value=False, new_value=True)
+        _audit(db, None, "APPLICATION_RESTORED", actor, f"{row.category}/{row.code}")
+        db.commit()
+        db.refresh(row)
+        return _application_view(db, row)
+
+
+def list_environments(include_inactive: bool = False) -> list[dict[str, Any]]:
     factory = session_factory()
     with factory() as db:
         rows = list(
             db.scalars(
-                select(InventoryEnvironment)
-                .where(InventoryEnvironment.is_active == 1)
+                (select(InventoryEnvironment) if include_inactive else select(InventoryEnvironment).where(InventoryEnvironment.is_active == 1))
                 .order_by(InventoryEnvironment.sort_order, InventoryEnvironment.display_name)
             ).all()
         )
@@ -313,7 +392,9 @@ def create_environment(code: str, display_name: str, actor: str) -> dict[str, An
         max_order = db.scalar(select(func.max(InventoryEnvironment.sort_order))) or 0
         row = InventoryEnvironment(code=code, display_name=display_name, sort_order=int(max_order) + 10, is_active=True)
         db.add(row)
+        db.flush()
         _audit(db, None, "ENVIRONMENT_CREATED", actor, code)
+        record_history(db, entity_type="ENVIRONMENT", entity_id=row.id, entity_name=display_name, action="CREATE", actor=actor, field_name="record", new_value={"code": code, "display_name": display_name, "sort_order": row.sort_order})
         db.commit()
         db.refresh(row)
         return {
@@ -324,6 +405,113 @@ def create_environment(code: str, display_name: str, actor: str) -> dict[str, An
             "is_active": row.is_active,
             "created_at": row.created_at.isoformat(),
             "updated_at": row.updated_at.isoformat(),
+        }
+
+
+def update_environment(environment_id: int, code: str, display_name: str, actor: str) -> dict[str, Any]:
+    code = code.strip().upper()
+    display_name = display_name.strip() or code
+    factory = session_factory()
+    with factory() as db:
+        row = db.get(InventoryEnvironment, environment_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Inventory environment was not found")
+        duplicate = db.scalar(
+            select(InventoryEnvironment).where(
+                InventoryEnvironment.code == code,
+                InventoryEnvironment.id != environment_id,
+            )
+        )
+        if duplicate:
+            raise HTTPException(status_code=409, detail="Inventory environment already exists")
+        old_values = {"code": row.code, "display_name": row.display_name}
+        row.code = code
+        row.display_name = display_name
+        row.updated_at = _utcnow()
+        record_changes(
+            db,
+            entity_type="ENVIRONMENT",
+            entity_id=row.id,
+            entity_name=row.display_name,
+            actor=actor,
+            old_values=old_values,
+            new_values={"code": row.code, "display_name": row.display_name},
+        )
+        _audit(db, None, "ENVIRONMENT_UPDATED", actor, code)
+        db.commit()
+        db.refresh(row)
+        return {
+            "id": row.id,
+            "code": row.code,
+            "display_name": row.display_name,
+            "sort_order": row.sort_order,
+            "is_active": row.is_active,
+            "created_at": row.created_at.isoformat(),
+            "updated_at": row.updated_at.isoformat(),
+        }
+
+
+def archive_environment(environment_id: int, actor: str) -> dict[str, Any]:
+    from .inventory_microservices import InventoryMsConfiguration
+
+    factory = session_factory()
+    with factory() as db:
+        row = db.get(InventoryEnvironment, environment_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Inventory environment was not found")
+        if not row.is_active:
+            return {
+                "id": row.id, "code": row.code, "display_name": row.display_name,
+                "sort_order": row.sort_order, "is_active": row.is_active,
+                "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat(),
+            }
+        record_count = db.scalar(
+            select(func.count()).select_from(InventoryRecord).where(
+                InventoryRecord.environment_id == row.id,
+                InventoryRecord.is_active == 1,
+            )
+        ) or 0
+        configuration_count = db.scalar(
+            select(func.count()).select_from(InventoryMsConfiguration).where(
+                InventoryMsConfiguration.environment_id == row.id,
+                InventoryMsConfiguration.is_active == 1,
+            )
+        ) or 0
+        if record_count or configuration_count:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Environment is still used by {record_count} GTB record(s) and {configuration_count} Microservices configuration(s). Remove or move those items first.",
+            )
+        row.is_active = False
+        row.updated_at = _utcnow()
+        record_history(db, entity_type="ENVIRONMENT", entity_id=row.id, entity_name=row.display_name, action="ARCHIVE", actor=actor, field_name="is_active", old_value=True, new_value=False)
+        _audit(db, None, "ENVIRONMENT_ARCHIVED", actor, row.code)
+        db.commit()
+        db.refresh(row)
+        return {
+            "id": row.id, "code": row.code, "display_name": row.display_name,
+            "sort_order": row.sort_order, "is_active": row.is_active,
+            "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat(),
+        }
+
+
+def restore_environment(environment_id: int, actor: str) -> dict[str, Any]:
+    factory = session_factory()
+    with factory() as db:
+        row = db.get(InventoryEnvironment, environment_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Inventory environment was not found")
+        if not row.is_active:
+            row.is_active = True
+            row.updated_at = _utcnow()
+            record_history(db, entity_type="ENVIRONMENT", entity_id=row.id, entity_name=row.display_name, action="RESTORE", actor=actor, field_name="is_active", old_value=False, new_value=True)
+            _audit(db, None, "ENVIRONMENT_RESTORED", actor, row.code)
+            db.commit()
+            db.refresh(row)
+        return {
+            "id": row.id, "code": row.code, "display_name": row.display_name,
+            "sort_order": row.sort_order, "is_active": row.is_active,
+            "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat(),
         }
 
 
@@ -450,6 +638,7 @@ def create_record(payload: dict[str, Any], actor: str) -> dict[str, Any]:
         _upsert_credential(db, row.id, "SSH", payload.get("ssh_password"), actor)
         _upsert_credential(db, row.id, "APPLICATION", payload.get("application_password"), actor)
         _audit(db, row.id, "RECORD_CREATED", actor, f"record={row.id}")
+        record_history(db, entity_type="GTB_RECORD", entity_id=row.id, entity_name=row.hostname or row.ip_address or f"Record {row.id}", action="CREATE", actor=actor, field_name="record", new_value={"application_id": row.application_id, "environment_id": row.environment_id, "ip_address": row.ip_address, "hostname": row.hostname, "asset_type": row.asset_type, "app_name": row.app_name, "ssh_username": row.ssh_username, "application_username": row.application_username, "console_details": row.console_details, "notes": row.notes})
         db.commit()
         db.refresh(row)
         return _record_view(db, row)
@@ -462,6 +651,7 @@ def update_record(record_id: int, payload: dict[str, Any], actor: str) -> dict[s
         if not row or not row.is_active:
             raise HTTPException(status_code=404, detail="Inventory record was not found")
         _validate_refs(db, int(payload["application_id"]), int(payload["environment_id"]))
+        old_values = {"application_id": row.application_id, "environment_id": row.environment_id, "ip_address": row.ip_address or "", "hostname": row.hostname or "", "asset_type": row.asset_type or "", "app_name": row.app_name or "", "ssh_username": row.ssh_username or "", "application_username": row.application_username or "", "console_details": row.console_details or "", "notes": row.notes or ""}
         row.application_id = int(payload["application_id"])
         row.environment_id = int(payload["environment_id"])
         row.ip_address = (payload.get("ip_address") or "").strip() or None
@@ -476,6 +666,12 @@ def update_record(record_id: int, payload: dict[str, Any], actor: str) -> dict[s
         row.updated_at = _utcnow()
         _upsert_credential(db, row.id, "SSH", payload.get("ssh_password"), actor)
         _upsert_credential(db, row.id, "APPLICATION", payload.get("application_password"), actor)
+        new_values = {"application_id": row.application_id, "environment_id": row.environment_id, "ip_address": row.ip_address or "", "hostname": row.hostname or "", "asset_type": row.asset_type or "", "app_name": row.app_name or "", "ssh_username": row.ssh_username or "", "application_username": row.application_username or "", "console_details": row.console_details or "", "notes": row.notes or ""}
+        record_changes(db, entity_type="GTB_RECORD", entity_id=row.id, entity_name=row.hostname or row.ip_address or f"Record {row.id}", actor=actor, old_values=old_values, new_values=new_values)
+        if payload.get("ssh_password"):
+            record_history(db, entity_type="GTB_RECORD", entity_id=row.id, entity_name=row.hostname or row.ip_address or f"Record {row.id}", action="UPDATE", actor=actor, field_name="ssh_password", old_value="[REDACTED]", new_value="[UPDATED]")
+        if payload.get("application_password"):
+            record_history(db, entity_type="GTB_RECORD", entity_id=row.id, entity_name=row.hostname or row.ip_address or f"Record {row.id}", action="UPDATE", actor=actor, field_name="application_password", old_value="[REDACTED]", new_value="[UPDATED]")
         _audit(db, row.id, "RECORD_UPDATED", actor, f"record={row.id}")
         db.commit()
         db.refresh(row)
@@ -492,6 +688,7 @@ def delete_record(record_id: int, actor: str) -> None:
         row.updated_by = actor
         row.updated_at = _utcnow()
         _audit(db, row.id, "RECORD_DELETED", actor, f"record={row.id}")
+        record_history(db, entity_type="GTB_RECORD", entity_id=row.id, entity_name=row.hostname or row.ip_address or f"Record {row.id}", action="ARCHIVE", actor=actor, field_name="is_active", old_value=True, new_value=False)
         db.commit()
 
 
@@ -508,6 +705,7 @@ def reveal_credential(record_id: int, credential_type: str, actor: str) -> dict[
         if not credential:
             raise HTTPException(status_code=404, detail=f"{credential_type.title()} password is not configured")
         _audit(db, row.id, f"{credential_type}_PASSWORD_REVEALED", actor, f"record={row.id}")
+        record_history(db, entity_type="GTB_RECORD", entity_id=row.id, entity_name=row.hostname or row.ip_address or f"Record {row.id}", action="ACCESS", actor=actor, field_name=f"{credential_type.lower()}_password", old_value=None, new_value="[REVEALED]")
         db.commit()
         return {"password": _decrypt_secret(credential.password_ciphertext)}
 
