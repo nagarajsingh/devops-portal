@@ -200,6 +200,21 @@ export interface InventoryRecord {
   updated_at: string;
 }
 
+
+export interface InventoryHistoryEvent {
+  id:number;
+  entity_type:string;
+  entity_id:number|null;
+  entity_name:string;
+  action:string;
+  field_name:string;
+  old_value:string|null;
+  new_value:string|null;
+  actor:string;
+  source:string;
+  created_at:string;
+}
+
 export interface InventoryAudit {
   id: number;
   inventory_record_id: number | null;
