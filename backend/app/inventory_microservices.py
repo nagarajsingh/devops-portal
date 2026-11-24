@@ -109,26 +109,35 @@ def _migrate_configuration_uniqueness(db) -> None:
     unique key. Excel inventories commonly use PRIMARY for several distinct DBs,
     so DB name must be part of the identity.
     """
-    db.execute(text("""
-        IF EXISTS (
-            SELECT 1
-            FROM sys.key_constraints
-            WHERE [name] = 'uq_inventory_ms_service_environment_connection'
-        )
-        BEGIN
-            ALTER TABLE inventory_ms_configurations
-            DROP CONSTRAINT uq_inventory_ms_service_environment_connection;
-        END;
+    bind = db.get_bind()
+    if not bind or bind.dialect.name != "mssql":
+        return
 
-        IF NOT EXISTS (
-            SELECT 1
-            FROM sys.key_constraints
-            WHERE [name] = 'uq_inventory_ms_service_environment_connection_db'
-        )
+    db.execute(text("""
+        IF OBJECT_ID('inventory_ms_configurations', 'U') IS NOT NULL
         BEGIN
-            ALTER TABLE inventory_ms_configurations
-            ADD CONSTRAINT uq_inventory_ms_service_environment_connection_db
-            UNIQUE (service_id, environment_id, connection_name, db_name);
+            IF EXISTS (
+                SELECT 1
+                FROM sys.key_constraints
+                WHERE [name] = 'uq_inventory_ms_service_environment_connection'
+                  AND [parent_object_id] = OBJECT_ID('inventory_ms_configurations')
+            )
+            BEGIN
+                ALTER TABLE inventory_ms_configurations
+                DROP CONSTRAINT uq_inventory_ms_service_environment_connection;
+            END;
+
+            IF NOT EXISTS (
+                SELECT 1
+                FROM sys.key_constraints
+                WHERE [name] = 'uq_inventory_ms_service_environment_connection_db'
+                  AND [parent_object_id] = OBJECT_ID('inventory_ms_configurations')
+            )
+            BEGIN
+                ALTER TABLE inventory_ms_configurations
+                ADD CONSTRAINT uq_inventory_ms_service_environment_connection_db
+                UNIQUE (service_id, environment_id, connection_name, db_name);
+            END;
         END;
     """))
 
