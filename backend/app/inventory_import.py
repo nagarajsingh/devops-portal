@@ -661,6 +661,7 @@ def preview_microservice_workbook(content: bytes) -> dict[str, Any]:
         "preview_rows": [
             {
                 "source_row": row["source_row"],
+                "source_connection": row.get("source_connection", "1"),
                 "group": row["group"],
                 "service": row["service"],
                 "environment": row["environment"],
