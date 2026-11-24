@@ -181,8 +181,8 @@ export default function MicroservicesInventory({token,environments,onBack,onEnvi
         setServices(await getInventoryMsServices(token,selectedGroup.id));
         setNotice({variant:"success",message:`${catalogName.trim()||catalogCode.trim()} service added to ${selectedGroup.display_name}.`});
       }else{
-        await createInventoryEnvironment({code:catalogCode.trim(),display_name:catalogName.trim()||catalogCode.trim()},token);
-        onEnvironmentsChange(await getInventoryEnvironments(token));
+        await createInventoryEnvironment({category:"MICROSERVICES",code:catalogCode.trim(),display_name:catalogName.trim()||catalogCode.trim()},token);
+        onEnvironmentsChange(await getInventoryEnvironments(token,"MICROSERVICES"));
         setNotice({variant:"success",message:`${catalogName.trim()||catalogCode.trim()} environment added.`});
       }
       setCatalogMode(null);setCatalogCode("");setCatalogName("");
@@ -268,7 +268,7 @@ export default function MicroservicesInventory({token,environments,onBack,onEnvi
     try{
       const result=await commitInventoryMsExcel(importFile,token);
       setImportOpen(false);setImportFile(null);setImportPreview(null);
-      onEnvironmentsChange(await getInventoryEnvironments(token));
+      onEnvironmentsChange(await getInventoryEnvironments(token,"MICROSERVICES"));
       await refreshCurrent();
       setNotice({variant:"success",message:`Excel import completed: ${result.created_count} created, ${result.updated_count} updated, ${result.skipped_count} skipped.`});
     }catch(error){setNotice({variant:"error",message:error instanceof Error?error.message:"Unable to import Microservices inventory"});}
