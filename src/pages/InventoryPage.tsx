@@ -107,6 +107,8 @@ export default function InventoryPage({ token }: { token: string }) {
   const [detailRecord, setDetailRecord] = useState<InventoryRecord | null>(null);
   const [revealed, setRevealed] = useState<{ SSH?: string; APPLICATION?: string }>({});
   const [revealBusy, setRevealBusy] = useState<"SSH" | "APPLICATION" | null>(null);
+  const [tableCredentials, setTableCredentials] = useState<Record<string,string>>({});
+  const [tableCredentialBusy, setTableCredentialBusy] = useState<string|null>(null);
 
   const [catalogOpen, setCatalogOpen] = useState<"application" | "environment" | null>(null);
   const [catalogCode, setCatalogCode] = useState("");
@@ -150,6 +152,7 @@ export default function InventoryPage({ token }: { token: string }) {
     setEnvironmentId(0);
     setSearch("");
     setRecords([]);
+    setTableCredentials({});
     setNotice(null);
     if (nextCategory === "MICROSERVICES") {
       setApplications([]);
@@ -179,6 +182,7 @@ export default function InventoryPage({ token }: { token: string }) {
     setSelectedApplication(application);
     setEnvironmentId(0);
     setSearch("");
+    setTableCredentials({});
     setRecordsLoading(true);
     setNotice(null);
     try {
@@ -321,6 +325,37 @@ export default function InventoryPage({ token }: { token: string }) {
     }
   }
 
+  async function toggleTableCredential(record: InventoryRecord, type: "SSH" | "APPLICATION") {
+    const key = record.id + "-" + type;
+    if (tableCredentials[key]) {
+      setTableCredentials((current) => {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+      return;
+    }
+    const configured = type === "SSH" ? record.ssh_password_configured : record.application_password_configured;
+    if (!configured) return;
+    setTableCredentialBusy(key);
+    try {
+      const result = await revealInventoryCredential(record.id, type, token);
+      setTableCredentials((current) => ({ ...current, [key]: result.password }));
+      window.setTimeout(() => {
+        setTableCredentials((current) => {
+          if (!current[key]) return current;
+          const next = { ...current };
+          delete next[key];
+          return next;
+        });
+      }, 30000);
+    } catch (error) {
+      setNotice({ variant: "error", message: error instanceof Error ? error.message : "Unable to reveal credential" });
+    } finally {
+      setTableCredentialBusy((current) => current === key ? null : current);
+    }
+  }
+
   async function saveCatalog(event: FormEvent) {
     event.preventDefault();
     if (!catalogOpen || !catalogCode.trim()) return;
@@ -404,6 +439,7 @@ export default function InventoryPage({ token }: { token: string }) {
     if (selectedApplication) {
       setSelectedApplication(null);
       setRecords([]);
+      setTableCredentials({});
       setEnvironmentId(0);
       setSearch("");
       return;
@@ -566,12 +602,24 @@ export default function InventoryPage({ token }: { token: string }) {
                 <td>{record.hostname || "—"}</td>
                 <td>{record.asset_type || "—"}</td>
                 <td>{record.app_name || "—"}</td>
-                <td><div className="inventory-access-flags">
-                  <span className={record.ssh_password_configured ? "configured" : ""}>SSH</span>
-                  <span className={record.application_password_configured ? "configured" : ""}>APP</span>
+                <td><div className="inventory-inline-credentials">
+                  <div className="inventory-inline-secret compact">
+                    <span>SSH</span>
+                    <code>{tableCredentials[record.id+"-SSH"]||(record.ssh_password_configured?"••••••••":"Not configured")}</code>
+                    {record.ssh_password_configured&&<button type="button" title={tableCredentials[record.id+"-SSH"]?"Hide SSH password":"Reveal SSH password"} aria-label={tableCredentials[record.id+"-SSH"]?"Hide SSH password":"Reveal SSH password"} disabled={tableCredentialBusy===record.id+"-SSH"} onClick={()=>void toggleTableCredential(record,"SSH")}>
+                      {tableCredentialBusy===record.id+"-SSH"?<RefreshCw size={14} className="spin"/>:tableCredentials[record.id+"-SSH"]?<EyeOff size={14}/>:<Eye size={14}/>} 
+                    </button>}
+                  </div>
+                  <div className="inventory-inline-secret compact">
+                    <span>APP</span>
+                    <code>{tableCredentials[record.id+"-APPLICATION"]||(record.application_password_configured?"••••••••":"Not configured")}</code>
+                    {record.application_password_configured&&<button type="button" title={tableCredentials[record.id+"-APPLICATION"]?"Hide application password":"Reveal application password"} aria-label={tableCredentials[record.id+"-APPLICATION"]?"Hide application password":"Reveal application password"} disabled={tableCredentialBusy===record.id+"-APPLICATION"} onClick={()=>void toggleTableCredential(record,"APPLICATION")}>
+                      {tableCredentialBusy===record.id+"-APPLICATION"?<RefreshCw size={14} className="spin"/>:tableCredentials[record.id+"-APPLICATION"]?<EyeOff size={14}/>:<Eye size={14}/>} 
+                    </button>}
+                  </div>
                 </div></td>
                 <td><small>{formatDate(record.updated_at)}</small></td>
-                <td><button className="inventory-row-action" onClick={() => { setDetailRecord(record); setRevealed({}); }}><Eye size={16}/>View</button></td>
+                <td><button className="inventory-row-action" onClick={() => { setDetailRecord(record); setRevealed({}); }}><Server size={16}/>View</button></td>
               </tr>)}
               {!recordsLoading && filteredRecords.length === 0 && <tr><td colSpan={8}><div className="inventory-empty">No inventory records match this application/environment selection.</div></td></tr>}
             </tbody>
