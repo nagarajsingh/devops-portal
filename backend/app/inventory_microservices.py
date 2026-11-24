@@ -538,7 +538,7 @@ def list_configurations(
                 InventoryMsConfiguration.db_username.like(token),
                 InventoryMsConfiguration.notes.like(token),
             ))
-        rows = list(db.scalars(query.order_by(InventoryMsConfiguration.environment_id, InventoryMsConfiguration.connection_name)).all())
+        rows = list(db.scalars(query.order_by(InventoryMsConfiguration.environment_id, InventoryMsConfiguration.connection_name, InventoryMsConfiguration.db_name)).all())
         return [_configuration_view(db, row) for row in rows]
 
 
@@ -588,7 +588,7 @@ def create_configuration(payload: dict[str, Any], actor: str) -> dict[str, Any]:
         db.flush()
         _upsert_credential(db, row.id, payload.get("db_password"), actor)
         _audit(db, None, "MS_CONFIGURATION_CREATED", actor, f"configuration={row.id}")
-        record_history(db, entity_type="MS_CONFIGURATION", entity_id=row.id, entity_name=f"{connection_name} / service {service_id}", action="CREATE", actor=actor, field_name="record", new_value={"service_id": service_id, "environment_id": environment_id, "connection_name": connection_name, "db_url": row.db_url, "db_name": row.db_name, "db_username": row.db_username, "notes": row.notes})
+        record_history(db, entity_type="MS_CONFIGURATION", entity_id=row.id, entity_name=f"{connection_name} / {row.db_name or 'DB'} / service {service_id}", action="CREATE", actor=actor, field_name="record", new_value={"service_id": service_id, "environment_id": environment_id, "connection_name": connection_name, "db_url": row.db_url, "db_name": row.db_name, "db_username": row.db_username, "notes": row.notes})
         db.commit()
         db.refresh(row)
         return _configuration_view(db, row)
@@ -630,7 +630,7 @@ def update_configuration(configuration_id: int, payload: dict[str, Any], actor: 
         row.updated_at = _utcnow()
         _upsert_credential(db, row.id, payload.get("db_password"), actor)
         new_values = {"service_id": row.service_id, "environment_id": row.environment_id, "connection_name": row.connection_name, "db_url": row.db_url or "", "db_name": row.db_name or "", "db_username": row.db_username or "", "notes": row.notes or ""}
-        record_changes(db, entity_type="MS_CONFIGURATION", entity_id=row.id, entity_name=f"{row.connection_name} / service {row.service_id}", actor=actor, old_values=old_values, new_values=new_values)
+        record_changes(db, entity_type="MS_CONFIGURATION", entity_id=row.id, entity_name=f"{row.connection_name} / {row.db_name or 'DB'} / service {row.service_id}", actor=actor, old_values=old_values, new_values=new_values)
         if payload.get("db_password"):
             record_history(db, entity_type="MS_CONFIGURATION", entity_id=row.id, entity_name=f"{row.connection_name} / service {row.service_id}", action="UPDATE", actor=actor, field_name="db_password", old_value="[REDACTED]", new_value="[UPDATED]")
         _audit(db, None, "MS_CONFIGURATION_UPDATED", actor, f"configuration={row.id}")
