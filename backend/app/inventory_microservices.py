@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, or_, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, or_, select, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .inventory_history import record_changes, record_history
@@ -67,7 +67,8 @@ class InventoryMsConfiguration(Base):
             "service_id",
             "environment_id",
             "connection_name",
-            name="uq_inventory_ms_service_environment_connection",
+            "db_name",
+            name="uq_inventory_ms_service_environment_connection_db",
         ),
     )
 
@@ -101,11 +102,43 @@ class InventoryMsCredential(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
 
+def _migrate_configuration_uniqueness(db) -> None:
+    """Allow multiple DBs to share the same connection name in one environment.
+
+    Older deployments enforced service + environment + connection_name as the
+    unique key. Excel inventories commonly use PRIMARY for several distinct DBs,
+    so DB name must be part of the identity.
+    """
+    db.execute(text("""
+        IF EXISTS (
+            SELECT 1
+            FROM sys.key_constraints
+            WHERE [name] = 'uq_inventory_ms_service_environment_connection'
+        )
+        BEGIN
+            ALTER TABLE inventory_ms_configurations
+            DROP CONSTRAINT uq_inventory_ms_service_environment_connection;
+        END;
+
+        IF NOT EXISTS (
+            SELECT 1
+            FROM sys.key_constraints
+            WHERE [name] = 'uq_inventory_ms_service_environment_connection_db'
+        )
+        BEGIN
+            ALTER TABLE inventory_ms_configurations
+            ADD CONSTRAINT uq_inventory_ms_service_environment_connection_db
+            UNIQUE (service_id, environment_id, connection_name, db_name);
+        END;
+    """))
+
+
 def initialize_microservice_inventory() -> None:
     from .inventory_store import InventoryEnvironment, ensure_environment_scope
 
     factory = session_factory()
     with factory() as db:
+        _migrate_configuration_uniqueness(db)
         for code, display_name in DEFAULT_GROUPS:
             if not db.scalar(select(InventoryMsGroup).where(InventoryMsGroup.code == code)):
                 db.add(InventoryMsGroup(code=code, display_name=display_name, is_active=True))
@@ -518,22 +551,24 @@ def create_configuration(payload: dict[str, Any], actor: str) -> dict[str, Any]:
         service_id = int(payload["service_id"])
         environment_id = int(payload["environment_id"])
         connection_name = str(payload.get("connection_name") or "PRIMARY").strip().upper()
+        db_name = str(payload.get("db_name") or "").strip()
         _validate_configuration_refs(db, service_id, environment_id)
         existing = db.scalar(select(InventoryMsConfiguration).where(
             InventoryMsConfiguration.service_id == service_id,
             InventoryMsConfiguration.environment_id == environment_id,
             InventoryMsConfiguration.connection_name == connection_name,
+            func.coalesce(InventoryMsConfiguration.db_name, "") == db_name,
             InventoryMsConfiguration.is_active == 1,
         ))
         if existing:
-            raise HTTPException(status_code=409, detail="This service/environment/database connection already exists")
+            raise HTTPException(status_code=409, detail="This service/environment/connection/DB name already exists")
 
         row = InventoryMsConfiguration(
             service_id=service_id,
             environment_id=environment_id,
             connection_name=connection_name,
             db_url=str(payload.get("db_url") or "").strip() or None,
-            db_name=str(payload.get("db_name") or "").strip() or None,
+            db_name=db_name or None,
             db_username=str(payload.get("db_username") or "").strip() or None,
             notes=str(payload.get("notes") or "").strip() or None,
             is_active=True,
@@ -559,6 +594,7 @@ def update_configuration(configuration_id: int, payload: dict[str, Any], actor: 
         service_id = int(payload["service_id"])
         environment_id = int(payload["environment_id"])
         connection_name = str(payload.get("connection_name") or "PRIMARY").strip().upper()
+        db_name = str(payload.get("db_name") or "").strip()
         _validate_configuration_refs(db, service_id, environment_id)
 
         old_values = {"service_id": row.service_id, "environment_id": row.environment_id, "connection_name": row.connection_name, "db_url": row.db_url or "", "db_name": row.db_name or "", "db_username": row.db_username or "", "notes": row.notes or ""}
@@ -567,17 +603,18 @@ def update_configuration(configuration_id: int, payload: dict[str, Any], actor: 
             InventoryMsConfiguration.service_id == service_id,
             InventoryMsConfiguration.environment_id == environment_id,
             InventoryMsConfiguration.connection_name == connection_name,
+            func.coalesce(InventoryMsConfiguration.db_name, "") == db_name,
             InventoryMsConfiguration.id != configuration_id,
             InventoryMsConfiguration.is_active == 1,
         ))
         if duplicate:
-            raise HTTPException(status_code=409, detail="Another configuration already uses this service/environment/database connection")
+            raise HTTPException(status_code=409, detail="Another configuration already uses this service/environment/connection/DB name")
 
         row.service_id = service_id
         row.environment_id = environment_id
         row.connection_name = connection_name
         row.db_url = str(payload.get("db_url") or "").strip() or None
-        row.db_name = str(payload.get("db_name") or "").strip() or None
+        row.db_name = db_name or None
         row.db_username = str(payload.get("db_username") or "").strip() or None
         row.notes = str(payload.get("notes") or "").strip() or None
         row.updated_by = actor
@@ -651,7 +688,12 @@ def import_microservice_rows(rows: list[dict[str, Any]], actor: str) -> dict[str
             ).all()
         }
         configurations = {
-            (row.service_id, row.environment_id, row.connection_name.upper()): row
+            (
+                row.service_id,
+                row.environment_id,
+                row.connection_name.upper(),
+                (row.db_name or "").strip().lower(),
+            ): row
             for row in db.scalars(select(InventoryMsConfiguration).where(InventoryMsConfiguration.is_active == 1)).all()
         }
 
@@ -670,6 +712,7 @@ def import_microservice_rows(rows: list[dict[str, Any]], actor: str) -> dict[str
             service_code = str(source.get("service") or "").strip()
             environment_code = str(source.get("environment") or "").strip().upper()
             connection_name = str(source.get("connection_name") or "PRIMARY").strip().upper() or "PRIMARY"
+            db_name = str(source.get("db_name") or "").strip()
 
             if not group_code or not service_code or not environment_code:
                 skipped += 1
@@ -715,11 +758,11 @@ def import_microservice_rows(rows: list[dict[str, Any]], actor: str) -> dict[str
                 created_environments.append(environment_code)
                 _audit(db, None, "MICROSERVICES_ENVIRONMENT_CREATED_BY_IMPORT", actor, environment_code)
 
-            key = (service.id, environment.id, connection_name)
+            key = (service.id, environment.id, connection_name, db_name.lower())
             configuration = configurations.get(key)
             if configuration:
                 configuration.db_url = str(source.get("db_url") or "").strip() or None
-                configuration.db_name = str(source.get("db_name") or "").strip() or None
+                configuration.db_name = db_name or None
                 configuration.db_username = str(source.get("db_username") or "").strip() or None
                 configuration.notes = str(source.get("notes") or "").strip() or None
                 configuration.updated_by = actor
@@ -733,7 +776,7 @@ def import_microservice_rows(rows: list[dict[str, Any]], actor: str) -> dict[str
                     environment_id=environment.id,
                     connection_name=connection_name,
                     db_url=str(source.get("db_url") or "").strip() or None,
-                    db_name=str(source.get("db_name") or "").strip() or None,
+                    db_name=db_name or None,
                     db_username=str(source.get("db_username") or "").strip() or None,
                     notes=str(source.get("notes") or "").strip() or None,
                     is_active=True,
