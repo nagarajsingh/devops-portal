@@ -1,5 +1,5 @@
 export type Role = "developer" | "devops";
-export type PageKey = "home"|"dashboard"|"requests"|"file-placement"|"monitoring"|"kubernetes-logs"|"deployment-management"|"ms-portal"|"devops-tasks"|"datasources"|"profile"|"admin";
+export type PageKey = "home"|"dashboard"|"requests"|"file-placement"|"monitoring"|"kubernetes-logs"|"deployment-management"|"ms-portal"|"devops-tasks"|"datasources"|"inventory"|"profile"|"admin";
 export interface NavItem { key:PageKey; label:string; devopsOnly?:boolean; adminOnly?:boolean; href?:string; }
 export interface AuthSession { access_token:string; token_type:string; username:string; role:Role; is_admin:boolean; }
 export interface PortalUser { id:number; email:string; role:Role; is_admin:boolean; is_active:boolean; created_at:string; updated_at:string; }
@@ -136,4 +136,22 @@ export interface DatasourceOperation {
   created_at:string;
   updated_at:string;
   completed_at?:string|null;
+}
+
+export interface InventoryTypeOption { value:string; label:string; }
+export interface InventoryItem {
+  id:number; item_type:string; name:string; code:string; description:string;
+  parent_id:number|null; parent_name?:string|null; source_system:string;
+  details:Record<string,unknown>; is_active:boolean;
+  created_by:string; updated_by:string; created_at:string; updated_at:string;
+}
+export interface InventoryAuditEvent {
+  id:number; item_id:number|null; item_type:string; item_name:string; action:string;
+  field_name?:string|null; old_value?:string|null; new_value?:string|null;
+  changed_by:string; source:string; changed_at:string;
+}
+export interface InventorySummary { total:number; active:number; archived:number; by_type:Record<string,number>; }
+export interface InventoryItemInput {
+  item_type:string; name:string; code:string; description:string;
+  parent_id:number|null; source_system:string; details:Record<string,string>;
 }
