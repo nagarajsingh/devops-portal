@@ -8,6 +8,7 @@ import {
   Download,
   FileSpreadsheet,
   FileText,
+  History,
   Pencil,
   Plus,
   RefreshCw,
@@ -32,6 +33,7 @@ import {
   type InventoryPatchActivityInput,
   type InventoryPatchingAssetInput,
 } from "../services/api";
+import InventoryHistoryModal from "../components/InventoryHistoryModal";
 import type {
   InventoryPatchCycle,
   InventoryPatchEnvironmentClass,
@@ -93,6 +95,7 @@ export default function PatchingInventory({token,onBack}:Props){
   const [saving,setSaving]=useState(false);
 
   const [detail,setDetail]=useState<InventoryPatchingAsset|null>(null);
+  const [historyDetail,setHistoryDetail]=useState<InventoryPatchingAsset|null>(null);
   const [importOpen,setImportOpen]=useState(false);
   const [importFile,setImportFile]=useState<File|null>(null);
   const [importPreview,setImportPreview]=useState<InventoryPatchingImportPreview|null>(null);
@@ -296,8 +299,10 @@ export default function PatchingInventory({token,onBack}:Props){
       <div className="inventory-modal-heading"><div className="inventory-card-icon"><Server size={21}/></div><div><span className="eyebrow">{detail.environment_class} · {detail.source_type}</span><h2>{detail.hostname||detail.asset_identifier}</h2><p>{detail.application||"Patching asset"} · {detail.asset_identifier}</p></div></div>
       <div className="inventory-detail-grid"><div><span>IP / Cluster</span><strong>{detail.asset_identifier}</strong></div><div><span>Hostname</span><strong>{detail.hostname||"—"}</strong></div><div><span>Application</span><strong>{detail.application||"—"}</strong></div><div><span>Owner</span><strong>{detail.application_owner||"—"}</strong></div><div><span>Type</span><strong>{detail.asset_type||"—"}</strong></div><div><span>Source</span><strong>{detail.source_type}</strong></div></div>
       <section className="patch-activity-detail"><h3>{detail.activity?.cycle_code||currentCycle?.code} activity</h3><div className="inventory-detail-grid"><div><span>Previous patch</span><strong>{dateText(detail.activity?.previous_patched_date)}</strong></div><div><span>Planned date</span><strong>{dateText(detail.activity?.planned_date)}</strong></div><div><span>Status</span><strong>{STATUS_LABELS[detail.activity?.status||"NOT_STARTED"]}</strong></div><div><span>Approval</span><strong>{detail.activity?.app_team_approval||"—"}</strong></div><div><span>CR Number</span><strong>{detail.activity?.cr_number||"—"}</strong></div><div><span>Role</span><strong>{detail.activity?.patch_role||"—"}</strong></div></div><div className="inventory-detail-block"><span>Comments</span><p>{detail.activity?.comments||"—"}</p></div></section>
-      <div className="inventory-modal-footer">{detail.source_type!=="GTB"&&<button className="danger-button" onClick={()=>void removeAsset(detail)}><Trash2 size={14}/>Remove</button>}<button className="primary-button" onClick={()=>beginEdit(detail)}><Pencil size={14}/>Update patching</button></div>
+      <div className="inventory-modal-footer"><button className="secondary-button" onClick={()=>setHistoryDetail(detail)}><History size={14}/>History</button>{detail.source_type!=="GTB"&&<button className="danger-button" onClick={()=>void removeAsset(detail)}><Trash2 size={14}/>Remove</button>}<button className="primary-button" onClick={()=>beginEdit(detail)}><Pencil size={14}/>Update patching</button></div>
     </article></div>}
+
+    {historyDetail&&<InventoryHistoryModal token={token} entityType="PATCH_ASSET" entityId={historyDetail.id} entityName={historyDetail.hostname||historyDetail.asset_identifier} onClose={()=>setHistoryDetail(null)}/>}
 
     {formOpen&&<div className="inventory-modal-backdrop" onMouseDown={()=>!saving&&setFormOpen(false)}><form className="inventory-modal patch-form" onSubmit={saveAsset} onMouseDown={e=>e.stopPropagation()}>
       <button type="button" className="inventory-modal-close" onClick={()=>setFormOpen(false)}><X size={18}/></button>
