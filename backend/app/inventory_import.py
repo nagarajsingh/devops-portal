@@ -570,6 +570,7 @@ def parse_microservice_workbook(content: bytes) -> dict[str, Any]:
                 str(record["service"]).strip().lower(),
                 str(record["environment"]).strip().upper(),
                 str(record["connection_name"]).strip().upper(),
+                str(record["db_name"]).strip().lower(),
             )
             seen[signature] = seen.get(signature, 0) + 1
             record["warnings"] = row_warnings
@@ -603,6 +604,7 @@ def parse_microservice_workbook(content: bytes) -> dict[str, Any]:
                 str(record["service"]).strip().lower(),
                 str(record["environment"]).strip().upper(),
                 "PRIMARY",
+                "",
             )
             seen[signature] = seen.get(signature, 0) + 1
             rows.append(record)
@@ -618,9 +620,10 @@ def parse_microservice_workbook(content: bytes) -> dict[str, Any]:
             str(record["service"]).strip().lower(),
             str(record["environment"]).strip().upper(),
             str(record["connection_name"]).strip().upper(),
+            str(record["db_name"]).strip().lower(),
         )
         if seen.get(signature, 0) > 1:
-            record["warnings"].append("Possible duplicate group/service/environment/connection row in workbook")
+            record["warnings"].append("Possible duplicate group/service/environment/connection/DB name row in workbook")
         for warning in record["warnings"]:
             warnings.append(
                 f"Row {record['source_row']} / {record['connection_name']}: {warning}"
