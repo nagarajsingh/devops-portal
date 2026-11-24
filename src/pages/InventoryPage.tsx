@@ -499,7 +499,7 @@ export default function InventoryPage({ token }: { token: string }) {
           <button className="secondary-button" disabled={!!exportBusy} onClick={() => void exportGtb("xlsx")}><Download size={16}/>{exportBusy === "xlsx" ? "Exporting..." : "Excel"}</button>
           <button className="secondary-button" disabled={!!exportBusy} onClick={() => void exportGtb("pdf")}><FileText size={16}/>{exportBusy === "pdf" ? "Exporting..." : "PDF"}</button>
           <button className="secondary-button" onClick={beginImport}><FileSpreadsheet size={16}/>Import Excel</button>
-          <button className="secondary-button" onClick={() => { setCatalogOpen("environment"); setCatalogCode(""); setCatalogName(""); }}><Layers3 size={16}/>Add environment</button>
+          <button className="secondary-button" onClick={() => { setCatalogOpen("environment"); setCatalogCode(""); setCatalogName(""); }}><Layers3 size={16}/>Add GTB environment</button>
           <button className="primary-button" onClick={() => { setCatalogOpen("application"); setCatalogCode(""); setCatalogName(""); }}><Plus size={16}/>Add application</button>
         </div>
       </section>
@@ -776,7 +776,7 @@ export default function InventoryPage({ token }: { token: string }) {
       <form className="inventory-modal inventory-catalog-form" onSubmit={saveCatalog} onMouseDown={(event) => event.stopPropagation()}>
         <button type="button" className="inventory-modal-close" onClick={() => setCatalogOpen(null)}><X size={19}/></button>
         <span className="eyebrow">INVENTORY CATALOG</span>
-        <h2>Add {catalogOpen}</h2>
+        <h2>{catalogOpen === "environment" ? "Add GTB environment" : `Add ${catalogOpen}`}</h2>
         <p>This becomes available immediately without a portal code change.</p>
         <label>Code / Name<input autoFocus required value={catalogCode} onChange={(event) => setCatalogCode(event.target.value)} placeholder={catalogOpen === "application" ? "Example: FLEXCUBE" : "Example: R2UAT"}/></label>
         <label>Display name <small>(optional)</small><input value={catalogName} onChange={(event) => setCatalogName(event.target.value)} placeholder="Friendly display name"/></label>
