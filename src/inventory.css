@@ -56,6 +56,7 @@
 .ms-config-table{min-width:1120px}
 .ms-secret-status{display:inline-flex;padding:5px 8px;border-radius:999px;background:#f2f4f6;color:#8d99a4;font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}
 .ms-secret-status.configured{background:#e9f7ef;color:#2b7d4d}
+.inventory-inline-secret{display:flex;align-items:center;gap:7px;min-width:150px}.inventory-inline-secret code{max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#29445f;font:10px/1.3 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}.inventory-inline-secret button{width:28px;height:28px;flex:0 0 28px;border:1px solid #dfe5eb;border-radius:8px;background:#fff;color:#3c6489;display:grid;place-items:center;cursor:pointer}.inventory-inline-secret button:hover{border-color:#ef9f6f;color:#dc5b18}.inventory-inline-secret button:disabled{opacity:.55;cursor:wait}.inventory-inline-secret.compact{min-width:210px}.inventory-inline-secret.compact>span{width:28px;flex:0 0 28px;color:#7e8d9c;font-size:8px;font-weight:900}.inventory-inline-secret.compact code{flex:1;max-width:150px}.inventory-inline-credentials{display:flex;flex-direction:column;gap:5px}.inventory-inline-credentials .inventory-inline-secret{padding:2px 0}
 .ms-inventory .inventory-section-actions{flex-wrap:wrap;justify-content:flex-end}
 .ms-inventory .inventory-detail-block pre{max-height:150px;overflow:auto}
 @media(max-width:1050px){.ms-group-grid{grid-template-columns:1fr}.ms-inventory .inventory-section-actions{justify-content:flex-start}}
