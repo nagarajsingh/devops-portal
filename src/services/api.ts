@@ -1,4 +1,4 @@
-import type { ApplicationType, AuthSession, DatasourceApplication, DatasourceOperation, DevOpsTask, DevOpsTaskPriority, DevOpsTaskStatus, KubernetesService, KubernetesTarget, PipelineRequest, PipelineRequestInput, PortalUser, ReviewUpdate, Role, WebLogicEnvironment } from "../types";
+import type { ApplicationType, AuthSession, DatasourceApplication, DatasourceOperation, DevOpsTask, DevOpsTaskPriority, DevOpsTaskStatus, InventoryAuditEvent, InventoryItem, InventoryItemInput, InventorySummary, InventoryTypeOption, KubernetesService, KubernetesTarget, PipelineRequest, PipelineRequestInput, PortalUser, ReviewUpdate, Role, WebLogicEnvironment } from "../types";
 const API_BASE="/devops-portal/api";
 export class ApiError extends Error{code?:string;status?:number;payload?:unknown;constructor(message:string,options:{code?:string;status?:number;payload?:unknown}={}){super(message);this.name="ApiError";Object.assign(this,options);}}
 async function request<T>(path:string,options:RequestInit={},token?:string):Promise<T>{const response=await fetch(`${API_BASE}${path}`,{...options,headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{}) ,...options.headers}});if(!response.ok){const body=await response.json().catch(()=>({detail:"Request failed"}));const d=body?.detail;throw new ApiError(typeof d==="string"?d:d?.message??"Request failed",{code:typeof d==="object"&&d?d.code:undefined,status:response.status,payload:d});}if(response.status===204)return undefined as T;return response.json() as Promise<T>;}
@@ -96,3 +96,29 @@ export const saveDatasourceEntityProfile=(environmentId:number,entityCode:string
 export const getDatasourceOperations=(token:string,limit=50)=>request<DatasourceOperation[]>(`/datasources/operations?limit=${limit}`,{},token);
 export const previewDatasources=(payload:DatasourcePreviewInput,token:string)=>request<DatasourceOperation>("/datasources/preview",{method:"POST",body:JSON.stringify(payload)},token);
 export const applyDatasourceOperation=(id:number,pat:string,token:string)=>request<DatasourceOperation>(`/datasources/operations/${id}/apply`,{method:"POST",body:JSON.stringify({azure_devops_pat:pat})},token);
+
+export const getInventoryTypes=(token:string)=>request<InventoryTypeOption[]>("/inventory/types",{},token);
+export const getInventorySummary=(token:string)=>request<InventorySummary>("/inventory/summary",{},token);
+export const getInventoryItems=(token:string,filters:{q?:string;item_type?:string;include_inactive?:boolean}={})=>{
+  const q=new URLSearchParams();
+  if(filters.q)q.set("q",filters.q);
+  if(filters.item_type)q.set("item_type",filters.item_type);
+  if(filters.include_inactive)q.set("include_inactive","true");
+  const suffix=q.toString();
+  return request<InventoryItem[]>("/inventory/items"+(suffix?"?"+suffix:""),{},token);
+};
+export const createInventoryItem=(payload:InventoryItemInput,token:string)=>request<InventoryItem>("/inventory/items",{method:"POST",body:JSON.stringify(payload)},token);
+export const updateInventoryItem=(id:number,payload:InventoryItemInput,token:string)=>request<InventoryItem>("/inventory/items/"+id,{method:"PUT",body:JSON.stringify(payload)},token);
+export const archiveInventoryItem=(id:number,token:string)=>request<InventoryItem>("/inventory/items/"+id,{method:"DELETE"},token);
+export const restoreInventoryItem=(id:number,token:string)=>request<InventoryItem>("/inventory/items/"+id+"/restore",{method:"POST"},token);
+export const getInventoryItemHistory=(id:number,token:string)=>request<InventoryAuditEvent[]>("/inventory/items/"+id+"/history",{},token);
+export const getInventoryHistory=(token:string,filters:{q?:string;actor?:string;action?:string;item_type?:string;limit?:number}={})=>{
+  const q=new URLSearchParams();
+  if(filters.q)q.set("q",filters.q);
+  if(filters.actor)q.set("actor",filters.actor);
+  if(filters.action)q.set("action",filters.action);
+  if(filters.item_type)q.set("item_type",filters.item_type);
+  if(filters.limit)q.set("limit",String(filters.limit));
+  const suffix=q.toString();
+  return request<InventoryAuditEvent[]>("/inventory/history"+(suffix?"?"+suffix:""),{},token);
+};
