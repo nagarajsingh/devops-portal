@@ -166,6 +166,8 @@ export interface InventoryApplication {
 
 export interface InventoryEnvironment {
   id: number;
+  scope_id?: number | null;
+  category?: InventoryCategory | "";
   code: string;
   display_name: string;
   sort_order: number;
