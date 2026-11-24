@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, or_, select
 from sqlalchemy.orm import Mapped, mapped_column
 
+from .inventory_history import record_changes, record_history
 from .inventory_store import _audit, _decrypt_secret, _encrypt_secret
 from .user_store import Base, session_factory
 
@@ -207,10 +208,13 @@ def _group_view(db, row: InventoryMsGroup) -> dict[str, Any]:
     }
 
 
-def list_groups() -> list[dict[str, Any]]:
+def list_groups(include_inactive: bool = False) -> list[dict[str, Any]]:
     factory = session_factory()
     with factory() as db:
-        rows = list(db.scalars(select(InventoryMsGroup).where(InventoryMsGroup.is_active == 1).order_by(InventoryMsGroup.display_name)).all())
+        query = select(InventoryMsGroup)
+        if not include_inactive:
+            query = query.where(InventoryMsGroup.is_active == 1)
+        rows = list(db.scalars(query.order_by(InventoryMsGroup.display_name)).all())
         return [_group_view(db, row) for row in rows]
 
 
@@ -223,9 +227,68 @@ def create_group(code: str, display_name: str, actor: str) -> dict[str, Any]:
             raise HTTPException(status_code=409, detail="Microservices inventory group already exists")
         row = InventoryMsGroup(code=code, display_name=display_name, is_active=True)
         db.add(row)
+        db.flush()
         _audit(db, None, "MS_GROUP_CREATED", actor, code)
+        record_history(db, entity_type="MS_GROUP", entity_id=row.id, entity_name=display_name, action="CREATE", actor=actor, field_name="record", new_value={"code": code, "display_name": display_name})
         db.commit()
         db.refresh(row)
+        return _group_view(db, row)
+
+
+def update_group(group_id: int, code: str, display_name: str, actor: str) -> dict[str, Any]:
+    code = code.strip().upper().replace(" ", "-")
+    display_name = display_name.strip() or code
+    factory = session_factory()
+    with factory() as db:
+        row = db.get(InventoryMsGroup, group_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Microservices inventory group was not found")
+        duplicate = db.scalar(select(InventoryMsGroup).where(InventoryMsGroup.code == code, InventoryMsGroup.id != group_id))
+        if duplicate:
+            raise HTTPException(status_code=409, detail="Microservices inventory group already exists")
+        old_values = {"code": row.code, "display_name": row.display_name}
+        row.code = code
+        row.display_name = display_name
+        row.updated_at = _utcnow()
+        record_changes(db, entity_type="MS_GROUP", entity_id=row.id, entity_name=row.display_name, actor=actor, old_values=old_values, new_values={"code": row.code, "display_name": row.display_name})
+        _audit(db, None, "MS_GROUP_UPDATED", actor, code)
+        db.commit()
+        db.refresh(row)
+        return _group_view(db, row)
+
+
+def archive_group(group_id: int, actor: str) -> dict[str, Any]:
+    factory = session_factory()
+    with factory() as db:
+        row = db.get(InventoryMsGroup, group_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Microservices inventory group was not found")
+        active_services = db.scalar(select(func.count()).select_from(InventoryMsService).where(InventoryMsService.group_id == row.id, InventoryMsService.is_active == 1)) or 0
+        if active_services:
+            raise HTTPException(status_code=409, detail=f"Group has {active_services} active service(s). Archive or move them before archiving the group.")
+        if row.is_active:
+            row.is_active = False
+            row.updated_at = _utcnow()
+            record_history(db, entity_type="MS_GROUP", entity_id=row.id, entity_name=row.display_name, action="ARCHIVE", actor=actor, field_name="is_active", old_value=True, new_value=False)
+            _audit(db, None, "MS_GROUP_ARCHIVED", actor, row.code)
+            db.commit()
+            db.refresh(row)
+        return _group_view(db, row)
+
+
+def restore_group(group_id: int, actor: str) -> dict[str, Any]:
+    factory = session_factory()
+    with factory() as db:
+        row = db.get(InventoryMsGroup, group_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Microservices inventory group was not found")
+        if not row.is_active:
+            row.is_active = True
+            row.updated_at = _utcnow()
+            record_history(db, entity_type="MS_GROUP", entity_id=row.id, entity_name=row.display_name, action="RESTORE", actor=actor, field_name="is_active", old_value=False, new_value=True)
+            _audit(db, None, "MS_GROUP_RESTORED", actor, row.code)
+            db.commit()
+            db.refresh(row)
         return _group_view(db, row)
 
 
@@ -258,10 +321,12 @@ def _service_view(db, row: InventoryMsService) -> dict[str, Any]:
     }
 
 
-def list_services(group_id: int | None = None, query_text: str = "") -> list[dict[str, Any]]:
+def list_services(group_id: int | None = None, query_text: str = "", include_inactive: bool = False) -> list[dict[str, Any]]:
     factory = session_factory()
     with factory() as db:
-        query = select(InventoryMsService).where(InventoryMsService.is_active == 1)
+        query = select(InventoryMsService)
+        if not include_inactive:
+            query = query.where(InventoryMsService.is_active == 1)
         if group_id:
             query = query.where(InventoryMsService.group_id == group_id)
         if query_text.strip():
@@ -283,9 +348,75 @@ def create_service(group_id: int, code: str, display_name: str, actor: str) -> d
             raise HTTPException(status_code=409, detail="Service already exists in this group")
         row = InventoryMsService(group_id=group_id, code=code, display_name=display_name, is_active=True)
         db.add(row)
+        db.flush()
         _audit(db, None, "MS_SERVICE_CREATED", actor, f"{group.code}/{code}")
+        record_history(db, entity_type="MS_SERVICE", entity_id=row.id, entity_name=display_name, action="CREATE", actor=actor, field_name="record", new_value={"group_id": group_id, "code": code, "display_name": display_name})
         db.commit()
         db.refresh(row)
+        return _service_view(db, row)
+
+
+def update_service(service_id: int, group_id: int, code: str, display_name: str, actor: str) -> dict[str, Any]:
+    code = code.strip()
+    display_name = display_name.strip() or code
+    factory = session_factory()
+    with factory() as db:
+        row = db.get(InventoryMsService, service_id)
+        group = db.get(InventoryMsGroup, group_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Microservice was not found")
+        if not group or not group.is_active:
+            raise HTTPException(status_code=400, detail="Selected microservices group is not active")
+        duplicate = db.scalar(select(InventoryMsService).where(InventoryMsService.group_id == group_id, InventoryMsService.code == code, InventoryMsService.id != service_id))
+        if duplicate:
+            raise HTTPException(status_code=409, detail="Service already exists in this group")
+        old_values = {"group_id": row.group_id, "code": row.code, "display_name": row.display_name}
+        row.group_id = group_id
+        row.code = code
+        row.display_name = display_name
+        row.updated_at = _utcnow()
+        record_changes(db, entity_type="MS_SERVICE", entity_id=row.id, entity_name=row.display_name, actor=actor, old_values=old_values, new_values={"group_id": row.group_id, "code": row.code, "display_name": row.display_name})
+        _audit(db, None, "MS_SERVICE_UPDATED", actor, f"{group.code}/{code}")
+        db.commit()
+        db.refresh(row)
+        return _service_view(db, row)
+
+
+def archive_service(service_id: int, actor: str) -> dict[str, Any]:
+    factory = session_factory()
+    with factory() as db:
+        row = db.get(InventoryMsService, service_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Microservice was not found")
+        active_configurations = db.scalar(select(func.count()).select_from(InventoryMsConfiguration).where(InventoryMsConfiguration.service_id == row.id, InventoryMsConfiguration.is_active == 1)) or 0
+        if active_configurations:
+            raise HTTPException(status_code=409, detail=f"Service has {active_configurations} active configuration(s). Remove or move them before archiving the service.")
+        if row.is_active:
+            row.is_active = False
+            row.updated_at = _utcnow()
+            record_history(db, entity_type="MS_SERVICE", entity_id=row.id, entity_name=row.display_name, action="ARCHIVE", actor=actor, field_name="is_active", old_value=True, new_value=False)
+            _audit(db, None, "MS_SERVICE_ARCHIVED", actor, row.code)
+            db.commit()
+            db.refresh(row)
+        return _service_view(db, row)
+
+
+def restore_service(service_id: int, actor: str) -> dict[str, Any]:
+    factory = session_factory()
+    with factory() as db:
+        row = db.get(InventoryMsService, service_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Microservice was not found")
+        group = db.get(InventoryMsGroup, row.group_id)
+        if not group or not group.is_active:
+            raise HTTPException(status_code=409, detail="Restore the parent group before restoring this service")
+        if not row.is_active:
+            row.is_active = True
+            row.updated_at = _utcnow()
+            record_history(db, entity_type="MS_SERVICE", entity_id=row.id, entity_name=row.display_name, action="RESTORE", actor=actor, field_name="is_active", old_value=False, new_value=True)
+            _audit(db, None, "MS_SERVICE_RESTORED", actor, row.code)
+            db.commit()
+            db.refresh(row)
         return _service_view(db, row)
 
 
@@ -389,6 +520,7 @@ def create_configuration(payload: dict[str, Any], actor: str) -> dict[str, Any]:
         db.flush()
         _upsert_credential(db, row.id, payload.get("db_password"), actor)
         _audit(db, None, "MS_CONFIGURATION_CREATED", actor, f"configuration={row.id}")
+        record_history(db, entity_type="MS_CONFIGURATION", entity_id=row.id, entity_name=f"{connection_name} / service {service_id}", action="CREATE", actor=actor, field_name="record", new_value={"service_id": service_id, "environment_id": environment_id, "connection_name": connection_name, "db_url": row.db_url, "db_name": row.db_name, "db_username": row.db_username, "notes": row.notes})
         db.commit()
         db.refresh(row)
         return _configuration_view(db, row)
@@ -404,6 +536,8 @@ def update_configuration(configuration_id: int, payload: dict[str, Any], actor: 
         environment_id = int(payload["environment_id"])
         connection_name = str(payload.get("connection_name") or "PRIMARY").strip().upper()
         _validate_configuration_refs(db, service_id, environment_id)
+
+        old_values = {"service_id": row.service_id, "environment_id": row.environment_id, "connection_name": row.connection_name, "db_url": row.db_url or "", "db_name": row.db_name or "", "db_username": row.db_username or "", "notes": row.notes or ""}
 
         duplicate = db.scalar(select(InventoryMsConfiguration).where(
             InventoryMsConfiguration.service_id == service_id,
@@ -425,6 +559,10 @@ def update_configuration(configuration_id: int, payload: dict[str, Any], actor: 
         row.updated_by = actor
         row.updated_at = _utcnow()
         _upsert_credential(db, row.id, payload.get("db_password"), actor)
+        new_values = {"service_id": row.service_id, "environment_id": row.environment_id, "connection_name": row.connection_name, "db_url": row.db_url or "", "db_name": row.db_name or "", "db_username": row.db_username or "", "notes": row.notes or ""}
+        record_changes(db, entity_type="MS_CONFIGURATION", entity_id=row.id, entity_name=f"{row.connection_name} / service {row.service_id}", actor=actor, old_values=old_values, new_values=new_values)
+        if payload.get("db_password"):
+            record_history(db, entity_type="MS_CONFIGURATION", entity_id=row.id, entity_name=f"{row.connection_name} / service {row.service_id}", action="UPDATE", actor=actor, field_name="db_password", old_value="[REDACTED]", new_value="[UPDATED]")
         _audit(db, None, "MS_CONFIGURATION_UPDATED", actor, f"configuration={row.id}")
         db.commit()
         db.refresh(row)
@@ -441,6 +579,7 @@ def delete_configuration(configuration_id: int, actor: str) -> None:
         row.updated_by = actor
         row.updated_at = _utcnow()
         _audit(db, None, "MS_CONFIGURATION_DELETED", actor, f"configuration={row.id}")
+        record_history(db, entity_type="MS_CONFIGURATION", entity_id=row.id, entity_name=f"{row.connection_name} / service {row.service_id}", action="ARCHIVE", actor=actor, field_name="is_active", old_value=True, new_value=False)
         db.commit()
 
 
@@ -454,6 +593,7 @@ def reveal_configuration_password(configuration_id: int, actor: str) -> dict[str
         if not credential:
             raise HTTPException(status_code=404, detail="Database password is not configured")
         _audit(db, None, "MS_DB_PASSWORD_REVEALED", actor, f"configuration={configuration_id}")
+        record_history(db, entity_type="MS_CONFIGURATION", entity_id=row.id, entity_name=f"{row.connection_name} / service {row.service_id}", action="ACCESS", actor=actor, field_name="db_password", new_value="[REVEALED]")
         db.commit()
         return {"password": _decrypt_secret(credential.password_ciphertext)}
 
