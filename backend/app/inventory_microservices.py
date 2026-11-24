@@ -102,7 +102,7 @@ class InventoryMsCredential(Base):
 
 
 def initialize_microservice_inventory() -> None:
-    from .inventory_store import InventoryEnvironment
+    from .inventory_store import InventoryEnvironment, ensure_environment_scope
 
     factory = session_factory()
     with factory() as db:
@@ -134,10 +134,32 @@ def initialize_microservice_inventory() -> None:
 
         max_order = db.scalar(select(func.max(InventoryEnvironment.sort_order))) or 0
         next_order = int(max_order)
-        for name in DEFAULT_ENVIRONMENTS:
-            if not db.scalar(select(InventoryEnvironment).where(InventoryEnvironment.code == name)):
+        for index, name in enumerate(DEFAULT_ENVIRONMENTS, start=1):
+            environment = db.scalar(select(InventoryEnvironment).where(InventoryEnvironment.code == name))
+            if not environment:
                 next_order += 10
-                db.add(InventoryEnvironment(code=name, display_name=name, sort_order=next_order, is_active=True))
+                environment = InventoryEnvironment(code=name, display_name=name, sort_order=next_order, is_active=True)
+                db.add(environment)
+                db.flush()
+            ensure_environment_scope(
+                db,
+                environment,
+                "MICROSERVICES",
+                code=name,
+                display_name=name,
+                sort_order=index * 10,
+            )
+
+        # Preserve any environments already referenced by existing Microservices
+        # configurations, including custom environments created before scopes.
+        for environment_id in db.scalars(
+            select(InventoryMsConfiguration.environment_id)
+            .where(InventoryMsConfiguration.is_active == 1)
+            .distinct()
+        ).all():
+            environment = db.get(InventoryEnvironment, int(environment_id))
+            if environment:
+                ensure_environment_scope(db, environment, "MICROSERVICES")
         db.commit()
 
 
@@ -421,11 +443,12 @@ def restore_service(service_id: int, actor: str) -> dict[str, Any]:
 
 
 def _configuration_view(db, row: InventoryMsConfiguration) -> dict[str, Any]:
-    from .inventory_store import InventoryEnvironment
+    from .inventory_store import InventoryEnvironment, _environment_scope
 
     service = db.get(InventoryMsService, row.service_id)
     group = db.get(InventoryMsGroup, service.group_id) if service else None
     environment = db.get(InventoryEnvironment, row.environment_id)
+    environment_scope = _environment_scope(db, row.environment_id, "MICROSERVICES") if environment else None
     credential = _credential(db, row.id)
     return {
         "id": row.id,
@@ -436,8 +459,8 @@ def _configuration_view(db, row: InventoryMsConfiguration) -> dict[str, Any]:
         "service_code": service.code if service else "",
         "service_name": service.display_name if service else "",
         "environment_id": row.environment_id,
-        "environment_code": environment.code if environment else "",
-        "environment_name": environment.display_name if environment else "",
+        "environment_code": environment_scope.code if environment_scope else (environment.code if environment else ""),
+        "environment_name": environment_scope.display_name if environment_scope else (environment.display_name if environment else ""),
         "connection_name": row.connection_name,
         "db_url": row.db_url or "",
         "db_name": row.db_name or "",
@@ -478,14 +501,15 @@ def list_configurations(
 
 
 def _validate_configuration_refs(db, service_id: int, environment_id: int) -> None:
-    from .inventory_store import InventoryEnvironment
+    from .inventory_store import InventoryEnvironment, _environment_scope
 
     service = db.get(InventoryMsService, service_id)
     environment = db.get(InventoryEnvironment, environment_id)
+    environment_scope = _environment_scope(db, environment_id, "MICROSERVICES")
     if not service or not service.is_active:
         raise HTTPException(status_code=400, detail="Selected microservice is not active")
-    if not environment or not environment.is_active:
-        raise HTTPException(status_code=400, detail="Selected inventory environment is not active")
+    if not environment or not environment.is_active or not environment_scope or not environment_scope.is_active:
+        raise HTTPException(status_code=400, detail="Selected environment is not active for MICROSERVICES")
 
 
 def create_configuration(payload: dict[str, Any], actor: str) -> dict[str, Any]:
@@ -614,13 +638,18 @@ def microservice_summary() -> dict[str, int]:
 
 
 def import_microservice_rows(rows: list[dict[str, Any]], actor: str) -> dict[str, Any]:
-    from .inventory_store import InventoryEnvironment
+    from .inventory_store import InventoryEnvironment, InventoryEnvironmentScope, ensure_environment_scope
 
     factory = session_factory()
     with factory() as db:
         groups = {row.code.upper(): row for row in db.scalars(select(InventoryMsGroup)).all()}
         services = {(row.group_id, row.code.lower()): row for row in db.scalars(select(InventoryMsService)).all()}
-        environments = {row.code.upper(): row for row in db.scalars(select(InventoryEnvironment)).all()}
+        environments = {
+            scope.code.upper(): db.get(InventoryEnvironment, scope.environment_id)
+            for scope in db.scalars(
+                select(InventoryEnvironmentScope).where(InventoryEnvironmentScope.category == "MICROSERVICES")
+            ).all()
+        }
         configurations = {
             (row.service_id, row.environment_id, row.connection_name.upper()): row
             for row in db.scalars(select(InventoryMsConfiguration).where(InventoryMsConfiguration.is_active == 1)).all()
@@ -669,12 +698,22 @@ def import_microservice_rows(rows: list[dict[str, Any]], actor: str) -> dict[str
             environment = environments.get(environment_code)
             if not environment:
                 max_order = max((item.sort_order for item in environments.values()), default=0)
-                environment = InventoryEnvironment(code=environment_code, display_name=environment_code, sort_order=max_order + 10, is_active=True)
-                db.add(environment)
-                db.flush()
+                environment = db.scalar(select(InventoryEnvironment).where(InventoryEnvironment.code == environment_code))
+                if not environment:
+                    environment = InventoryEnvironment(code=environment_code, display_name=environment_code, sort_order=max_order + 10, is_active=True)
+                    db.add(environment)
+                    db.flush()
+                ensure_environment_scope(
+                    db,
+                    environment,
+                    "MICROSERVICES",
+                    code=environment_code,
+                    display_name=environment_code,
+                    sort_order=max_order + 10,
+                )
                 environments[environment_code] = environment
                 created_environments.append(environment_code)
-                _audit(db, None, "ENVIRONMENT_CREATED_BY_IMPORT", actor, environment_code)
+                _audit(db, None, "MICROSERVICES_ENVIRONMENT_CREATED_BY_IMPORT", actor, environment_code)
 
             key = (service.id, environment.id, connection_name)
             configuration = configurations.get(key)
