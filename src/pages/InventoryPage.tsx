@@ -10,6 +10,7 @@ import {
   EyeOff,
   FileSpreadsheet,
   FileText,
+  History,
   KeyRound,
   Layers3,
   Pencil,
@@ -17,6 +18,7 @@ import {
   RefreshCw,
   Search,
   Server,
+  Settings2,
   ShieldCheck,
   Trash2,
   Wrench,
@@ -39,6 +41,8 @@ import {
   updateInventoryRecord,
   type InventoryRecordInput,
 } from "../services/api";
+import InventoryCatalogManager from "../components/InventoryCatalogManager";
+import InventoryHistoryModal from "../components/InventoryHistoryModal";
 import InventoryGlobalSearch from "./InventoryGlobalSearch";
 import MicroservicesInventory from "./MicroservicesInventory";
 import PatchingInventory from "./PatchingInventory";
@@ -113,6 +117,8 @@ export default function InventoryPage({ token }: { token: string }) {
   const [importPreview, setImportPreview] = useState<InventoryImportPreview | null>(null);
   const [importBusy, setImportBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState<"xlsx" | "pdf" | null>(null);
+  const [catalogManagerOpen,setCatalogManagerOpen]=useState(false);
+  const [historyTarget,setHistoryTarget]=useState<{type:string;id?:number;name:string}|null>(null);
 
   async function loadBase() {
     setLoading(true);
@@ -427,7 +433,7 @@ export default function InventoryPage({ token }: { token: string }) {
         <h1>Inventory</h1>
         <p>One operational catalog for GTB infrastructure, Microservices database configuration and patching lifecycle. Search once across every inventory source.</p>
       </div>
-      <div className="inventory-hero-shield"><ShieldCheck size={30}/><span>DevOps only</span></div>
+      <div className="inventory-hero-actions"><button type="button" className="secondary-button" onClick={()=>setHistoryTarget({type:"",name:"All inventory changes"})}><History size={16}/>History</button><button type="button" className="secondary-button" onClick={()=>setCatalogManagerOpen(true)}><Settings2 size={16}/>Manage catalog</button><div className="inventory-hero-shield"><ShieldCheck size={30}/><span>DevOps only</span></div></div>
     </section>
 
     {notice && <div className={`inventory-notice ${notice.variant}`}>{notice.message}</div>}
@@ -661,6 +667,7 @@ export default function InventoryPage({ token }: { token: string }) {
         </div>
 
         <div className="inventory-modal-footer">
+          <button className="secondary-button" onClick={()=>setHistoryTarget({type:"GTB_RECORD",id:detailRecord.id,name:detailRecord.hostname||detailRecord.ip_address||"Inventory record"})}><History size={15}/>History</button>
           <button className="danger-button" onClick={() => void removeRecord(detailRecord)}><Trash2 size={15}/>Remove</button>
           <button className="primary-button" onClick={() => beginEditRecord(detailRecord)}><Pencil size={15}/>Edit record</button>
         </div>
@@ -758,7 +765,7 @@ export default function InventoryPage({ token }: { token: string }) {
       </form>
     </div>}
 
-    {catalogOpen && <div className="inventory-modal-backdrop" onMouseDown={() => setCatalogOpen(null)}>
+    {catalogManagerOpen&&<InventoryCatalogManager token={token} onClose={()=>setCatalogManagerOpen(false)} onChanged={()=>void loadBase()}/>}\n    {historyTarget&&<InventoryHistoryModal token={token} entityType={historyTarget.type} entityId={historyTarget.id} entityName={historyTarget.name} onClose={()=>setHistoryTarget(null)}/>}\n\n    {catalogOpen && <div className="inventory-modal-backdrop" onMouseDown={() => setCatalogOpen(null)}>
       <form className="inventory-modal inventory-catalog-form" onSubmit={saveCatalog} onMouseDown={(event) => event.stopPropagation()}>
         <button type="button" className="inventory-modal-close" onClick={() => setCatalogOpen(null)}><X size={19}/></button>
         <span className="eyebrow">INVENTORY CATALOG</span>
