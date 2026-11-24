@@ -138,6 +138,9 @@ def ensure_environment_scope(
 ) -> InventoryEnvironmentScope:
     category = _environment_category(category)
     row = _environment_scope(db, environment.id, category)
+    if active and not environment.is_active:
+        environment.is_active = True
+        environment.updated_at = _utcnow()
     if row:
         if active and not row.is_active:
             row.is_active = True
@@ -675,6 +678,9 @@ def restore_environment(environment_id: int, category: str, actor: str) -> dict[
         if not scope.is_active:
             scope.is_active = True
             scope.updated_at = _utcnow()
+            if not environment.is_active:
+                environment.is_active = True
+                environment.updated_at = _utcnow()
             record_history(
                 db,
                 entity_type=f"{category}_ENVIRONMENT",
