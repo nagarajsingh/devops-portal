@@ -765,7 +765,10 @@ export default function InventoryPage({ token }: { token: string }) {
       </form>
     </div>}
 
-    {catalogManagerOpen&&<InventoryCatalogManager token={token} onClose={()=>setCatalogManagerOpen(false)} onChanged={()=>void loadBase()}/>}\n    {historyTarget&&<InventoryHistoryModal token={token} entityType={historyTarget.type} entityId={historyTarget.id} entityName={historyTarget.name} onClose={()=>setHistoryTarget(null)}/>}\n\n    {catalogOpen && <div className="inventory-modal-backdrop" onMouseDown={() => setCatalogOpen(null)}>
+    {catalogManagerOpen&&<InventoryCatalogManager token={token} onClose={()=>setCatalogManagerOpen(false)} onChanged={()=>void loadBase()}/>}
+    {historyTarget&&<InventoryHistoryModal token={token} entityType={historyTarget.type} entityId={historyTarget.id} entityName={historyTarget.name} onClose={()=>setHistoryTarget(null)}/>}
+
+    {catalogOpen && <div className="inventory-modal-backdrop" onMouseDown={() => setCatalogOpen(null)}>
       <form className="inventory-modal inventory-catalog-form" onSubmit={saveCatalog} onMouseDown={(event) => event.stopPropagation()}>
         <button type="button" className="inventory-modal-close" onClick={() => setCatalogOpen(null)}><X size={19}/></button>
         <span className="eyebrow">INVENTORY CATALOG</span>
