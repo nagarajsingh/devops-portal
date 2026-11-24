@@ -436,9 +436,9 @@ def upsert_activity(asset_id: int, cycle_id: int, payload: dict[str, Any], actor
         row.updated_at = _utcnow()
         new_values = {"previous_patched_date": row.previous_patched_date, "planned_date": row.planned_date, "status": row.status, "app_team_approval": row.app_team_approval or "", "cr_number": row.cr_number or "", "comments": row.comments or "", "patch_role": row.patch_role or ""}
         if created:
-            record_history(db, entity_type="PATCH_ACTIVITY", entity_id=row.id, entity_name=f"{asset.hostname or asset.asset_identifier} / {cycle.code}", action="CREATE", actor=actor, field_name="record", new_value=new_values)
+            record_history(db, entity_type="PATCH_ASSET", entity_id=asset.id, entity_name=asset.hostname or asset.asset_identifier, action="UPDATE", actor=actor, field_name=f"{cycle.code}.activity", old_value=None, new_value=new_values)
         else:
-            record_changes(db, entity_type="PATCH_ACTIVITY", entity_id=row.id, entity_name=f"{asset.hostname or asset.asset_identifier} / {cycle.code}", actor=actor, old_values=old_values, new_values=new_values)
+            record_changes(db, entity_type="PATCH_ASSET", entity_id=asset.id, entity_name=asset.hostname or asset.asset_identifier, actor=actor, old_values={f"{cycle.code}.{key}": value for key, value in old_values.items()}, new_values={f"{cycle.code}.{key}": value for key, value in new_values.items()})
         _audit(db, None, "PATCH_ACTIVITY_UPDATED", actor, f"asset={asset_id} cycle={cycle.code}")
         db.commit()
         db.refresh(asset)
