@@ -79,8 +79,8 @@ export default function InventoryCatalogManager({token,onClose,onChanged}:{token
     setBusy(true);setError("");setNotice("");
     try{
       if(editing.kind==="gtb_environment"||editing.kind==="ms_environment"){
-        const category=editing.kind==="gtb_environment"?"GTB":"MICROSERVICES";
-        const payload={category:category as const,code:editing.code,display_name:editing.display_name||editing.code};
+        const category:"GTB"|"MICROSERVICES"=editing.kind==="gtb_environment"?"GTB":"MICROSERVICES";
+        const payload={category,code:editing.code,display_name:editing.display_name||editing.code};
         if(editing.id)await updateInventoryEnvironment(editing.id,payload,token);else await createInventoryEnvironment(payload,token);
       }else if(editing.kind==="application"){
         const payload={category:"GTB" as const,code:editing.code,display_name:editing.display_name||editing.code};
