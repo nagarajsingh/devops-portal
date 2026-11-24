@@ -86,6 +86,7 @@ function categoryTitle(category: InventoryCategory) {
 export default function InventoryPage({ token }: { token: string }) {
   const [summaries, setSummaries] = useState<InventoryCategorySummary[]>([]);
   const [environments, setEnvironments] = useState<InventoryEnvironment[]>([]);
+  const [microserviceEnvironments, setMicroserviceEnvironments] = useState<InventoryEnvironment[]>([]);
   const [category, setCategory] = useState<InventoryCategory | null>(null);
   const [patchingOpen, setPatchingOpen] = useState(false);
   const [patchingSummary, setPatchingSummary] = useState<InventoryPatchingSummary | null>(null);
@@ -124,13 +125,15 @@ export default function InventoryPage({ token }: { token: string }) {
     setLoading(true);
     setNotice(null);
     try {
-      const [summaryResult, environmentRows, patchSummary] = await Promise.all([
+      const [summaryResult, environmentRows, microserviceEnvironmentRows, patchSummary] = await Promise.all([
         getInventorySummary(token),
-        getInventoryEnvironments(token),
+        getInventoryEnvironments(token, "GTB"),
+        getInventoryEnvironments(token, "MICROSERVICES"),
         getInventoryPatchingSummary(token),
       ]);
       setSummaries(summaryResult.categories);
       setEnvironments(environmentRows);
+      setMicroserviceEnvironments(microserviceEnvironmentRows);
       setPatchingSummary(patchSummary);
     } catch (error) {
       setNotice({ variant: "error", message: error instanceof Error ? error.message : "Unable to load inventory" });
@@ -336,10 +339,11 @@ export default function InventoryPage({ token }: { token: string }) {
         setNotice({ variant: "success", message: `${catalogCode.trim().toUpperCase()} added to ${categoryTitle(category)} inventory.` });
       } else {
         await createInventoryEnvironment({
+          category: "GTB",
           code: catalogCode.trim(),
           display_name: catalogName.trim() || catalogCode.trim(),
         }, token);
-        setEnvironments(await getInventoryEnvironments(token));
+        setEnvironments(await getInventoryEnvironments(token, "GTB"));
         setNotice({ variant: "success", message: `${catalogCode.trim().toUpperCase()} environment added.` });
       }
       setCatalogOpen(null);
@@ -384,7 +388,7 @@ export default function InventoryPage({ token }: { token: string }) {
       setImportFile(null);
       setImportPreview(null);
       await Promise.all([refreshApplications(), loadBase()]);
-      setEnvironments(await getInventoryEnvironments(token));
+      setEnvironments(await getInventoryEnvironments(token, "GTB"));
       setNotice({
         variant: "success",
         message: `Excel import completed: ${result.created_count} created, ${result.updated_count} updated, ${result.skipped_count} skipped.`,
@@ -478,9 +482,9 @@ export default function InventoryPage({ token }: { token: string }) {
 
     {category === "MICROSERVICES" && <MicroservicesInventory
       token={token}
-      environments={environments}
+      environments={microserviceEnvironments}
       onBack={() => { setCategory(null); setApplications([]); }}
-      onEnvironmentsChange={setEnvironments}
+      onEnvironmentsChange={setMicroserviceEnvironments}
     />}
 
     {category === "GTB" && !selectedApplication && <>
