@@ -221,14 +221,14 @@ export default function MicroservicesInventory({token,environments,onBack,onEnvi
         ?await updateInventoryMsConfiguration(editingConfigId,payload,token)
         :await createInventoryMsConfiguration(payload,token);
       setConfigOpen(false);setEditingConfigId(null);
-      setNotice({variant:"success",message:`${saved.service_name} / ${saved.environment_name} / ${saved.connection_name} saved.`});
+      setNotice({variant:"success",message:`${saved.service_name} / ${saved.environment_name} / ${saved.connection_name} / ${saved.db_name||"DB"} saved.`});
       await refreshCurrent();
     }catch(error){setNotice({variant:"error",message:error instanceof Error?error.message:"Unable to save database configuration"});}
     finally{setConfigBusy(false);}
   }
 
   async function removeConfig(item:InventoryMsConfiguration){
-    if(!window.confirm(`Remove ${item.service_name} / ${item.environment_name} / ${item.connection_name}?`))return;
+    if(!window.confirm(`Remove ${item.service_name} / ${item.environment_name} / ${item.connection_name} / ${item.db_name||"DB"}?`))return;
     try{
       await deleteInventoryMsConfiguration(item.id,token);
       setDetail(null);setRevealedPassword("");
@@ -395,7 +395,7 @@ export default function MicroservicesInventory({token,environments,onBack,onEnvi
 
     {importOpen&&<div className="inventory-modal-backdrop" onMouseDown={()=>!importBusy&&setImportOpen(false)}><form className="inventory-modal inventory-import-modal" onSubmit={previewImport} onMouseDown={e=>e.stopPropagation()}>
       <button type="button" className="inventory-modal-close" onClick={()=>setImportOpen(false)}><X size={18}/></button>
-      <div className="inventory-modal-heading"><div className="inventory-card-icon"><FileSpreadsheet size={21}/></div><div><span className="eyebrow">MICROSERVICES IMPORT</span><h2>Import Excel inventory</h2><p>Expected columns: GROUP, SERVICE, ENV plus one or more DB blocks. Use DB URL / DB NAME / DB USERNAME / DB PASSWORD for PRIMARY, then DB URL 2 / DB NAME 2 / DB USERNAME 2 / DB PASSWORD 2, DB URL 3, and so on.</p></div></div>
+      <div className="inventory-modal-heading"><div className="inventory-card-icon"><FileSpreadsheet size={21}/></div><div><span className="eyebrow">MICROSERVICES IMPORT</span><h2>Import Excel inventory</h2><p>Expected columns: GROUP, SERVICE, ENV, CONNECTION NAME, DB URL, DB NAME, DB USERNAME, DB PASSWORD, NOTES. Use one database per row. Multiple rows may use the same service, environment and connection name such as PRIMARY when DB NAME is different.</p></div></div>
       <label className="inventory-import-drop"><FileSpreadsheet size={30}/><strong>{importFile?importFile.name:"Choose an .xlsx workbook"}</strong><span>{importFile?`${(importFile.size/1024/1024).toFixed(2)} MB`:"Maximum 15 MB"}</span><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={e=>{setImportFile(e.target.files?.[0]||null);setImportPreview(null);}}/></label>
       {!importPreview&&<div className="inventory-import-security"><ShieldCheck size={17}/><div><strong>Secure import</strong><span>Passwords are hidden during preview and encrypted before database storage.</span></div></div>}
       {importPreview&&<>
