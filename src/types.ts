@@ -402,6 +402,7 @@ export interface InventoryPatchingAsset {
   environment_name:string;
   environment_class:InventoryPatchEnvironmentClass;
   is_active:boolean;
+  sync_enabled?:boolean;
   activity:InventoryPatchActivity|null;
   created_by:string;
   updated_by:string;
