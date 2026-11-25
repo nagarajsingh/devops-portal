@@ -96,6 +96,8 @@ const PATCH_COLUMNS:{key:PatchColumnKey;label:string}[]=[
   {key:"source",label:"Source"},
 ];
 
+const PATCH_COLUMNS_STORAGE_KEY="devops-portal-patching-columns";
+
 const DEFAULT_PATCH_COLUMNS:Record<PatchColumnKey,boolean>={
   hostname:true,application:true,class:true,type:true,previous:true,planned:true,status:true,approval:true,cr:true,role:false,comments:false,source:true,
 };
@@ -146,7 +148,12 @@ export default function PatchingInventory({token,onBack}:Props){
   const [bulkStatus,setBulkStatus]=useState<InventoryPatchStatus>("NOT_STARTED");
   const [bulkSaving,setBulkSaving]=useState(false);
   const [columnOpen,setColumnOpen]=useState(false);
-  const [visibleColumns,setVisibleColumns]=useState<Record<PatchColumnKey,boolean>>({...DEFAULT_PATCH_COLUMNS});
+  const [visibleColumns,setVisibleColumns]=useState<Record<PatchColumnKey,boolean>>(()=>{
+    try{
+      const saved=localStorage.getItem(PATCH_COLUMNS_STORAGE_KEY);
+      return saved?{...DEFAULT_PATCH_COLUMNS,...JSON.parse(saved)}:{...DEFAULT_PATCH_COLUMNS};
+    }catch{return {...DEFAULT_PATCH_COLUMNS};}
+  });
   const [cycleOpen,setCycleOpen]=useState(false);
   const [cycleCode,setCycleCode]=useState("");
   const [bulkAddOpen,setBulkAddOpen]=useState(false);
@@ -179,6 +186,7 @@ export default function PatchingInventory({token,onBack}:Props){
 
   useEffect(()=>{loadCycles().then(rows=>void loadData(rows[0]?.id||0)).catch(error=>setNotice({variant:"error",message:error instanceof Error?error.message:"Unable to load patch cycles"}));},[token]);
   useEffect(()=>{if(cycleId)void loadData(cycleId);},[cycleId,environmentClass,status]);
+  useEffect(()=>{localStorage.setItem(PATCH_COLUMNS_STORAGE_KEY,JSON.stringify(visibleColumns));},[visibleColumns]);
 
   const currentCycle=cycles.find(item=>item.id===cycleId);
   const filtered=useMemo(()=>{
