@@ -239,6 +239,7 @@ export const getInventoryPatchingAssets=(token:string,filters:{cycle_id?:number;
 export const createInventoryPatchingAsset=(payload:InventoryPatchingAssetInput,token:string)=>request<InventoryPatchingAsset>("/inventory/patching/assets",{method:"POST",body:JSON.stringify(payload)},token);
 export const updateInventoryPatchingAsset=(id:number,payload:InventoryPatchingAssetInput,token:string)=>request<InventoryPatchingAsset>(`/inventory/patching/assets/${id}`,{method:"PUT",body:JSON.stringify(payload)},token);
 export const deleteInventoryPatchingAsset=(id:number,token:string)=>request<void>(`/inventory/patching/assets/${id}`,{method:"DELETE"},token);
+export const deleteInventoryPatchingAssetsBulk=(assetIds:number[],token:string)=>request<{deleted_count:number;gtb_suppressed_count:number}>("/inventory/patching/assets/bulk-delete",{method:"POST",body:JSON.stringify({asset_ids:assetIds})},token);
 export const saveInventoryPatchActivity=(assetId:number,cycleId:number,payload:InventoryPatchActivityInput,token:string)=>request<InventoryPatchingAsset>(`/inventory/patching/assets/${assetId}/cycles/${cycleId}`,{method:"PUT",body:JSON.stringify(payload)},token);
 export const previewInventoryPatchingExcel=(file:File,token:string)=>uploadInventoryWorkbook<InventoryPatchingImportPreview>("/inventory/patching/import/preview",file,token);
 export const commitInventoryPatchingExcel=(file:File,token:string)=>uploadInventoryWorkbook<InventoryPatchingImportResult>("/inventory/patching/import/commit",file,token);
