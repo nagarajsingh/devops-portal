@@ -265,6 +265,8 @@ export default function KubernetesLogsPage({ token, role }: Props) {
         setNamespaces(rows);
         setNamespace(rows[0] || "");
       }
+      setManageOpen(false);
+      setManageSearch("");
     } catch (reason) {
       setManageMessage(reason instanceof Error ? reason.message : "Unable to save namespace access");
     } finally {
