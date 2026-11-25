@@ -22,6 +22,7 @@ from .inventory_patching import (
     create_asset as create_patching_asset,
     create_cycle as create_patch_cycle,
     delete_asset as delete_patching_asset,
+    bulk_delete_assets as bulk_delete_patching_assets,
     list_assets as list_patching_assets,
     list_cycles as list_patch_cycles,
     patching_summary,
@@ -139,6 +140,10 @@ class InventoryPatchingAssetPayload(BaseModel):
 
 class InventoryPatchCyclePayload(BaseModel):
     code: str = Field(min_length=6, max_length=30)
+
+
+class InventoryPatchingBulkDeletePayload(BaseModel):
+    asset_ids: list[int] = Field(min_length=1, max_length=500)
 
 
 class InventoryPatchActivityPayload(BaseModel):
@@ -631,6 +636,14 @@ def remove_patching_asset(
 ):
     delete_patching_asset(asset_id, user.username)
     return Response(status_code=204)
+
+
+@router.post("/patching/assets/bulk-delete")
+def remove_patching_assets_bulk(
+    payload: InventoryPatchingBulkDeletePayload,
+    user: UserContext = Depends(require_devops),
+):
+    return bulk_delete_patching_assets(payload.asset_ids, user.username)
 
 
 @router.put("/patching/assets/{asset_id}/cycles/{cycle_id}")
