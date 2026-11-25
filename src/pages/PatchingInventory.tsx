@@ -532,7 +532,7 @@ export default function PatchingInventory({token,onBack}:Props){
     {bulkAddOpen&&<div className="inventory-modal-backdrop" onMouseDown={()=>!bulkAddSaving&&setBulkAddOpen(false)}><article className="inventory-modal patch-bulk-modal" onMouseDown={e=>e.stopPropagation()}>
       <button type="button" className="inventory-modal-close" onClick={()=>setBulkAddOpen(false)}><X size={18}/></button>
       <div className="inventory-modal-heading"><div className="inventory-card-icon"><Server size={21}/></div><div><span className="eyebrow">BULK PATCHING SCOPE</span><h2>Add multiple servers</h2><p>Add several servers or clusters to {currentCycle?.code||"the selected cycle"} in one save.</p></div></div>
-      <div className="patch-bulk-table-wrap"><table className="inventory-table patch-bulk-table"><thead><tr><th>IP / Cluster</th><th>Hostname</th><th>Application</th><th>Owner</th><th>Type</th><th>Environment</th><th>Class</th><th>Status</th><th/></tr></thead><tbody>
+      <div className="patch-bulk-table-wrap"><table className="inventory-table patch-bulk-table"><thead><tr><th>IP / Cluster</th><th>Hostname</th><th>Application</th><th>Owner</th><th>Type</th><th>Environment</th><th>Class</th><th>Previous Patch</th><th>Planned</th><th>Status</th><th>Approval</th><th>CR</th><th/></tr></thead><tbody>
         {bulkRows.map(row=><tr key={row.id}>
           <td><input value={row.asset.asset_identifier} onChange={e=>updateBulkAsset(row.id,{asset_identifier:e.target.value})} placeholder="10.x.x.x"/></td>
           <td><input value={row.asset.hostname} onChange={e=>updateBulkAsset(row.id,{hostname:e.target.value})} placeholder="hostname"/></td>
@@ -541,7 +541,11 @@ export default function PatchingInventory({token,onBack}:Props){
           <td><input value={row.asset.asset_type} onChange={e=>updateBulkAsset(row.id,{asset_type:e.target.value})} placeholder="APP SERVER"/></td>
           <td><input value={row.asset.environment_name} onChange={e=>updateBulkAsset(row.id,{environment_name:e.target.value})} placeholder="DEV / SIT / PROD"/></td>
           <td><select value={row.asset.environment_class} onChange={e=>updateBulkAsset(row.id,{environment_class:e.target.value as InventoryPatchEnvironmentClass})}><option value="NON_PROD">NON-PROD</option><option value="PROD">PROD</option><option value="DR">DR</option></select></td>
+          <td><input type="date" value={row.activity.previous_patched_date||""} onChange={e=>updateBulkActivity(row.id,{previous_patched_date:e.target.value})}/></td>
+          <td><input type="date" value={row.activity.planned_date||""} onChange={e=>updateBulkActivity(row.id,{planned_date:e.target.value})}/></td>
           <td><select value={row.activity.status} onChange={e=>updateBulkActivity(row.id,{status:e.target.value as InventoryPatchStatus})}>{Object.entries(STATUS_LABELS).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></td>
+          <td><input value={row.activity.app_team_approval} onChange={e=>updateBulkActivity(row.id,{app_team_approval:e.target.value})} placeholder="Approved / Pending"/></td>
+          <td><input value={row.activity.cr_number} onChange={e=>updateBulkActivity(row.id,{cr_number:e.target.value})} placeholder="CRQ..."/></td>
           <td><button className="inventory-row-action" type="button" onClick={()=>removeBulkRow(row.id)} disabled={bulkRows.length===1}><Trash2 size={14}/></button></td>
         </tr>)}
       </tbody></table></div>
