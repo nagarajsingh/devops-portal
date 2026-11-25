@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, or_, select
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, or_, select, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .inventory_history import record_changes, record_history
@@ -61,6 +61,7 @@ class InventoryPatchingAsset(Base):
     environment_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
     environment_class: Mapped[str] = mapped_column(String(30), nullable=False, default="NON_PROD", index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sync_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     updated_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -133,7 +134,25 @@ def ensure_cycle(code: str, actor: str = "system") -> InventoryPatchCycle:
         return row
 
 
+def _migrate_patching_schema() -> None:
+    factory = session_factory()
+    with factory() as db:
+        bind = db.get_bind()
+        if bind and bind.dialect.name == "mssql":
+            db.execute(text("""
+                IF OBJECT_ID('inventory_patching_assets', 'U') IS NOT NULL
+                   AND COL_LENGTH('inventory_patching_assets', 'sync_enabled') IS NULL
+                BEGIN
+                    ALTER TABLE inventory_patching_assets
+                    ADD sync_enabled BIT NOT NULL
+                    CONSTRAINT df_inventory_patching_assets_sync_enabled DEFAULT 1;
+                END;
+            """))
+            db.commit()
+
+
 def initialize_patching_inventory() -> None:
+    _migrate_patching_schema()
     now = _utcnow()
     current_quarter = ((now.month - 1) // 3) + 1
     ensure_cycle(_cycle_code(current_quarter, now.year), "system")
@@ -168,6 +187,7 @@ def _asset_view(db, row: InventoryPatchingAsset, cycle_id: int | None = None) ->
         "environment_name": row.environment_name or "",
         "environment_class": row.environment_class,
         "is_active": row.is_active,
+        "sync_enabled": row.sync_enabled,
         "activity": {
             "id": activity.id,
             "cycle_id": activity.cycle_id,
@@ -252,6 +272,8 @@ def sync_gtb_record(record_id: int, actor: str = "system") -> None:
             return
 
         row = _find_linked_gtb_asset(db, record.id)
+        if row and not row.sync_enabled:
+            return
         if not row:
             row = InventoryPatchingAsset(
                 source_type="GTB",
@@ -264,6 +286,7 @@ def sync_gtb_record(record_id: int, actor: str = "system") -> None:
                 environment_name=env_name or None,
                 environment_class=infer_environment_class(env_name),
                 is_active=True,
+                sync_enabled=True,
                 created_by=actor,
                 updated_by=actor,
             )
@@ -279,6 +302,7 @@ def sync_gtb_record(record_id: int, actor: str = "system") -> None:
             row.environment_name = env_name or None
             row.environment_class = infer_environment_class(env_name)
             row.is_active = True
+            row.sync_enabled = True
             row.updated_by = actor
             row.updated_at = _utcnow()
         db.commit()
@@ -343,6 +367,7 @@ def create_asset(payload: dict[str, Any], actor: str) -> dict[str, Any]:
             environment_name=str(payload.get("environment_name") or "").strip() or None,
             environment_class=env_class,
             is_active=True,
+            sync_enabled=True,
             created_by=actor,
             updated_by=actor,
         )
@@ -385,20 +410,67 @@ def update_asset(asset_id: int, payload: dict[str, Any], actor: str) -> dict[str
         return _asset_view(db, row)
 
 
+def _archive_patching_asset(db, row: InventoryPatchingAsset, actor: str) -> bool:
+    was_gtb = row.source_type == "GTB"
+    row.is_active = False
+    if was_gtb:
+        # Suppress only the Patching projection. The source GTB inventory record
+        # is intentionally untouched and future automatic sync will respect this.
+        row.sync_enabled = False
+    row.updated_by = actor
+    row.updated_at = _utcnow()
+    action = "PATCH_GTB_ASSET_REMOVED_FROM_SCOPE" if was_gtb else "PATCH_ASSET_DELETED"
+    _audit(db, None, action, actor, f"asset={row.id}")
+    record_history(
+        db,
+        entity_type="PATCH_ASSET",
+        entity_id=row.id,
+        entity_name=row.hostname or row.asset_identifier,
+        action="ARCHIVE",
+        actor=actor,
+        field_name="is_active",
+        old_value=True,
+        new_value=False,
+        source="patching",
+    )
+    return was_gtb
+
+
 def delete_asset(asset_id: int, actor: str) -> None:
     factory = session_factory()
     with factory() as db:
         row = db.get(InventoryPatchingAsset, asset_id)
         if not row or not row.is_active:
             raise HTTPException(status_code=404, detail="Patching asset was not found")
-        if row.source_type == "GTB":
-            raise HTTPException(status_code=409, detail="GTB-linked assets remain visible while the GTB record is active")
-        row.is_active = False
-        row.updated_by = actor
-        row.updated_at = _utcnow()
-        _audit(db, None, "PATCH_ASSET_DELETED", actor, f"asset={row.id}")
-        record_history(db, entity_type="PATCH_ASSET", entity_id=row.id, entity_name=row.hostname or row.asset_identifier, action="ARCHIVE", actor=actor, field_name="is_active", old_value=True, new_value=False)
+        _archive_patching_asset(db, row, actor)
         db.commit()
+
+
+def bulk_delete_assets(asset_ids: list[int], actor: str) -> dict[str, int]:
+    ids = sorted({int(value) for value in asset_ids if int(value) > 0})
+    if not ids:
+        raise HTTPException(status_code=400, detail="Select at least one patching asset")
+    if len(ids) > 500:
+        raise HTTPException(status_code=400, detail="A maximum of 500 patching assets can be removed at once")
+
+    factory = session_factory()
+    deleted = 0
+    gtb_suppressed = 0
+    with factory() as db:
+        rows = list(
+            db.scalars(
+                select(InventoryPatchingAsset).where(
+                    InventoryPatchingAsset.id.in_(ids),
+                    InventoryPatchingAsset.is_active == 1,
+                )
+            ).all()
+        )
+        for row in rows:
+            if _archive_patching_asset(db, row, actor):
+                gtb_suppressed += 1
+            deleted += 1
+        db.commit()
+    return {"deleted_count": deleted, "gtb_suppressed_count": gtb_suppressed}
 
 
 def upsert_activity(asset_id: int, cycle_id: int, payload: dict[str, Any], actor: str) -> dict[str, Any]:
