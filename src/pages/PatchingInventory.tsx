@@ -177,7 +177,9 @@ export default function PatchingInventory({token,onBack}:Props){
         getInventoryPatchingSummary(token,selectedCycle||undefined),
       ]);
       setAssets(assetRows);setSummary(summaryRow);
-      setActivityDrafts(Object.fromEntries(assetRows.map(item=>[item.id,activityInput(item)])));
+      const drafts:Record<number,InventoryPatchActivityInput>={};
+      assetRows.forEach(item=>{drafts[item.id]=activityInput(item);});
+      setActivityDrafts(drafts);
       setDirtyIds([]);
       setSelectedIds([]);
     }catch(error){setNotice({variant:"error",message:error instanceof Error?error.message:"Unable to load patching inventory"});}
