@@ -23,6 +23,7 @@ import {
   createInventoryPatchCycle,
   createInventoryPatchingAsset,
   deleteInventoryPatchingAsset,
+  deleteInventoryPatchingAssetsBulk,
   downloadInventoryExport,
   getInventoryPatchCycles,
   getInventoryPatchingAssets,
@@ -77,6 +78,44 @@ const STATUS_LABELS:Record<InventoryPatchStatus,string>={
 function dateText(value?:string){if(!value)return "—";const parsed=new Date(value);return Number.isNaN(parsed.getTime())?value:parsed.toLocaleDateString();}
 function classLabel(value:InventoryPatchEnvironmentClass){return value==="NON_PROD"?"NON-PROD":value;}
 
+type PatchColumnKey="hostname"|"application"|"class"|"type"|"previous"|"planned"|"status"|"approval"|"cr"|"role"|"comments"|"source";
+type BulkServerRow={id:number;asset:InventoryPatchingAssetInput;activity:InventoryPatchActivityInput};
+
+const PATCH_COLUMNS:{key:PatchColumnKey;label:string}[]=[
+  {key:"hostname",label:"Hostname"},
+  {key:"application",label:"Application"},
+  {key:"class",label:"Class"},
+  {key:"type",label:"Type"},
+  {key:"previous",label:"Previous Patch"},
+  {key:"planned",label:"Planned"},
+  {key:"status",label:"Status"},
+  {key:"approval",label:"Approval"},
+  {key:"cr",label:"CR"},
+  {key:"role",label:"Patch Role"},
+  {key:"comments",label:"Comments"},
+  {key:"source",label:"Source"},
+];
+
+const DEFAULT_PATCH_COLUMNS:Record<PatchColumnKey,boolean>={
+  hostname:true,application:true,class:true,type:true,previous:true,planned:true,status:true,approval:true,cr:true,role:false,comments:false,source:true,
+};
+
+function activityInput(item:InventoryPatchingAsset):InventoryPatchActivityInput{
+  return {
+    previous_patched_date:item.activity?.previous_patched_date||"",
+    planned_date:item.activity?.planned_date||"",
+    status:item.activity?.status||"NOT_STARTED",
+    app_team_approval:item.activity?.app_team_approval||"",
+    cr_number:item.activity?.cr_number||"",
+    comments:item.activity?.comments||"",
+    patch_role:item.activity?.patch_role||"",
+  };
+}
+
+function blankBulkRow(id:number):BulkServerRow{
+  return {id,asset:{...emptyAsset},activity:{...emptyActivity}};
+}
+
 export default function PatchingInventory({token,onBack}:Props){
   const [cycles,setCycles]=useState<InventoryPatchCycle[]>([]);
   const [cycleId,setCycleId]=useState(0);
@@ -101,6 +140,19 @@ export default function PatchingInventory({token,onBack}:Props){
   const [importPreview,setImportPreview]=useState<InventoryPatchingImportPreview|null>(null);
   const [importBusy,setImportBusy]=useState(false);
   const [exportBusy,setExportBusy]=useState<"xlsx"|"pdf"|null>(null);
+  const [selectedIds,setSelectedIds]=useState<number[]>([]);
+  const [activityDrafts,setActivityDrafts]=useState<Record<number,InventoryPatchActivityInput>>({});
+  const [dirtyIds,setDirtyIds]=useState<number[]>([]);
+  const [bulkStatus,setBulkStatus]=useState<InventoryPatchStatus>("NOT_STARTED");
+  const [bulkSaving,setBulkSaving]=useState(false);
+  const [columnOpen,setColumnOpen]=useState(false);
+  const [visibleColumns,setVisibleColumns]=useState<Record<PatchColumnKey,boolean>>({...DEFAULT_PATCH_COLUMNS});
+  const [cycleOpen,setCycleOpen]=useState(false);
+  const [cycleCode,setCycleCode]=useState("");
+  const [bulkAddOpen,setBulkAddOpen]=useState(false);
+  const [bulkRows,setBulkRows]=useState<BulkServerRow[]>([blankBulkRow(1),blankBulkRow(2)]);
+  const [bulkAddSaving,setBulkAddSaving]=useState(false);
+  const [nextBulkRowId,setNextBulkRowId]=useState(3);
 
   async function loadCycles(){
     const rows=await getInventoryPatchCycles(token);
@@ -118,6 +170,9 @@ export default function PatchingInventory({token,onBack}:Props){
         getInventoryPatchingSummary(token,selectedCycle||undefined),
       ]);
       setAssets(assetRows);setSummary(summaryRow);
+      setActivityDrafts(Object.fromEntries(assetRows.map(item=>[item.id,activityInput(item)])));
+      setDirtyIds([]);
+      setSelectedIds([]);
     }catch(error){setNotice({variant:"error",message:error instanceof Error?error.message:"Unable to load patching inventory"});}
     finally{setLoading(false);}
   }
@@ -135,12 +190,13 @@ export default function PatchingInventory({token,onBack}:Props){
     ].some(value=>value.toLowerCase().includes(q)));
   },[assets,search]);
 
-  async function createCycle(){
-    const value=window.prompt("Patch cycle code (example: Q4-2026)");
-    if(!value?.trim())return;
+  async function createCycle(event:FormEvent){
+    event.preventDefault();
+    if(!cycleCode.trim())return;
     try{
-      const created=await createInventoryPatchCycle(value.trim(),token);
+      const created=await createInventoryPatchCycle(cycleCode.trim(),token);
       const rows=await getInventoryPatchCycles(token);setCycles(rows);setCycleId(created.id);
+      setCycleOpen(false);setCycleCode("");
       setNotice({variant:"success",message:`${created.code} patch cycle is ready.`});
     }catch(error){setNotice({variant:"error",message:error instanceof Error?error.message:"Unable to create patch cycle"});}
   }
@@ -196,10 +252,114 @@ export default function PatchingInventory({token,onBack}:Props){
   }
 
   async function removeAsset(item:InventoryPatchingAsset){
-    if(item.source_type==="GTB"){setNotice({variant:"info",message:"This asset is linked to GTB Inventory and remains visible while the GTB record is active."});return;}
-    if(!window.confirm(`Remove ${item.asset_identifier} from Patching inventory?`))return;
-    try{await deleteInventoryPatchingAsset(item.id,token);setDetail(null);setNotice({variant:"success",message:"Patching asset removed."});await loadData();}
-    catch(error){setNotice({variant:"error",message:error instanceof Error?error.message:"Unable to remove patching asset"});}
+    const suffix=item.source_type==="GTB"?" It will remain available in GTB Inventory.":"";
+    if(!window.confirm(`Remove ${item.asset_identifier} from Patching inventory?${suffix}`))return;
+    try{
+      await deleteInventoryPatchingAsset(item.id,token);
+      setDetail(null);
+      setNotice({variant:"success",message:item.source_type==="GTB"?"Removed from Patching only. The GTB record was not deleted.":"Patching asset removed."});
+      await loadData();
+    }catch(error){setNotice({variant:"error",message:error instanceof Error?error.message:"Unable to remove patching asset"});}
+  }
+
+  function updateActivityDraft(assetId:number,patch:Partial<InventoryPatchActivityInput>){
+    setActivityDrafts(current=>({...current,[assetId]:{...(current[assetId]||emptyActivity),...patch}}));
+    setDirtyIds(current=>current.includes(assetId)?current:[...current,assetId]);
+  }
+
+  function toggleSelected(assetId:number,checked:boolean){
+    setSelectedIds(current=>checked?current.includes(assetId)?current:[...current,assetId]:current.filter(id=>id!==assetId));
+  }
+
+  function toggleAllVisible(checked:boolean){
+    setSelectedIds(checked?filtered.map(item=>item.id):[]);
+  }
+
+  function applyStatusToSelected(){
+    if(!selectedIds.length){setNotice({variant:"info",message:"Select one or more patching rows first."});return;}
+    selectedIds.forEach(id=>updateActivityDraft(id,{status:bulkStatus}));
+  }
+
+  async function saveGridChanges(){
+    if(!cycleId||!dirtyIds.length)return;
+    setBulkSaving(true);setNotice(null);
+    try{
+      for(const assetId of dirtyIds){
+        const draft=activityDrafts[assetId]||emptyActivity;
+        await saveInventoryPatchActivity(assetId,cycleId,{
+          ...draft,
+          previous_patched_date:draft.previous_patched_date||null,
+          planned_date:draft.planned_date||null,
+        },token);
+      }
+      const count=dirtyIds.length;
+      setNotice({variant:"success",message:`${count} patching row${count===1?"":"s"} saved for ${currentCycle?.code||"selected cycle"}.`});
+      await loadData();
+    }catch(error){setNotice({variant:"error",message:error instanceof Error?error.message:"Unable to save patching changes"});}
+    finally{setBulkSaving(false);}
+  }
+
+  async function removeSelected(){
+    if(!selectedIds.length)return;
+    if(!window.confirm(`Remove ${selectedIds.length} selected row${selectedIds.length===1?"":"s"} from Patching? GTB source records will remain in GTB Inventory.`))return;
+    setBulkSaving(true);
+    try{
+      const result=await deleteInventoryPatchingAssetsBulk(selectedIds,token);
+      setNotice({variant:"success",message:`${result.deleted_count} patching row${result.deleted_count===1?"":"s"} removed. ${result.gtb_suppressed_count} GTB-linked row${result.gtb_suppressed_count===1?"":"s"} removed from Patching only.`});
+      await loadData();
+    }catch(error){setNotice({variant:"error",message:error instanceof Error?error.message:"Unable to remove selected patching rows"});}
+    finally{setBulkSaving(false);}
+  }
+
+  function beginBulkAdd(){
+    setBulkRows([blankBulkRow(1),blankBulkRow(2)]);
+    setNextBulkRowId(3);
+    setBulkAddOpen(true);
+  }
+
+  function addBulkRow(){
+    setBulkRows(current=>[...current,blankBulkRow(nextBulkRowId)]);
+    setNextBulkRowId(value=>value+1);
+  }
+
+  function removeBulkRow(rowId:number){
+    setBulkRows(current=>current.length===1?current:current.filter(row=>row.id!==rowId));
+  }
+
+  function updateBulkAsset(rowId:number,patch:Partial<InventoryPatchingAssetInput>){
+    setBulkRows(current=>current.map(row=>row.id===rowId?{...row,asset:{...row.asset,...patch}}:row));
+  }
+
+  function updateBulkActivity(rowId:number,patch:Partial<InventoryPatchActivityInput>){
+    setBulkRows(current=>current.map(row=>row.id===rowId?{...row,activity:{...row.activity,...patch}}:row));
+  }
+
+  async function saveBulkServers(){
+    if(!cycleId){setNotice({variant:"error",message:"Create or select a patch cycle first."});return;}
+    const rows=bulkRows.filter(row=>row.asset.asset_identifier.trim()||row.asset.hostname.trim());
+    if(!rows.length){setNotice({variant:"error",message:"Enter at least one IP / cluster or hostname."});return;}
+    setBulkAddSaving(true);setNotice(null);
+    let created=0;
+    const errors:string[]=[];
+    for(const row of rows){
+      try{
+        const saved=await createInventoryPatchingAsset(row.asset,token);
+        await saveInventoryPatchActivity(saved.id,cycleId,{
+          ...row.activity,
+          previous_patched_date:row.activity.previous_patched_date||null,
+          planned_date:row.activity.planned_date||null,
+        },token);
+        created+=1;
+      }catch(error){
+        errors.push(error instanceof Error?error.message:"Unable to add server");
+      }
+    }
+    if(created){
+      setBulkAddOpen(false);
+      await loadData();
+    }
+    setNotice({variant:errors.length?"info":"success",message:`${created} server${created===1?"":"s"} added${errors.length?`; ${errors.length} row${errors.length===1?"":"s"} could not be added.`:"."}`});
+    setBulkAddSaving(false);
   }
 
   function beginImport(){setImportOpen(true);setImportFile(null);setImportPreview(null);setNotice(null);}
@@ -248,7 +408,8 @@ export default function PatchingInventory({token,onBack}:Props){
         <button className="secondary-button" disabled={!!exportBusy} onClick={()=>void runExport("xlsx")}><Download size={15}/>{exportBusy==="xlsx"?"Exporting...":"Excel"}</button>
         <button className="secondary-button" disabled={!!exportBusy} onClick={()=>void runExport("pdf")}><FileText size={15}/>{exportBusy==="pdf"?"Exporting...":"PDF"}</button>
         <button className="secondary-button" onClick={beginImport}><FileSpreadsheet size={15}/>Import tracker</button>
-        <button className="secondary-button" onClick={()=>void createCycle()}><CalendarDays size={15}/>New cycle</button>
+        <button className="secondary-button" onClick={()=>{setCycleCode("");setCycleOpen(true);}}><CalendarDays size={15}/>New cycle</button>
+        <button className="secondary-button" onClick={beginBulkAdd}><Plus size={15}/>Add multiple</button>
         <button className="primary-button" onClick={beginAdd}><Plus size={15}/>Add asset</button>
       </div>
     </section>
@@ -275,21 +436,53 @@ export default function PatchingInventory({token,onBack}:Props){
     <section className="inventory-record-panel">
       <div className="inventory-record-toolbar patch-toolbar">
         <div className="inventory-search"><Search size={17}/><input value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")void loadData();}} placeholder="Search IP, cluster, hostname, application, owner, CR or comments..."/></div>
-        <button className="secondary-button" disabled={loading} onClick={()=>void loadData()}><RefreshCw size={15} className={loading?"spin":""}/>Refresh</button>
+        <div className="patch-grid-actions">
+          <select value={bulkStatus} onChange={e=>setBulkStatus(e.target.value as InventoryPatchStatus)} title="Status to apply to selected rows">{Object.entries(STATUS_LABELS).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select>
+          <button className="secondary-button" disabled={!selectedIds.length} onClick={applyStatusToSelected}>Apply status</button>
+          <button className="secondary-button" disabled={!dirtyIds.length||bulkSaving} onClick={()=>void saveGridChanges()}><CheckCircle2 size={15}/>{bulkSaving?"Saving...":`Save changes (${dirtyIds.length})`}</button>
+          <button className="danger-button" disabled={!selectedIds.length||bulkSaving} onClick={()=>void removeSelected()}><Trash2 size={15}/>Delete selected ({selectedIds.length})</button>
+          <div className="patch-column-menu-wrap"><button className="secondary-button" onClick={()=>setColumnOpen(value=>!value)}>Columns</button>{columnOpen&&<div className="patch-column-menu">{PATCH_COLUMNS.map(column=><label key={column.key}><input type="checkbox" checked={visibleColumns[column.key]} onChange={e=>setVisibleColumns(current=>({...current,[column.key]:e.target.checked}))}/><span>{column.label}</span></label>)}</div>}</div>
+          <button className="secondary-button" disabled={loading} onClick={()=>void loadData()}><RefreshCw size={15} className={loading?"spin":""}/>Refresh</button>
+        </div>
         <span>{filtered.length} shown</span>
       </div>
       <div className="inventory-table-wrap patch-table-wrap"><table className="inventory-table patch-table">
-        <thead><tr><th>IP / Cluster</th><th>Hostname</th><th>Application</th><th>Class</th><th>Type</th><th>Previous Patch</th><th>Planned</th><th>Status</th><th>Approval</th><th>CR</th><th>Source</th><th/></tr></thead>
+        <thead><tr>
+          <th className="patch-select-cell"><input type="checkbox" checked={filtered.length>0&&selectedIds.length===filtered.length} onChange={e=>toggleAllVisible(e.target.checked)}/></th>
+          <th>IP / Cluster</th>
+          {visibleColumns.hostname&&<th>Hostname</th>}
+          {visibleColumns.application&&<th>Application</th>}
+          {visibleColumns.class&&<th>Class</th>}
+          {visibleColumns.type&&<th>Type</th>}
+          {visibleColumns.previous&&<th>Previous Patch</th>}
+          {visibleColumns.planned&&<th>Planned</th>}
+          {visibleColumns.status&&<th>Status</th>}
+          {visibleColumns.approval&&<th>Approval</th>}
+          {visibleColumns.cr&&<th>CR</th>}
+          {visibleColumns.role&&<th>Patch Role</th>}
+          {visibleColumns.comments&&<th>Comments</th>}
+          {visibleColumns.source&&<th>Source</th>}
+          <th/>
+        </tr></thead>
         <tbody>
-          {filtered.map(item=>{const activity=item.activity;return <tr key={item.id} className={item.environment_class==="PROD"?"patch-prod-row":""}>
-            <td><strong>{item.asset_identifier}</strong></td><td>{item.hostname||"—"}</td><td>{item.application||"—"}{item.application_owner&&<small className="patch-owner">{item.application_owner}</small>}</td>
-            <td><span className={`patch-env ${item.environment_class.toLowerCase()}`}>{classLabel(item.environment_class)}</span></td><td>{item.asset_type||"—"}</td>
-            <td>{dateText(activity?.previous_patched_date)}</td><td>{dateText(activity?.planned_date)}</td>
-            <td><span className={`patch-status ${(activity?.status||"NOT_STARTED").toLowerCase()}`}>{STATUS_LABELS[activity?.status||"NOT_STARTED"]}</span></td>
-            <td>{activity?.app_team_approval||"—"}</td><td><strong>{activity?.cr_number||"—"}</strong></td><td><span className={`patch-source ${item.source_type.toLowerCase()}`}>{item.source_type}</span></td>
+          {filtered.map(item=>{const draft=activityDrafts[item.id]||activityInput(item);return <tr key={item.id} className={`${item.environment_class==="PROD"?"patch-prod-row":""} ${dirtyIds.includes(item.id)?"patch-row-dirty":""}`}>
+            <td className="patch-select-cell"><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={e=>toggleSelected(item.id,e.target.checked)}/></td>
+            <td><strong>{item.asset_identifier}</strong></td>
+            {visibleColumns.hostname&&<td>{item.hostname||"—"}</td>}
+            {visibleColumns.application&&<td>{item.application||"—"}{item.application_owner&&<small className="patch-owner">{item.application_owner}</small>}</td>}
+            {visibleColumns.class&&<td><span className={`patch-env ${item.environment_class.toLowerCase()}`}>{classLabel(item.environment_class)}</span></td>}
+            {visibleColumns.type&&<td>{item.asset_type||"—"}</td>}
+            {visibleColumns.previous&&<td><input className="patch-grid-input date" type="date" value={draft.previous_patched_date||""} onChange={e=>updateActivityDraft(item.id,{previous_patched_date:e.target.value})}/></td>}
+            {visibleColumns.planned&&<td><input className="patch-grid-input date" type="date" value={draft.planned_date||""} onChange={e=>updateActivityDraft(item.id,{planned_date:e.target.value})}/></td>}
+            {visibleColumns.status&&<td><select className={`patch-grid-select ${draft.status.toLowerCase()}`} value={draft.status} onChange={e=>updateActivityDraft(item.id,{status:e.target.value as InventoryPatchStatus})}>{Object.entries(STATUS_LABELS).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></td>}
+            {visibleColumns.approval&&<td><input className="patch-grid-input" value={draft.app_team_approval} onChange={e=>updateActivityDraft(item.id,{app_team_approval:e.target.value})} placeholder="Approval"/></td>}
+            {visibleColumns.cr&&<td><input className="patch-grid-input" value={draft.cr_number} onChange={e=>updateActivityDraft(item.id,{cr_number:e.target.value})} placeholder="CR number"/></td>}
+            {visibleColumns.role&&<td><input className="patch-grid-input" value={draft.patch_role} onChange={e=>updateActivityDraft(item.id,{patch_role:e.target.value})} placeholder="Role"/></td>}
+            {visibleColumns.comments&&<td><input className="patch-grid-input wide" value={draft.comments} onChange={e=>updateActivityDraft(item.id,{comments:e.target.value})} placeholder="Comments"/></td>}
+            {visibleColumns.source&&<td><span className={`patch-source ${item.source_type.toLowerCase()}`}>{item.source_type}</span></td>}
             <td><button className="inventory-row-action" onClick={()=>setDetail(item)}>View</button></td>
           </tr>})}
-          {!loading&&filtered.length===0&&<tr><td colSpan={12}><div className="inventory-empty">No patching assets match this cycle and filter selection.</div></td></tr>}
+          {!loading&&filtered.length===0&&<tr><td colSpan={16}><div className="inventory-empty">No patching assets match this cycle and filter selection.</div></td></tr>}
         </tbody>
       </table></div>
     </section>
@@ -299,7 +492,7 @@ export default function PatchingInventory({token,onBack}:Props){
       <div className="inventory-modal-heading"><div className="inventory-card-icon"><Server size={21}/></div><div><span className="eyebrow">{detail.environment_class} · {detail.source_type}</span><h2>{detail.hostname||detail.asset_identifier}</h2><p>{detail.application||"Patching asset"} · {detail.asset_identifier}</p></div></div>
       <div className="inventory-detail-grid"><div><span>IP / Cluster</span><strong>{detail.asset_identifier}</strong></div><div><span>Hostname</span><strong>{detail.hostname||"—"}</strong></div><div><span>Application</span><strong>{detail.application||"—"}</strong></div><div><span>Owner</span><strong>{detail.application_owner||"—"}</strong></div><div><span>Type</span><strong>{detail.asset_type||"—"}</strong></div><div><span>Source</span><strong>{detail.source_type}</strong></div></div>
       <section className="patch-activity-detail"><h3>{detail.activity?.cycle_code||currentCycle?.code} activity</h3><div className="inventory-detail-grid"><div><span>Previous patch</span><strong>{dateText(detail.activity?.previous_patched_date)}</strong></div><div><span>Planned date</span><strong>{dateText(detail.activity?.planned_date)}</strong></div><div><span>Status</span><strong>{STATUS_LABELS[detail.activity?.status||"NOT_STARTED"]}</strong></div><div><span>Approval</span><strong>{detail.activity?.app_team_approval||"—"}</strong></div><div><span>CR Number</span><strong>{detail.activity?.cr_number||"—"}</strong></div><div><span>Role</span><strong>{detail.activity?.patch_role||"—"}</strong></div></div><div className="inventory-detail-block"><span>Comments</span><p>{detail.activity?.comments||"—"}</p></div></section>
-      <div className="inventory-modal-footer"><button className="secondary-button" onClick={()=>setHistoryDetail(detail)}><History size={14}/>History</button>{detail.source_type!=="GTB"&&<button className="danger-button" onClick={()=>void removeAsset(detail)}><Trash2 size={14}/>Remove</button>}<button className="primary-button" onClick={()=>beginEdit(detail)}><Pencil size={14}/>Update patching</button></div>
+      <div className="inventory-modal-footer"><button className="secondary-button" onClick={()=>setHistoryDetail(detail)}><History size={14}/>History</button><button className="danger-button" onClick={()=>void removeAsset(detail)}><Trash2 size={14}/>Remove from Patching</button><button className="primary-button" onClick={()=>beginEdit(detail)}><Pencil size={14}/>Update patching</button></div>
     </article></div>}
 
     {historyDetail&&<InventoryHistoryModal token={token} entityType="PATCH_ASSET" entityId={historyDetail.id} entityName={historyDetail.hostname||historyDetail.asset_identifier} onClose={()=>setHistoryDetail(null)}/>}
@@ -328,6 +521,33 @@ export default function PatchingInventory({token,onBack}:Props){
       </div>
       <div className="inventory-modal-footer"><button type="button" className="secondary-button" onClick={()=>setFormOpen(false)}>Cancel</button><button className="primary-button" disabled={saving}>{saving?"Saving...":"Save patching details"}</button></div>
     </form></div>}
+
+    {cycleOpen&&<div className="inventory-modal-backdrop" onMouseDown={()=>setCycleOpen(false)}><form className="inventory-modal inventory-catalog-form" onSubmit={createCycle} onMouseDown={e=>e.stopPropagation()}>
+      <button type="button" className="inventory-modal-close" onClick={()=>setCycleOpen(false)}><X size={18}/></button>
+      <span className="eyebrow">PATCHING</span><h2>Add patch cycle</h2><p>Create a quarterly patch cycle directly from the dashboard.</p>
+      <label>Cycle code<input required autoFocus value={cycleCode} onChange={e=>setCycleCode(e.target.value.toUpperCase())} placeholder="Q4-2026"/></label>
+      <div className="inventory-modal-footer"><button type="button" className="secondary-button" onClick={()=>setCycleOpen(false)}>Cancel</button><button className="primary-button">Create cycle</button></div>
+    </form></div>}
+
+    {bulkAddOpen&&<div className="inventory-modal-backdrop" onMouseDown={()=>!bulkAddSaving&&setBulkAddOpen(false)}><article className="inventory-modal patch-bulk-modal" onMouseDown={e=>e.stopPropagation()}>
+      <button type="button" className="inventory-modal-close" onClick={()=>setBulkAddOpen(false)}><X size={18}/></button>
+      <div className="inventory-modal-heading"><div className="inventory-card-icon"><Server size={21}/></div><div><span className="eyebrow">BULK PATCHING SCOPE</span><h2>Add multiple servers</h2><p>Add several servers or clusters to {currentCycle?.code||"the selected cycle"} in one save.</p></div></div>
+      <div className="patch-bulk-table-wrap"><table className="inventory-table patch-bulk-table"><thead><tr><th>IP / Cluster</th><th>Hostname</th><th>Application</th><th>Owner</th><th>Type</th><th>Environment</th><th>Class</th><th>Status</th><th/></tr></thead><tbody>
+        {bulkRows.map(row=><tr key={row.id}>
+          <td><input value={row.asset.asset_identifier} onChange={e=>updateBulkAsset(row.id,{asset_identifier:e.target.value})} placeholder="10.x.x.x"/></td>
+          <td><input value={row.asset.hostname} onChange={e=>updateBulkAsset(row.id,{hostname:e.target.value})} placeholder="hostname"/></td>
+          <td><input value={row.asset.application} onChange={e=>updateBulkAsset(row.id,{application:e.target.value})} placeholder="Application"/></td>
+          <td><input value={row.asset.application_owner} onChange={e=>updateBulkAsset(row.id,{application_owner:e.target.value})} placeholder="Owner"/></td>
+          <td><input value={row.asset.asset_type} onChange={e=>updateBulkAsset(row.id,{asset_type:e.target.value})} placeholder="APP SERVER"/></td>
+          <td><input value={row.asset.environment_name} onChange={e=>updateBulkAsset(row.id,{environment_name:e.target.value})} placeholder="DEV / SIT / PROD"/></td>
+          <td><select value={row.asset.environment_class} onChange={e=>updateBulkAsset(row.id,{environment_class:e.target.value as InventoryPatchEnvironmentClass})}><option value="NON_PROD">NON-PROD</option><option value="PROD">PROD</option><option value="DR">DR</option></select></td>
+          <td><select value={row.activity.status} onChange={e=>updateBulkActivity(row.id,{status:e.target.value as InventoryPatchStatus})}>{Object.entries(STATUS_LABELS).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></td>
+          <td><button className="inventory-row-action" type="button" onClick={()=>removeBulkRow(row.id)} disabled={bulkRows.length===1}><Trash2 size={14}/></button></td>
+        </tr>)}
+      </tbody></table></div>
+      <div className="patch-bulk-actions"><button className="secondary-button" type="button" onClick={addBulkRow}><Plus size={15}/>Add row</button><span>{bulkRows.length} rows</span></div>
+      <div className="inventory-modal-footer"><button className="secondary-button" type="button" onClick={()=>setBulkAddOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={bulkAddSaving} onClick={()=>void saveBulkServers()}>{bulkAddSaving?"Saving...":"Save servers"}</button></div>
+    </article></div>}
 
     {importOpen&&<div className="inventory-modal-backdrop" onMouseDown={()=>!importBusy&&setImportOpen(false)}><form className="inventory-modal inventory-import-modal" onSubmit={previewImport} onMouseDown={e=>e.stopPropagation()}>
       <button type="button" className="inventory-modal-close" onClick={()=>setImportOpen(false)}><X size={18}/></button>
