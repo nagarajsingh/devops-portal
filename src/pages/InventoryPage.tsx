@@ -605,6 +605,7 @@ export default function InventoryPage({ token }: { token: string }) {
                 <td><div className="inventory-inline-credentials">
                   <div className="inventory-inline-secret compact">
                     <span>SSH</span>
+                    <strong className="inventory-inline-username">{record.ssh_username||"—"}</strong>
                     <code>{tableCredentials[record.id+"-SSH"]||(record.ssh_password_configured?"••••••••":"Not configured")}</code>
                     {record.ssh_password_configured&&<button type="button" title={tableCredentials[record.id+"-SSH"]?"Hide SSH password":"Reveal SSH password"} aria-label={tableCredentials[record.id+"-SSH"]?"Hide SSH password":"Reveal SSH password"} disabled={tableCredentialBusy===record.id+"-SSH"} onClick={()=>void toggleTableCredential(record,"SSH")}>
                       {tableCredentialBusy===record.id+"-SSH"?<RefreshCw size={14} className="spin"/>:tableCredentials[record.id+"-SSH"]?<EyeOff size={14}/>:<Eye size={14}/>} 
@@ -612,6 +613,7 @@ export default function InventoryPage({ token }: { token: string }) {
                   </div>
                   <div className="inventory-inline-secret compact">
                     <span>APP</span>
+                    <strong className="inventory-inline-username">{record.application_username||"—"}</strong>
                     <code>{tableCredentials[record.id+"-APPLICATION"]||(record.application_password_configured?"••••••••":"Not configured")}</code>
                     {record.application_password_configured&&<button type="button" title={tableCredentials[record.id+"-APPLICATION"]?"Hide application password":"Reveal application password"} aria-label={tableCredentials[record.id+"-APPLICATION"]?"Hide application password":"Reveal application password"} disabled={tableCredentialBusy===record.id+"-APPLICATION"} onClick={()=>void toggleTableCredential(record,"APPLICATION")}>
                       {tableCredentialBusy===record.id+"-APPLICATION"?<RefreshCw size={14} className="spin"/>:tableCredentials[record.id+"-APPLICATION"]?<EyeOff size={14}/>:<Eye size={14}/>} 
