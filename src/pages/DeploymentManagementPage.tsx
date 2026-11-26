@@ -7,7 +7,7 @@ const PAT_SESSION_KEY = "devops-portal-azure-pat";
 const APP_TYPES = ["H2H", "Collections", "GTB-Applications", "Native-Mobile", "Safenet"] as const;
 const COLLECTIONS_COUNTRIES = ["UAE", "Egypt"];
 const COLLECTIONS_DEPLOYMENT_ENVIRONMENTS = ["DEV", "SIT", "UAT", "TRAINING/PPR", "PROD", "DR"] as const;
-const PAT_REQUIRED_ACTIONS = new Set(["trigger-code-pull", "create-pr", "trigger-build", "trigger-deployment", "refresh-status"]);
+const PAT_REQUIRED_ACTIONS = new Set(["trigger-code-pull", "create-pr", "trigger-build", "retry-build", "trigger-deployment", "refresh-status"]);
 
 function deploymentLocationState() {
   const params = new URLSearchParams(window.location.search);
@@ -41,6 +41,8 @@ type Run = {
   service?: string;
   vendor_image?: string;
   use_vendor_image?: boolean;
+  retry_of?: number;
+  attempt_history?: Run[];
   environment_status?: string;
   target_environment?: string;
   target_environment_status?: string;
@@ -185,11 +187,17 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
   const [showCompletionForm, setShowCompletionForm] = useState(false);
   const [completionComment, setCompletionComment] = useState("");
   const collectionsDirtyRef = useRef(false);
+  const mutationInFlight = useRef(false);
+  const pollInFlight = useRef(false);
+  const mutationEpoch = useRef(0);
 
   async function loadRequests() {
+    if (mutationInFlight.current) return;
+    const epoch = mutationEpoch.current;
     const response = await fetch(`${API_BASE}/deployment-management/requests`, { headers: { Authorization: `Bearer ${token}` } });
     if (!response.ok) return;
     const rows = (await readResponse(response)) as DeploymentRequest[];
+    if (mutationInFlight.current || epoch !== mutationEpoch.current) return;
     setRequests(rows);
     setSelected((current) => {
       const requestId = current?.id || deploymentLocationState().requestId;
@@ -270,7 +278,10 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
       return;
     }
 
-    if (!silent) { setBusy(true); setInlineNotice(null); }
+    if (mutationInFlight.current || (silent && pollInFlight.current)) return;
+    if (silent) pollInFlight.current = true;
+    else { mutationInFlight.current = true; mutationEpoch.current += 1; setBusy(true); setInlineNotice(null); }
+    const epoch = mutationEpoch.current;
     try {
       const response = await fetch(`${API_BASE}/deployment-management/requests/${id}/${name}`, {
         method: "POST",
@@ -278,6 +289,7 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
         body: JSON.stringify({ azure_devops_pat: actionPat || null, updates }),
       });
       const body = await readResponse(response);
+      if (silent && (mutationInFlight.current || epoch !== mutationEpoch.current)) return;
       if (!response.ok) {
         if (!silent) setInlineNotice({ variant: "error", message: body.detail || "The requested operation failed." });
         return;
@@ -285,12 +297,16 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
       if (["save-extracted-data", "trigger-build", "extract-document"].includes(name)) {
         collectionsDirtyRef.current = false;
       }
-      setSelected(body);
+      setSelected(current => current?.id === id ? body : current);
       setRequests((rows) => rows.map((row) => row.id === body.id ? body : row));
       if (!silent) {
         const releaseCount = body?.application_type === "Collections" && name === "trigger-deployment" ? body?.steps?.deployment?.runs?.length || 0 : 0;
         const actionLabel = name.split("-").join(" ");
-        if (name === "complete-request") {
+        if (name === "retry-build") {
+          const queued = body.retry_result?.queued?.length || 0;
+          const errors = (body.retry_result?.errors || []) as {service: string; message: string}[];
+          setInlineNotice({ variant: errors.length ? (queued ? "warning" : "error") : "success", message: `${queued} failed build${queued === 1 ? "" : "s"} requeued.${errors.length ? " " + errors.map(error => `${error.service}: ${error.message}`).join("; ") : ""}` });
+        } else if (name === "complete-request") {
           setShowCompletionForm(false);
           setCompletionComment("");
           setInlineNotice({
@@ -310,13 +326,13 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
       }
     } catch (error) {
       if (!silent) setInlineNotice({ variant: "error", message: error instanceof Error ? error.message : "Action failed" });
-    } finally { if (!silent) setBusy(false); }
+    } finally { if (silent) pollInFlight.current = false; else { mutationInFlight.current = false; setBusy(false); } }
   }
 
   const autoRefreshRequired = useMemo(() => {
     const states = [selected?.steps?.build?.status, selected?.steps?.deployment?.status];
-    return states.some((state) => state === "Queued" || state === "Running");
-  }, [selected?.steps?.build?.status, selected?.steps?.deployment?.status]);
+    return selected?.status !== "Completed" && (states.some((state) => state === "Queued" || state === "Running") || (selected?.steps?.build?.runs || []).some(run => run.status === "Queued" || run.status === "Running"));
+  }, [selected?.status, selected?.steps?.build, selected?.steps?.deployment?.status]);
 
   useEffect(() => {
     if (!selected || !autoRefreshRequired) return;
@@ -360,6 +376,13 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
   const buildRuns = selected?.steps?.build?.runs || [];
   const deploymentRuns = selected?.steps?.deployment?.runs || [];
   const buildLocked = buildRuns.length > 0;
+  const canRetryBuild = role === "devops" && selected?.application_type === "Collections" && selected?.status !== "Completed" && selected?.steps?.owner_approval?.status === "Approved" && deploymentRuns.length === 0 && ["Waiting", ""].includes(selected?.steps?.deployment?.status || "");
+  const failedRuns = buildRuns.filter(run => run.status === "Failed" && typeof run.run_id === "number" && run.run_id > 0);
+  function retryBuilds(runs: Run[]) {
+    if (!selected || !canRetryBuild || busy || !runs.length) return;
+    const ids = runs.flatMap(run => typeof run.run_id === "number" && run.status === "Failed" ? [run.run_id] : []);
+    if (ids.length) void action(selected.id, "retry-build", { run_ids: ids });
+  }
   const selectedItems = (selected?.collections_items || []).filter((item) => item.selected && item.vendor_image.trim());
   const collectionsBuildReady = selectedItems.length > 0 && selectedItems.every((item) =>
     item.pipeline_name.trim() &&
@@ -484,7 +507,18 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
       {step === "Pull Request" && role === "devops" && <div className="wizard-action-panel"><GitPullRequest/><div><h3>Raise pull request</h3><button className="primary-button" onClick={() => action(selected.id, "create-pr")}>Raise PR</button></div></div>}
       {step === "Build" && selected.application_type !== "Collections" && role === "devops" && <div className="wizard-action-panel"><Boxes/><div><h3>Trigger build pipeline</h3><button className="primary-button" onClick={() => action(selected.id, "trigger-build")}>Trigger build</button></div></div>}
 
-      {buildRuns.length > 0 && <div className="lifecycle-section"><div className="deployment-result-header"><h3>Build lifecycle</h3><span className={`status ${statusClass(selected.steps?.build?.status)}`}>{selected.steps?.build?.status}</span></div>{autoRefreshRequired && <p className="auto-refresh-note">Auto-refreshing every 5 seconds</p>}<div className="table-card lifecycle-table"><table><thead><tr><th>Service</th><th>Pipeline</th><th>Status</th><th>Duration</th><th>Link</th></tr></thead><tbody>{buildRuns.map((run, index) => <tr key={`${run.run_id}-${index}`}><td>{run.service || "—"}</td><td>{run.pipeline_name}</td><td><span className={`status ${statusClass(run.status)}`}>{run.status}</span></td><td>{formatDuration(run.duration_seconds)}</td><td>{run.url ? <a href={run.url} target="_blank" rel="noreferrer" title="Open build in Azure DevOps" aria-label="Open build in Azure DevOps"><ExternalLink size={17}/> Open</a> : "—"}</td></tr>)}</tbody></table></div></div>}
+      {buildRuns.length > 0 && <div className="lifecycle-section">
+        <div className="deployment-result-header"><h3>Build lifecycle</h3><span className={`status ${statusClass(selected.steps?.build?.status)}`}>{selected.steps?.build?.status}</span></div>
+        {autoRefreshRequired && <p className="auto-refresh-note">Auto-refreshing every 5 seconds</p>}
+        {canRetryBuild && failedRuns.length > 0 && <div className="deployment-actions"><button type="button" className="primary-button" disabled={busy} onClick={() => retryBuilds(failedRuns)}><RefreshCw size={15}/>Retry all failed ({failedRuns.length})</button><small>Only failed services will be queued again using their original build inputs.</small></div>}
+        <div className="table-card lifecycle-table"><table><thead><tr><th>Service</th><th>Pipeline</th><th>Status</th><th>Duration</th><th>Link</th>{canRetryBuild && <th>Action</th>}</tr></thead><tbody>
+          {buildRuns.map((run, index) => <tr key={`${run.run_id}-${index}`}>
+            <td>{run.service || "—"}</td><td>{run.pipeline_name}</td><td><span className={`status ${statusClass(run.status)}`}>{run.status}</span>{run.retry_of && <small>Attempt {(run.attempt_history?.length || 1) + 1} · retried #{run.retry_of}</small>}</td><td>{formatDuration(run.duration_seconds)}</td>
+            <td>{run.url ? <a href={run.url} target="_blank" rel="noreferrer" title="Open build in Azure DevOps" aria-label="Open build in Azure DevOps"><ExternalLink size={17}/> Open</a> : "—"}{Boolean(run.attempt_history?.length) && <details><summary>Previous attempts</summary>{run.attempt_history?.map((attempt, attemptIndex) => <div key={`${attempt.run_id}-${attemptIndex}`}>{attempt.url ? <a href={attempt.url} target="_blank" rel="noreferrer">#{attempt.run_id} · {attempt.status}</a> : <small>#{attempt.run_id} · {attempt.status}</small>}</div>)}</details>}</td>
+            {canRetryBuild && <td>{run.status === "Failed" && run.run_id ? <button type="button" className="secondary-button" disabled={busy} onClick={() => retryBuilds([run])}><RefreshCw size={14}/>Retry</button> : "—"}</td>}
+          </tr>)}
+        </tbody></table></div>
+      </div>}
 
       {step === "Deployment" && role === "devops" && <div className="wizard-action-panel"><Rocket/><div><h3>Trigger deployment</h3><p>Build status: {selected.steps?.build?.status}</p>{selected.application_type === "Collections" ? <><div className="deployment-target-action"><span>Target environment</span><strong>{selected.deployment_environment || "Not configured"}</strong><small>This environment was selected by the developer when the request was raised and cannot be changed during orchestration.</small></div><p>The portal will discover the Classic Releases linked to the successful builds and track completion against <strong>{selected.deployment_environment || "the requested environment"}</strong>.</p><button className="primary-button" disabled={selected.steps?.build?.status !== "Succeeded" || !selected.deployment_environment || busy} onClick={() => void action(selected.id, "trigger-deployment")}>{busy ? "Discovering release..." : "Trigger deployment"}</button></> : <button className="primary-button" onClick={() => setDialog({ kind: "pipeline", request: selected, pipelineName: "" })}>Trigger deployment</button>}</div></div>}
 
