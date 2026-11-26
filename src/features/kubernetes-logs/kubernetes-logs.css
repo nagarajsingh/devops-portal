@@ -395,3 +395,16 @@
     overflow:visible;
   }
 }
+
+
+/* Log content filters stay inside the console toolbar and work in both themes. */
+.klog-filter-controls{display:flex;flex:1 0 100%;min-width:0;align-items:center;flex-wrap:wrap;gap:8px 12px}
+.klog-console-toolbar .klog-log-search{flex:1 1 280px;min-width:0;height:34px;border:1px solid #dce3ea;border-radius:9px;background:#fff;padding:0 10px;color:#778698}
+.klog-log-search input{min-width:0;flex:1;width:100%;height:100%;border:0;outline:0;background:transparent;color:#263b55;font-size:11px}
+.klog-filter-controls .klog-level-filter select{height:34px;min-width:112px;border:1px solid #dce3ea;border-radius:9px;padding:0 8px;background:#fff;color:#263b55;font-size:11px}
+.klog-filter-controls .secondary-button{height:34px;padding:5px 10px;white-space:nowrap}
+.klog-filter-controls input[type="checkbox"]{accent-color:#f36b21}
+.klog-log-search:focus-within,.klog-level-filter select:focus-visible{outline:2px solid #ef8d52;outline-offset:1px}
+.klog-page[data-theme="dark"] .klog-log-search,.klog-page[data-theme="dark"] .klog-level-filter select{background:#182431;border-color:#344454;color:#e2edf6}
+.klog-page[data-theme="dark"] .klog-log-search input{color:#e2edf6}
+@media(max-width:560px){.klog-filter-controls{width:100%}.klog-console-toolbar .klog-log-search{flex-basis:100%}}
