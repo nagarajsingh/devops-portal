@@ -307,8 +307,8 @@ def list_deployment_requests() -> list[dict[str, Any]]:
     return _load()
 
 
-def _pipeline_run(pipeline_name: str, parameters: dict[str, Any], pat: str, ref: str = "") -> dict[str, Any]:
-    pipeline = find_pipeline_by_name(pipeline_name, pat)
+def _pipeline_run(pipeline_name: str, parameters: dict[str, Any], pat: str, ref: str = "", pipeline_id: int | None = None) -> dict[str, Any]:
+    pipeline = {"id": pipeline_id} if pipeline_id else find_pipeline_by_name(pipeline_name, pat)
     if not pipeline:
         raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_name} was not found")
     body: dict[str, Any] = {"templateParameters": parameters}
@@ -321,6 +321,8 @@ def _pipeline_run(pipeline_name: str, parameters: dict[str, Any], pat: str, ref:
     if code not in (200, 201):
         raise HTTPException(status_code=502, detail=run.get("message", f"Unable to trigger {pipeline_name}"))
     run_id = run.get("id")
+    if not run_id:
+        raise HTTPException(status_code=502, detail="Azure DevOps did not return a build run ID. Check Azure DevOps before retrying.")
     web_url = ((run.get("_links") or {}).get("web") or {}).get("href")
     return {
         "status": "Queued",
