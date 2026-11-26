@@ -291,6 +291,9 @@ def trigger_collections_build(request_id: str, actor: str, pat: str, updates: di
     if not row:
         raise HTTPException(status_code=404, detail="Deployment request not found")
 
+    if ((row.get("steps") or {}).get("build") or {}).get("runs"):
+        raise HTTPException(status_code=409, detail="Builds already exist for this request. Use Retry for failed runs.")
+
     items = updates.get("collections_items") or row.get("collections_items") or []
     selected = [item for item in items if item.get("selected", True)]
     if not selected:
