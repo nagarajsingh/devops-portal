@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, SecretStr
 
 from .auth import current_user, require_devops
+from . import deployment_management as dm
 from .deployment_collections import normalize_all_collections_requests, normalize_collections_payload, normalize_persisted_collections_request
 from .deployment_management import (
     APPLICATION_TYPES,
@@ -118,15 +119,16 @@ async def submit_release_document(
         app_owner,
     )
     try:
-        result = submit_document(
-            application_type,
-            app_owner,
-            document,
-            raw,
-            user.username,
-            country,
-            deployment_environment,
-        )
+        with dm._LOCK:
+            result = submit_document(
+                application_type,
+                app_owner,
+                document,
+                raw,
+                user.username,
+                country,
+                deployment_environment,
+            )
         mail_sent = send_owner_approval_request(result)
         result["owner_mail_sent"] = mail_sent
         logger.info(
