@@ -22,10 +22,10 @@ def resolve_pat(explicit_pat: str = "") -> str:
     )
 
 
-def _refresh_build_run(run: dict[str, Any], pat: str) -> None:
+def _refresh_build_run(run: dict[str, Any], pat: str) -> bool:
     run_id = run.get("run_id")
     if not run_id:
-        return
+        return False
 
     code, body = azdo_request(
         "GET",
@@ -35,8 +35,9 @@ def _refresh_build_run(run: dict[str, Any], pat: str) -> None:
     if code != 200:
         run["error"] = body.get("message", f"Unable to refresh build {run_id}")
         logger.warning("Build refresh failed run_id=%s status=%s", run_id, code)
-        return
+        return False
 
+    run.pop("error", None)
     status = str(body.get("status") or "").lower()
     result = str(body.get("result") or "").lower()
     normalized = "Running"
@@ -61,8 +62,10 @@ def _refresh_build_run(run: dict[str, Any], pat: str) -> None:
             "pipeline_name": (body.get("definition") or {}).get("name") or run.get("pipeline_name"),
             "build_number": body.get("buildNumber") or run.get("build_number"),
             "project_id": (body.get("project") or {}).get("id") or run.get("project_id"),
+            "source_branch": body.get("sourceBranch") or run.get("source_branch"),
         }
     )
+    return True
 
 
 COLLECTIONS_DEPLOYMENT_ENVIRONMENTS = dm.COLLECTIONS_DEPLOYMENT_ENVIRONMENTS
@@ -154,6 +157,21 @@ def _sync_collections_releases(row: dict[str, Any], pat: str) -> tuple[list[dict
     return runs, missing
 
 
+def _update_build_status(row: dict[str, Any]) -> None:
+    build = row["steps"]["build"]
+    statuses = [str(run.get("status") or "") for run in build.get("runs", [])]
+    if not statuses:
+        return
+    if any(status == "Running" for status in statuses):
+        build["status"], row["status"] = "Running", "Build Running"
+    elif any(status == "Queued" for status in statuses):
+        build["status"], row["status"] = "Queued", "Build Queued"
+    elif all(status == "Succeeded" for status in statuses):
+        build["status"], row["status"] = "Succeeded", "Build Completed"
+    else:
+        build["status"], row["status"] = "Failed", "Build Failed"
+
+
 def refresh_status(request_id: str, pat: str, actor: str) -> dict[str, Any]:
     rows = dm._load()
     row = next((item for item in rows if item.get("id") == request_id), None)
@@ -166,20 +184,7 @@ def refresh_status(request_id: str, pat: str, actor: str) -> dict[str, Any]:
     for run in build_runs:
         _refresh_build_run(run, pat)
 
-    if build_runs:
-        statuses = [str(run.get("status") or "") for run in build_runs]
-        if all(status == "Succeeded" for status in statuses):
-            build["status"] = "Succeeded"
-            row["status"] = "Build Completed"
-        elif any(status == "Failed" for status in statuses):
-            build["status"] = "Failed"
-            row["status"] = "Build Failed"
-        elif any(status == "Running" for status in statuses):
-            build["status"] = "Running"
-            row["status"] = "Build Running"
-        else:
-            build["status"] = "Queued"
-            row["status"] = "Build Queued"
+    _update_build_status(row)
 
     deployment = steps.setdefault("deployment", {"status": "Waiting", "runs": []})
     for run in deployment.setdefault("runs", []):
@@ -344,6 +349,86 @@ def trigger_collections_build(request_id: str, actor: str, pat: str, updates: di
     return row
 
 
+def retry_collections_builds(request_id: str, actor: str, pat: str, updates: dict[str, Any]) -> dict[str, Any]:
+    """Queue new runs for explicitly selected failed attempts, keeping other runs unchanged."""
+    rows = dm._load()
+    row = next((item for item in rows if item.get("id") == request_id), None)
+    if not row:
+        raise HTTPException(status_code=404, detail="Deployment request not found")
+    if row.get("application_type") != "Collections":
+        raise HTTPException(status_code=422, detail="This retry action is for Collections builds")
+    steps = row.get("steps") or {}
+    if (steps.get("owner_approval") or {}).get("status") != "Approved" or row.get("status") == "Completed":
+        raise HTTPException(status_code=409, detail="Only approved, open deployment requests can retry builds")
+    deployment = steps.get("deployment") or {}
+    if deployment.get("runs") or deployment.get("status") not in (None, "", "Waiting"):
+        raise HTTPException(status_code=409, detail="Build retry is unavailable once deployment has started")
+    build = steps.get("build") or {}
+    runs = build.get("runs") or []
+    requested = updates.get("run_ids")
+    if not isinstance(requested, list) or not requested or any(type(value) is not int or value <= 0 for value in requested):
+        raise HTTPException(status_code=422, detail="Select at least one failed build run")
+    ids = set(requested)
+    targets = [(index, run) for index, run in enumerate(runs) if run.get("run_id") in ids]
+    if len(targets) != len(ids):
+        raise HTTPException(status_code=409, detail="Build runs have changed. Refresh before retrying.")
+    if any(run.get("status") != "Failed" for _, run in targets):
+        raise HTTPException(status_code=409, detail="Only failed build runs may be retried")
+
+    queued = []
+    errors = []
+    for index, old in targets:
+        service = old.get("service") or old.get("pipeline_name") or str(old.get("run_id"))
+        try:
+            if not _refresh_build_run(old, pat):
+                raise HTTPException(status_code=502, detail="Unable to verify the original build status")
+            if old.get("status") != "Failed":
+                raise HTTPException(status_code=409, detail="Original build is no longer failed")
+            parameters = old.get("parameters")
+            if not isinstance(parameters, dict):
+                # Compatibility with older runs that stored the reviewed inputs directly.
+                if "use_vendor_image" not in old or "vendor_image" not in old:
+                    raise HTTPException(status_code=409, detail="Original build parameters are unavailable")
+                parameters = {"vendorImage": old["vendor_image"], "useVendorImage": old["use_vendor_image"]}
+            if not isinstance(parameters.get("useVendorImage"), bool) or (parameters["useVendorImage"] and not str(parameters.get("vendorImage") or "").strip()):
+                raise HTTPException(status_code=409, detail="Original vendor image parameters are incomplete")
+            pipeline_name = str(old.get("pipeline_name") or "")
+            pipeline_id = old.get("pipeline_id")
+            if not pipeline_name or not pipeline_id:
+                raise HTTPException(status_code=409, detail="Original pipeline identity is unavailable")
+            ref = str(old.get("source_branch") or "")
+            if ref and not ref.startswith("refs/heads/"):
+                raise HTTPException(status_code=409, detail="Original build branch is not supported for automatic retry")
+            new = dm._pipeline_run(pipeline_name, parameters, pat, ref=ref, pipeline_id=int(pipeline_id))
+            previous = {key: value for key, value in old.items() if key not in {"attempt_history", "parameters"}}
+            history = list(old.get("attempt_history") or []) + [previous]
+            # Replace the current attempt only; deployment discovery sees the new run ID.
+            runs[index] = {
+                **{key: old[key] for key in ("service", "image_tag", "vendor_image", "use_vendor_image", "country", "selected", "extraction_method") if key in old},
+                **new,
+                "parameters": parameters,
+                "source_branch": ref,
+                "attempt_history": history,
+                "retry_of": old["run_id"],
+            }
+            queued.append({"service": service, "previous_run_id": old["run_id"], "run_id": new["run_id"]})
+        except HTTPException as exc:
+            errors.append({"service": service, "run_id": old.get("run_id"), "message": str(exc.detail)})
+        except Exception:
+            logger.exception("Collections retry failed request_id=%s run_id=%s", request_id, old.get("run_id"))
+            errors.append({"service": service, "run_id": old.get("run_id"), "message": "Unable to queue retry; check Azure DevOps before trying again"})
+        # Persist each accepted run immediately, including partial success.
+        _update_build_status(row)
+        dm._update_progress(row)
+        row["updated_at"] = dm._now()
+        dm._save(rows)
+
+    result = {"queued": queued, "errors": errors}
+    row.setdefault("timeline", []).append({"at": dm._now(), "actor": actor, "action": "Collections failed builds retried", **result})
+    dm._save(rows)
+    return {**row, "retry_result": result}
+
+
 def trigger_collections_deployment(
     request_id: str,
     actor: str,
@@ -472,7 +557,7 @@ def complete_deployment_request(
     return row
 
 
-def perform_action(
+def _perform_action(
     request_id: str,
     action: str,
     actor: str,
@@ -486,6 +571,7 @@ def perform_action(
         "trigger-code-pull",
         "create-pr",
         "trigger-build",
+        "retry-build",
         "trigger-deployment",
         "refresh-status",
     }
@@ -504,6 +590,9 @@ def perform_action(
     if action == "refresh-status":
         return refresh_status(request_id, pat, actor)
 
+    if action == "retry-build":
+        return retry_collections_builds(request_id, actor, pat, updates)
+
     if action == "trigger-build":
         rows = dm._load()
         row = next((item for item in rows if item.get("id") == request_id), None)
@@ -517,3 +606,9 @@ def perform_action(
             return trigger_collections_deployment(request_id, actor, pat, updates)
 
     return dm.update_action(request_id, action, actor, pat, updates)
+
+
+def perform_action(request_id: str, action: str, actor: str, explicit_pat: str = "", updates: dict[str, Any] | None = None) -> dict[str, Any]:
+    # Prevent refresh and retry from overwriting one another in this process.
+    with dm._LOCK:
+        return _perform_action(request_id, action, actor, explicit_pat, updates)
