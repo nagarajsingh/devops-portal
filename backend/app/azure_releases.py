@@ -174,6 +174,47 @@ def _release_definitions_for_build(build_definition_id: str, project_id: str, pa
     return detailed_matches
 
 
+def _format_linked_release(detail: dict[str, Any], definition: dict[str, Any], build_run_id: str, build_number: str, build_definition_id: str, build_pipeline_name: str) -> dict[str, Any]:
+    definition_id = definition.get("id") or (detail.get("releaseDefinition") or {}).get("id")
+    environments = detail.get("environments") or []
+    status = _release_status(environments)
+    web_url = ((detail.get("_links") or {}).get("web") or {}).get("href")
+    finished_at = detail.get("modifiedOn") if status in {"Succeeded", "Failed"} else None
+    result = {
+        "pipeline_name": definition.get("name") or detail.get("releaseDefinition", {}).get("name") or "",
+        "release_definition_id": definition_id,
+        "release_definition_name": definition.get("name") or "",
+        "release_id": detail.get("id"),
+        "release_name": detail.get("name") or "",
+        "status": status,
+        "result": status,
+        "url": web_url,
+        "logs_url": web_url,
+        "started_at": detail.get("createdOn"),
+        "finished_at": finished_at,
+        "duration_seconds": _duration_seconds(detail.get("createdOn"), finished_at),
+        "environment_status": ", ".join(
+            f"{env.get('name')}={env.get('status')}" for env in environments
+        ),
+        "environments": [
+            {
+                "id": env.get("id"),
+                "name": env.get("name"),
+                "status": env.get("status"),
+                "rank": env.get("rank"),
+            }
+            for env in environments
+        ],
+        "source_build": {
+            "run_id": int(build_run_id),
+            "build_number": build_number,
+            "pipeline_id": build_definition_id,
+            "pipeline_name": build_pipeline_name,
+        },
+    }
+    return result
+
+
 def discover_release_for_build(build_run: dict[str, Any], pat: str) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Discover the Classic Release created from a specific successful build."""
     build_run_id = str(build_run.get("run_id") or "")
@@ -228,42 +269,7 @@ def discover_release_for_build(build_run: dict[str, Any], pat: str) -> tuple[dic
             if not _release_matches_build(detail, build_definition_id, build_run_id):
                 continue
 
-            environments = detail.get("environments") or []
-            status = _release_status(environments)
-            web_url = ((detail.get("_links") or {}).get("web") or {}).get("href")
-            finished_at = detail.get("modifiedOn") if status in {"Succeeded", "Failed"} else None
-            result = {
-                "pipeline_name": definition.get("name") or detail.get("releaseDefinition", {}).get("name") or "",
-                "release_definition_id": definition_id,
-                "release_definition_name": definition.get("name") or "",
-                "release_id": detail.get("id"),
-                "release_name": detail.get("name") or "",
-                "status": status,
-                "result": status,
-                "url": web_url,
-                "logs_url": web_url,
-                "started_at": detail.get("createdOn"),
-                "finished_at": finished_at,
-                "duration_seconds": _duration_seconds(detail.get("createdOn"), finished_at),
-                "environment_status": ", ".join(
-                    f"{env.get('name')}={env.get('status')}" for env in environments
-                ),
-                "environments": [
-                    {
-                        "id": env.get("id"),
-                        "name": env.get("name"),
-                        "status": env.get("status"),
-                        "rank": env.get("rank"),
-                    }
-                    for env in environments
-                ],
-                "source_build": {
-                    "run_id": int(build_run_id),
-                    "build_number": build_number,
-                    "pipeline_id": build_definition_id,
-                    "pipeline_name": build_pipeline_name,
-                },
-            }
+            result = _format_linked_release(detail, definition, build_run_id, build_number, build_definition_id, build_pipeline_name)
             logger.info(
                 "Classic release discovered build_pipeline=%s build_run=%s release_definition=%s release=%s",
                 build_pipeline_name,
@@ -284,21 +290,46 @@ def discover_release_for_build(build_run: dict[str, Any], pat: str) -> tuple[dic
 def discover_collections_releases(row: dict[str, Any], pat: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     runs: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
-    seen_release_ids: set[str] = set()
-
-    build_runs = ((row.get("steps") or {}).get("build") or {}).get("runs") or []
-    for build_run in build_runs:
+    steps = row.get("steps") or {}
+    previous = {
+        str((release.get("source_build") or {}).get("run_id")): release
+        for release in (steps.get("deployment") or {}).get("runs") or []
+        if (release.get("source_build") or {}).get("run_id") and release.get("release_id")
+    }
+    for build_run in (steps.get("build") or {}).get("runs") or []:
         if str(build_run.get("status") or "") != "Succeeded":
             continue
-        release, diagnostics = discover_release_for_build(build_run, pat)
+        build_id = str(build_run.get("run_id") or "")
+        known = previous.get(build_id)
+        diagnostics = {"build_run_id": build_id, "build_pipeline_name": build_run.get("pipeline_name"), "service": build_run.get("service")}
+        release = None
+        try:
+            if known:
+                # Refresh the exact known release instead of repeatedly scanning definitions.
+                code, detail = azdo_release_request("GET", f"_apis/release/releases/{known['release_id']}?api-version=7.1", pat)
+                source = known.get("source_build") or {}
+                definition_id = str(build_run.get("pipeline_id") or source.get("pipeline_id") or "")
+                if code == 200 and _release_matches_build(detail, definition_id, build_id):
+                    definition = {"id": known.get("release_definition_id"), "name": known.get("release_definition_name")}
+                    release = _format_linked_release(detail, definition, build_id, str(source.get("build_number") or ""), definition_id, str(source.get("pipeline_name") or build_run.get("pipeline_name") or ""))
+                    release["url"] = release.get("url") or known.get("url")
+                    release["logs_url"] = release.get("logs_url") or known.get("logs_url")
+                else:
+                    diagnostics["reason"] = "Unable to verify the previously linked release"
+            else:
+                release, discovery = discover_release_for_build(build_run, pat)
+                diagnostics.update(discovery)
+        except Exception:
+            logger.exception("Release discovery/refresh failed for build %s", build_id)
+            diagnostics["reason"] = "Azure DevOps release lookup failed; will retry"
         if not release:
             missing.append(diagnostics)
-            continue
-        release_id = str(release.get("release_id") or "")
-        if release_id and release_id in seen_release_ids:
-            continue
-        if release_id:
-            seen_release_ids.add(release_id)
+            if not known:
+                continue
+            # Do not erase an existing link during a temporary Azure DevOps failure.
+            release = {**known, "status": known.get("overall_release_status") or known.get("status"), "refresh_stale": True}
+        else:
+            release["refresh_stale"] = False
         release["service"] = build_run.get("service")
         runs.append(release)
 
