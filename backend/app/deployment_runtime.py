@@ -118,41 +118,44 @@ def _sync_collections_releases(row: dict[str, Any], pat: str) -> tuple[list[dict
     deployment = row.setdefault("steps", {}).setdefault("deployment", {"status": "Waiting", "runs": []})
     target_environment = str(row.get("deployment_environment") or "").strip().upper()
 
-    if runs:
+    build = row["steps"].get("build") or {}
+    build_runs = build.get("runs") or []
+    all_builds_succeeded = bool(build_runs) and all(run.get("status") == "Succeeded" for run in build_runs)
+    required_ids = {str(run.get("run_id")) for run in build_runs if run.get("run_id")}
+    for run in runs:
         if target_environment:
-            for run in runs:
-                target_status, raw_status = _target_environment_release_status(
-                    run.get("environments") or [],
-                    target_environment,
-                )
-                run["overall_release_status"] = run.get("status")
-                run["status"] = target_status
-                run["result"] = target_status
-                run["target_environment"] = target_environment
-                run["target_environment_status"] = raw_status
+            target_status, raw_status = _target_environment_release_status(run.get("environments") or [], target_environment)
+            run["overall_release_status"] = run.get("status")
+            run["status"] = target_status
+            run["result"] = target_status
+            run["target_environment"] = target_environment
+            run["target_environment_status"] = raw_status
 
-        deployment["runs"] = runs
-        deployment["discovery_missing"] = missing
-        deployment["target_environment"] = target_environment
-        statuses = [str(run.get("status") or "") for run in runs]
-
-        if all(status == "Succeeded" for status in statuses) and not missing:
-            deployment["status"] = "Succeeded"
-            row["status"] = "Deployment Completed"
-        elif any(status == "Failed" for status in statuses):
-            deployment["status"] = "Failed"
-            row["status"] = "Deployment Failed"
-        elif any(status == "Running" for status in statuses):
-            deployment["status"] = "Running"
-            row["status"] = "Deployment Running"
-        else:
-            deployment["status"] = "Ready"
-            row["status"] = "Release Discovery Pending" if missing else "Release Discovered"
+    deployment["runs"] = runs
+    deployment["discovery_missing"] = missing
+    deployment["target_environment"] = target_environment
+    statuses = [str(run.get("status") or "") for run in runs]
+    linked_ids = {str((run.get("source_build") or {}).get("run_id")) for run in runs}
+    complete_coverage = all_builds_succeeded and len(required_ids) == len(build_runs) and required_ids.issubset(linked_ids)
+    # A discovered release is not proof that every required service has deployed.
+    # Keep the request in its build phase until all builds are successful.
+    if not all_builds_succeeded:
+        deployment["status"] = "Partial" if runs or missing else "Waiting"
+    elif complete_coverage and target_environment in COLLECTIONS_DEPLOYMENT_ENVIRONMENTS and not missing and statuses and all(status == "Succeeded" for status in statuses):
+        deployment["status"] = "Succeeded"
+        row["status"] = "Deployment Completed"
+    elif any(status == "Failed" for status in statuses):
+        deployment["status"] = "Failed"
+        row["status"] = "Deployment Failed"
+    elif any(status == "Running" for status in statuses):
+        deployment["status"] = "Running"
+        row["status"] = "Deployment Running"
+    elif missing or not complete_coverage:
+        deployment["status"] = "Discovering"
+        row["status"] = "Release Discovery Pending"
     else:
-        deployment["runs"] = []
-        deployment["status"] = "Waiting"
-        deployment["target_environment"] = target_environment
-        deployment["discovery_missing"] = missing
+        deployment["status"] = "Ready"
+        row["status"] = "Release Discovered"
 
     return runs, missing
 
@@ -178,6 +181,9 @@ def refresh_status(request_id: str, pat: str, actor: str) -> dict[str, Any]:
     if not row:
         raise HTTPException(status_code=404, detail="Deployment request not found")
 
+    if row.get("status") == "Completed":
+        return row
+
     steps = row.setdefault("steps", {})
     build = steps.setdefault("build", {"status": "Waiting", "runs": []})
     build_runs = build.setdefault("runs", [])
@@ -191,7 +197,7 @@ def refresh_status(request_id: str, pat: str, actor: str) -> dict[str, Any]:
         if run.get("run_id"):
             _refresh_build_run(run, pat)
 
-    if row.get("application_type") == "Collections" and build.get("status") == "Succeeded":
+    if row.get("application_type") == "Collections" and build_runs:
         _sync_collections_releases(row, pat)
 
     dm._update_progress(row)
@@ -249,28 +255,38 @@ def reextract_document(request_id: str, actor: str) -> dict[str, Any]:
         "collections_items",
         "country",
     )
-    for key in extracted_fields:
-        if key in extracted:
-            row[key] = extracted[key]
-
-    architecture = row.get("architecture") or dm.ARCHITECTURES.get(row.get("application_type"), {})
     steps = row.setdefault("steps", {})
-    steps["document_extraction"] = {"status": "Completed", "actor": actor, "at": dm._now()}
-    steps["devops_review"] = {"status": "In Progress", "actor": actor, "at": dm._now()}
-    steps["code_pull"] = {"status": "Not Required" if not architecture.get("code_pull") else "Waiting"}
-    steps["pull_request"] = {"status": "Not Required" if not architecture.get("pull_request") else "Waiting"}
-    steps["build"] = {"status": "Waiting", "runs": []}
-    steps["deployment"] = {"status": "Waiting", "runs": []}
+    downstream_exists = any(
+        step.get("runs") or step.get("run_id") or step.get("pr_id")
+        or step.get("status") not in (None, "", "Waiting", "Pending", "Not Required")
+        for step in (steps.get(name) or {} for name in ("code_pull", "pull_request", "build", "deployment", "completion"))
+    ) or row.get("status") == "Completed"
 
+    # Keep a fresh parse for review, but never replace the inputs that already
+    # belong to submitted builds, PRs or releases in this request.
+    now = dm._now()
+    row["latest_extraction"] = {"at": now, "actor": actor, "data": {key: extracted[key] for key in extracted_fields if key in extracted}}
+    if not downstream_exists:
+        for key in extracted_fields:
+            if key in extracted:
+                row[key] = extracted[key]
+        architecture = row.get("architecture") or dm.ARCHITECTURES.get(row.get("application_type"), {})
+        steps["devops_review"] = {"status": "In Progress", "actor": actor, "at": now}
+        steps.setdefault("code_pull", {"status": "Not Required" if not architecture.get("code_pull") else "Waiting"})
+        steps.setdefault("pull_request", {"status": "Not Required" if not architecture.get("pull_request") else "Waiting"})
+        steps.setdefault("build", {"status": "Waiting", "runs": []})
+        steps.setdefault("deployment", {"status": "Waiting", "runs": []})
+        row["status"] = "DevOps Review"
+        if row.get("application_type") == "Collections":
+            row["progress_percent"] = 40
+    steps["document_extraction"] = {"status": "Completed", "actor": actor, "at": now}
     row["extracted"] = True
-    row["status"] = "DevOps Review"
-    row["progress_percent"] = 40 if row.get("application_type") == "Collections" else row.get("progress_percent", 0)
     now = dm._now()
     row["updated_at"] = now
     row.setdefault("timeline", []).append(
         {
             "at": now,
-            "action": "Document fully re-extracted and orchestration state reset",
+            "action": "Document re-extracted; orchestration preserved" if downstream_exists else "Document re-extracted",
             "actor": actor,
             "extracted_items": len(row.get("collections_items") or row.get("container_images") or []),
         }
@@ -364,8 +380,7 @@ def retry_collections_builds(request_id: str, actor: str, pat: str, updates: dic
     if (steps.get("owner_approval") or {}).get("status") != "Approved" or row.get("status") == "Completed":
         raise HTTPException(status_code=409, detail="Only approved, open deployment requests can retry builds")
     deployment = steps.get("deployment") or {}
-    if deployment.get("runs") or deployment.get("status") not in (None, "", "Waiting"):
-        raise HTTPException(status_code=409, detail="Build retry is unavailable once deployment has started")
+    # Releases from other successful services must not block retrying a failed build.
     build = steps.get("build") or {}
     runs = build.get("runs") or []
     requested = updates.get("run_ids")
@@ -377,6 +392,9 @@ def retry_collections_builds(request_id: str, actor: str, pat: str, updates: dic
         raise HTTPException(status_code=409, detail="Build runs have changed. Refresh before retrying.")
     if any(run.get("status") != "Failed" for _, run in targets):
         raise HTTPException(status_code=409, detail="Only failed build runs may be retried")
+    linked_ids = {str((release.get("source_build") or {}).get("run_id")) for release in deployment.get("runs") or []}
+    if any(str(run.get("run_id")) in linked_ids for _, run in targets):
+        raise HTTPException(status_code=409, detail="A selected failed build already has a linked release; review it before retrying")
 
     queued = []
     errors = []
@@ -520,6 +538,8 @@ def complete_deployment_request(
     deployment_status = str(
         ((row.get("steps") or {}).get("deployment") or {}).get("status") or ""
     )
+    if row.get("application_type") == "Collections" and ((row.get("steps") or {}).get("build") or {}).get("status") != "Succeeded":
+        raise HTTPException(status_code=409, detail="All Collections builds must succeed before completing the request")
     if deployment_status != "Succeeded":
         raise HTTPException(
             status_code=409,
