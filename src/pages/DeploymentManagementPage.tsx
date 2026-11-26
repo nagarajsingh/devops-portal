@@ -47,6 +47,8 @@ type Run = {
   target_environment?: string;
   target_environment_status?: string;
   overall_release_status?: string;
+  source_build?: { run_id?: number; pipeline_id?: string | number };
+  refresh_stale?: boolean;
   environments?: { id?: number; name?: string; status?: string; rank?: number }[];
 };
 
@@ -96,6 +98,7 @@ type DeploymentRequest = {
   jar_files: string[];
   container_images: string[];
   collections_items?: CollectionsItem[];
+  latest_extraction?: { at: string; actor: string; data?: { collections_items?: CollectionsItem[] } };
   steps: Record<string, Step>;
 };
 
@@ -331,14 +334,20 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
 
   const autoRefreshRequired = useMemo(() => {
     const states = [selected?.steps?.build?.status, selected?.steps?.deployment?.status];
-    return selected?.status !== "Completed" && (states.some((state) => state === "Queued" || state === "Running") || (selected?.steps?.build?.runs || []).some(run => run.status === "Queued" || run.status === "Running"));
-  }, [selected?.status, selected?.steps?.build, selected?.steps?.deployment?.status]);
+    if (!selected || selected.status === "Completed") return false;
+    const builds = selected.steps?.build?.runs || [];
+    const releases = selected.steps?.deployment?.runs || [];
+    const pendingRelease = selected.application_type === "Collections" && builds.some(run => run.status === "Succeeded" &&
+      (!releases.some(release => release.source_build?.run_id === run.run_id && release.url && !release.refresh_stale) ||
+        releases.some(release => release.source_build?.run_id === run.run_id && ["Ready", "Running", "Queued"].includes(release.status || ""))));
+    return states.some(state => state === "Queued" || state === "Running" || state === "Discovering") || builds.some(run => run.status === "Queued" || run.status === "Running") || pendingRelease;
+  }, [selected?.status, selected?.application_type, selected?.steps?.build, selected?.steps?.deployment]);
 
   useEffect(() => {
-    if (!selected || !autoRefreshRequired) return;
+    if (!selected || !autoRefreshRequired || role !== "devops" || !pat.trim()) return;
     const timer = window.setInterval(() => void action(selected.id, "refresh-status", {}, true), 5000);
     return () => window.clearInterval(timer);
-  }, [selected?.id, autoRefreshRequired, pat, token]);
+  }, [selected?.id, autoRefreshRequired, pat, token, role]);
 
   function updateCollectionItem(index: number, key: keyof CollectionsItem, value: string | boolean) {
     if (!selected) return;
@@ -376,8 +385,9 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
   const buildRuns = selected?.steps?.build?.runs || [];
   const deploymentRuns = selected?.steps?.deployment?.runs || [];
   const buildLocked = buildRuns.length > 0;
-  const canRetryBuild = role === "devops" && selected?.application_type === "Collections" && selected?.status !== "Completed" && selected?.steps?.owner_approval?.status === "Approved" && deploymentRuns.length === 0 && ["Waiting", ""].includes(selected?.steps?.deployment?.status || "");
-  const failedRuns = buildRuns.filter(run => run.status === "Failed" && typeof run.run_id === "number" && run.run_id > 0);
+  const canRetryBuild = role === "devops" && selected?.application_type === "Collections" && selected?.status !== "Completed" && selected?.steps?.owner_approval?.status === "Approved";
+  const releaseForBuild = (run: Run) => deploymentRuns.find(release => run.run_id != null && release.source_build?.run_id === run.run_id);
+  const failedRuns = buildRuns.filter(run => run.status === "Failed" && typeof run.run_id === "number" && run.run_id > 0 && !releaseForBuild(run));
   function retryBuilds(runs: Run[]) {
     if (!selected || !canRetryBuild || busy || !runs.length) return;
     const ids = runs.flatMap(run => typeof run.run_id === "number" && run.status === "Failed" ? [run.run_id] : []);
@@ -447,7 +457,7 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
       return <PremiumDeploymentModal open variant="info" eyebrow="AZURE DEVOPS AUTHENTICATION" title="Azure DevOps PAT required" message={`Enter your Azure DevOps PAT to continue with ${actionLabel}. The token is retained only for this browser session and is cleared on logout.`} details={[{ label: "Request", value: dialog.requestId }, { label: "Next action", value: actionLabel }]} inputLabel="Personal Access Token" inputType="password" inputValue={dialog.patValue} inputPlaceholder="Enter Azure DevOps PAT" primaryLabel="Continue securely" primaryDisabled={!dialog.patValue.trim()} secondaryLabel="Cancel" busy={busy} onInputChange={(value) => setDialog({ ...dialog, patValue: value })} onPrimary={() => void confirmDialog()} onSecondary={() => setDialog(null)} />;
     }
     if (dialog.kind === "reextract") {
-      return <PremiumDeploymentModal open variant="warning" eyebrow="RE-EXTRACT RELEASE DOCUMENT" title="Re-extract and reset orchestration state?" message="The original uploaded release document will be parsed again. Existing extracted values, build runs and release/deployment tracking for this request will be reset so the workflow follows the newly extracted data." details={[{ label: "Request", value: dialog.request.id }, { label: "Document", value: dialog.request.document_name }, { label: "Current status", value: dialog.request.status }]} primaryLabel="Re-extract document" secondaryLabel="Keep current state" busy={busy} onPrimary={() => void confirmDialog()} onSecondary={() => setDialog(null)} />;
+      return <PremiumDeploymentModal open variant="warning" eyebrow="RE-EXTRACT RELEASE DOCUMENT" title="Re-extract release document?" message="The document will be parsed again. All submitted build inputs, build attempts, release links, approvals and deployment progress for this request will be retained. The new extraction is stored separately for review." details={[{ label: "Request", value: dialog.request.id }, { label: "Document", value: dialog.request.document_name }, { label: "Current status", value: dialog.request.status }]} primaryLabel="Re-extract document" secondaryLabel="Cancel" busy={busy} onPrimary={() => void confirmDialog()} onSecondary={() => setDialog(null)} />;
     }
     if (dialog.kind === "bypass") {
       if (!isAdmin) return null;
@@ -489,8 +499,8 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
 
       {step === "Extraction" && <div className="wizard-action-panel"><FileText/><div><h3>Extract the release document</h3><p>The document will be parsed and actionable release inputs will be shown. For Collections, platform/base images are ignored; newly detected vt* services remain visible even if their build pipeline needs to be supplied by DevOps.</p>{role === "devops" && <button className="primary-button" disabled={busy} onClick={() => action(selected.id, "extract-document")}>Extract release data</button>}</div></div>}
 
-      {selected.extracted && selected.application_type === "Collections" && ["Build", "Build Status"].includes(step) && <div className="collections-build-panel">
-        <div className="deployment-result-header"><div><span className="eyebrow">COLLECTIONS BUILD INPUT REVIEW</span><h3>{selected.country} vendor images</h3><p>Known services are mapped automatically. If a newly introduced service has no mapping yet, enter its build pipeline before triggering the build.</p></div><strong>{selectedItems.length} selected</strong></div>
+      {selected.extracted && selected.application_type === "Collections" && (buildLocked || ["Build", "Build Status"].includes(step)) && <div className="collections-build-panel">
+        <div className="deployment-result-header"><div><span className="eyebrow">COLLECTIONS BUILD INPUT REVIEW</span><h3>{selected.country} vendor images</h3><p>{buildLocked ? "Original reviewed build inputs are retained for this request." : "Known services are mapped automatically. If a newly introduced service has no mapping yet, enter its build pipeline before triggering the build."}</p>{selected.latest_extraction && <small>Last extraction: {formatDate(selected.latest_extraction.at)}</small>}</div><strong>{selectedItems.length} selected</strong></div>
         <div className="table-card collections-image-table"><table><thead><tr><th>Select</th><th>Service</th><th>Tag</th><th>useVendorImage</th><th>vendorImage</th><th>Pipeline</th></tr></thead><tbody>
           {(selected.collections_items || []).map((item, itemIndex) => ({ item, itemIndex })).filter(({ item }) => item.vendor_image.trim()).map(({ item, itemIndex }) => <tr key={`${item.service}-${itemIndex}`}>
             <td><input type="checkbox" checked={item.selected} disabled={buildLocked || role !== "devops"} onChange={(event) => updateCollectionItem(itemIndex, "selected", event.target.checked)}/></td>
@@ -509,13 +519,14 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
 
       {buildRuns.length > 0 && <div className="lifecycle-section">
         <div className="deployment-result-header"><h3>Build lifecycle</h3><span className={`status ${statusClass(selected.steps?.build?.status)}`}>{selected.steps?.build?.status}</span></div>
-        {autoRefreshRequired && <p className="auto-refresh-note">Auto-refreshing every 5 seconds</p>}
+        {autoRefreshRequired && <p className="auto-refresh-note">{role === "devops" && pat.trim() ? "Auto-refreshing every 5 seconds" : "Awaiting status refresh (DevOps authentication required)"}</p>}
         {canRetryBuild && failedRuns.length > 0 && <div className="deployment-actions"><button type="button" className="primary-button" disabled={busy} onClick={() => retryBuilds(failedRuns)}><RefreshCw size={15}/>Retry all failed ({failedRuns.length})</button><small>Only failed services will be queued again using their original build inputs.</small></div>}
-        <div className="table-card lifecycle-table"><table><thead><tr><th>Service</th><th>Pipeline</th><th>Status</th><th>Duration</th><th>Link</th>{canRetryBuild && <th>Action</th>}</tr></thead><tbody>
+        <div className="table-card lifecycle-table"><table><thead><tr><th>Service</th><th>Pipeline</th><th>Status</th><th>Duration</th><th>Build link</th>{selected.application_type === "Collections" && <th>Release link</th>}{canRetryBuild && <th>Action</th>}</tr></thead><tbody>
           {buildRuns.map((run, index) => <tr key={`${run.run_id}-${index}`}>
             <td>{run.service || "—"}</td><td>{run.pipeline_name}</td><td><span className={`status ${statusClass(run.status)}`}>{run.status}</span>{run.retry_of && <small>Attempt {(run.attempt_history?.length || 1) + 1} · retried #{run.retry_of}</small>}</td><td>{formatDuration(run.duration_seconds)}</td>
             <td>{run.url ? <a href={run.url} target="_blank" rel="noreferrer" title="Open build in Azure DevOps" aria-label="Open build in Azure DevOps"><ExternalLink size={17}/> Open</a> : "—"}{Boolean(run.attempt_history?.length) && <details><summary>Previous attempts</summary>{run.attempt_history?.map((attempt, attemptIndex) => <div key={`${attempt.run_id}-${attemptIndex}`}>{attempt.url ? <a href={attempt.url} target="_blank" rel="noreferrer">#{attempt.run_id} · {attempt.status}</a> : <small>#{attempt.run_id} · {attempt.status}</small>}</div>)}</details>}</td>
-            {canRetryBuild && <td>{run.status === "Failed" && run.run_id ? <button type="button" className="secondary-button" disabled={busy} onClick={() => retryBuilds([run])}><RefreshCw size={14}/>Retry</button> : "—"}</td>}
+            {selected.application_type === "Collections" && <td>{releaseForBuild(run)?.url ? <><a href={releaseForBuild(run)?.url} target="_blank" rel="noreferrer"><ExternalLink size={17}/> Open release</a><small>{releaseForBuild(run)?.release_name || ""} · {releaseForBuild(run)?.status || "Ready"}{releaseForBuild(run)?.refresh_stale ? " (last known)" : ""}</small></> : run.status === "Succeeded" ? <small>Discovering release…</small> : <small>Waiting for build</small>}</td>}
+            {canRetryBuild && <td>{failedRuns.some(failed => failed.run_id === run.run_id) ? <button type="button" className="secondary-button" disabled={busy} onClick={() => retryBuilds([run])}><RefreshCw size={14}/>Retry</button> : "—"}</td>}
           </tr>)}
         </tbody></table></div>
       </div>}
@@ -524,11 +535,13 @@ export default function DeploymentManagementPage({ token, role, isAdmin }: { tok
 
       {deploymentRuns.length > 0 && <div className="lifecycle-section"><div className="deployment-result-header"><div><h3>Deployment lifecycle</h3>{selected.deployment_environment && <small>Completion target: {selected.deployment_environment}</small>}</div><span className={`status ${statusClass(selected.steps?.deployment?.status)}`}>{selected.steps?.deployment?.status}</span></div><div className="table-card lifecycle-table"><table><thead><tr><th>Service</th><th>Release</th><th>Release definition</th><th>Status</th><th>Duration</th><th>Target environment</th><th>All environments</th><th>Link</th></tr></thead><tbody>{deploymentRuns.map((run, index) => <tr key={`${run.release_id || run.run_id}-${index}`}><td>{run.service || "—"}</td><td>{run.release_name || run.pipeline_name || "—"}{run.release_id ? <small>#{run.release_id}</small> : null}</td><td>{run.release_definition_name || run.pipeline_name || "—"}</td><td><span className={`status ${statusClass(run.status)}`}>{run.status}</span></td><td>{formatDuration(run.duration_seconds)}</td><td><strong>{run.target_environment || selected.deployment_environment || "—"}</strong><small>{run.target_environment_status || "Waiting"}</small></td><td>{run.environment_status || "—"}</td><td>{run.url ? <a href={run.url} target="_blank" rel="noreferrer" title="Open release in Azure DevOps" aria-label="Open release in Azure DevOps"><ExternalLink size={17}/> Open release</a> : "—"}</td></tr>)}</tbody></table></div></div>}
 
+      {buildLocked && selected.latest_extraction?.data?.collections_items && <details className="lifecycle-section"><summary>Latest document extraction (read-only)</summary><p>These values do not change submitted builds. Extracted {formatDate(selected.latest_extraction.at)}.</p><div className="table-card lifecycle-table"><table><thead><tr><th>Service</th><th>Tag</th><th>Vendor image</th><th>Pipeline</th></tr></thead><tbody>{selected.latest_extraction.data.collections_items.map((item, index) => <tr key={index}><td>{item.service}</td><td>{item.image_tag}</td><td>{item.vendor_image}</td><td>{item.pipeline_name}</td></tr>)}</tbody></table></div></details>}
+
       {selected.status === "Completed" && <div className="closure-summary"><h3>Deployment request completed</h3><p><strong>Completed by:</strong> {selected.completed_by || "—"}</p><p><strong>Completed at:</strong> {formatDate(selected.completed_at)}</p><p><strong>Completion comment:</strong> {selected.completion_comment || "—"}</p><p><strong>Developer:</strong> {selected.requested_by}</p></div>}
 
-      {role === "devops" && selected.steps?.deployment?.status === "Succeeded" && selected.status !== "Completed" && !showCompletionForm && <div className="deployment-actions"><button className="primary-button" disabled={busy} onClick={() => { setCompletionComment(""); setShowCompletionForm(true); }}>Complete Request</button></div>}
+      {role === "devops" && selected.steps?.deployment?.status === "Succeeded" && (selected.application_type !== "Collections" || selected.steps?.build?.status === "Succeeded") && selected.status !== "Completed" && !showCompletionForm && <div className="deployment-actions"><button className="primary-button" disabled={busy} onClick={() => { setCompletionComment(""); setShowCompletionForm(true); }}>Complete Request</button></div>}
 
-      {role === "devops" && selected.steps?.deployment?.status === "Succeeded" && selected.status !== "Completed" && showCompletionForm && <div className="ticket-closure-form"><div><span className="eyebrow">DEPLOYMENT COMPLETION</span><h3>Complete this deployment request</h3><p>The mandatory comment will be stored in the request timeline and emailed to {selected.requested_by}.</p></div><label>Completion comment<textarea autoFocus rows={4} maxLength={2000} value={completionComment} placeholder="Example: Deployment completed successfully in UAT. Smoke validation completed." onChange={(event) => setCompletionComment(event.target.value)}/><small>{completionComment.trim().length}/2000 characters</small></label><div className="ticket-closure-actions"><button className="secondary-button" disabled={busy} onClick={() => { setShowCompletionForm(false); setCompletionComment(""); }}>Cancel</button><button className="primary-button" disabled={busy || !completionComment.trim()} onClick={() => void action(selected.id, "complete-request", { comment: completionComment.trim() })}>{busy ? "Completing..." : "Confirm Complete & Email Developer"}</button></div></div>}
+      {role === "devops" && selected.steps?.deployment?.status === "Succeeded" && (selected.application_type !== "Collections" || selected.steps?.build?.status === "Succeeded") && selected.status !== "Completed" && showCompletionForm && <div className="ticket-closure-form"><div><span className="eyebrow">DEPLOYMENT COMPLETION</span><h3>Complete this deployment request</h3><p>The mandatory comment will be stored in the request timeline and emailed to {selected.requested_by}.</p></div><label>Completion comment<textarea autoFocus rows={4} maxLength={2000} value={completionComment} placeholder="Example: Deployment completed successfully in UAT. Smoke validation completed." onChange={(event) => setCompletionComment(event.target.value)}/><small>{completionComment.trim().length}/2000 characters</small></label><div className="ticket-closure-actions"><button className="secondary-button" disabled={busy} onClick={() => { setShowCompletionForm(false); setCompletionComment(""); }}>Cancel</button><button className="primary-button" disabled={busy || !completionComment.trim()} onClick={() => void action(selected.id, "complete-request", { comment: completionComment.trim() })}>{busy ? "Completing..." : "Confirm Complete & Email Developer"}</button></div></div>}
 
       <div className="deployment-actions">{role === "devops" && selected.status !== "Completed" && <button className="secondary-button" onClick={() => action(selected.id, "refresh-status")}><RefreshCw size={15}/>Refresh status</button>}<button className="secondary-button" onClick={backToRequests}><ArrowLeft size={15}/>Back to requests</button></div>
 
