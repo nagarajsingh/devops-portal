@@ -16,6 +16,12 @@ def normalize_collections_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if str(payload.get("application_type") or "") != "Collections":
         return payload
 
+    # Submitted build inputs belong to the request's immutable build scope.
+    # Normalize only a new extraction, not a previously queued request.
+    steps = payload.get("steps") or {}
+    if (steps.get("build") or {}).get("runs") or (steps.get("deployment") or {}).get("runs"):
+        return payload
+
     filtered: list[dict[str, Any]] = []
     for item in payload.get("collections_items") or []:
         vendor_image = str(item.get("vendor_image") or "").strip()
