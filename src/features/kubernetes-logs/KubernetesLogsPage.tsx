@@ -17,6 +17,7 @@ import {
   Sun,
 } from "lucide-react";
 import type { Role } from "../../types";
+import { filterLogs, LOG_LEVELS, type LogLevelFilter } from "./logFilters";
 import {
   downloadPodLogs,
   getLogAccess,
@@ -80,6 +81,9 @@ export default function KubernetesLogsPage({ token, role }: Props) {
   const [includePrevious, setIncludePrevious] = useState(true);
   const [podSearch, setPodSearch] = useState("");
   const [logContent, setLogContent] = useState("");
+  const [logSearch, setLogSearch] = useState("");
+  const [logLevel, setLogLevel] = useState<LogLevelFilter>("ALL");
+  const [logMatchCase, setLogMatchCase] = useState(false);
   const [logMeta, setLogMeta] = useState({ lines: 0, fetchedAt: "", truncated: false, source: "" });
   const [loadingClusters, setLoadingClusters] = useState(true);
   const [loadingPods, setLoadingPods] = useState(false);
@@ -102,6 +106,18 @@ export default function KubernetesLogsPage({ token, role }: Props) {
   const [manageMessage, setManageMessage] = useState("");
 
   const logViewerRef = useRef<HTMLPreElement | null>(null);
+  const hasLogFilter = Boolean(logSearch.trim()) || logLevel !== "ALL";
+  const filteredLogs = useMemo(
+    () => hasLogFilter ? filterLogs(logContent, outputFormat, logSearch, logLevel, logMatchCase) : null,
+    [hasLogFilter, logContent, outputFormat, logSearch, logLevel, logMatchCase],
+  );
+  const displayedLogs = filteredLogs?.content ?? logContent;
+
+  function clearLogFilters() {
+    setLogSearch("");
+    setLogLevel("ALL");
+    setLogMatchCase(false);
+  }
 
   const loadClusters = useCallback(async () => {
     setLoadingClusters(true);
@@ -219,7 +235,7 @@ export default function KubernetesLogsPage({ token, role }: Props) {
   useEffect(() => {
     if (!autoScroll || !logViewerRef.current) return;
     logViewerRef.current.scrollTop = logViewerRef.current.scrollHeight;
-  }, [logContent, autoScroll]);
+  }, [displayedLogs, autoScroll]);
 
   useEffect(() => {
     if (!manageOpen || role !== "devops" || !manageCluster) return;
@@ -368,7 +384,7 @@ export default function KubernetesLogsPage({ token, role }: Props) {
           <div className="klog-console-actions">
             <label className="klog-container-select"><span>Container</span><select value={container} disabled={!selectedPod} onChange={(event) => setContainer(event.target.value)}><option value="">Select container</option>{(selectedPod?.containers || []).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
             <button className="secondary-button" disabled={!container || loadingLogs} onClick={() => void loadLogs()}><RefreshCw size={16} className={loadingLogs ? "spin" : ""}/>{loadingLogs ? "Loading..." : "Refresh"}</button>
-            <button className="primary-button" disabled={!container || downloading} onClick={() => void downloadLogs()}><Download size={16}/>{downloading ? "Preparing..." : "Download"}</button>
+            <button className="primary-button" disabled={!container || downloading} onClick={() => void downloadLogs()}><Download size={16}/>{downloading ? "Preparing..." : hasLogFilter ? "Download all" : "Download"}</button>
           </div>
         </div>
 
@@ -376,13 +392,19 @@ export default function KubernetesLogsPage({ token, role }: Props) {
           <div className="klog-format-chip">{outputFormat === "json" ? <FileJson size={15}/> : <SquareTerminal size={15}/>}<span>{outputFormat.toUpperCase()}</span></div>
           <label><input type="checkbox" checked={includePrevious} onChange={(event) => setIncludePrevious(event.target.checked)}/>Include previous container instance</label>
           <label><input type="checkbox" checked={autoScroll} onChange={(event) => setAutoScroll(event.target.checked)}/>Auto-scroll</label>
-          <div className="klog-console-meta"><span>{logMeta.lines} lines</span>{logMeta.fetchedAt && <span>Updated {new Date(logMeta.fetchedAt).toLocaleTimeString()}</span>}<span>{logMeta.source || "—"}</span></div>
+          <div className="klog-filter-controls">
+            <label className="klog-log-search"><Search size={15}/><input aria-label="Filter log content" value={logSearch} onChange={(event) => setLogSearch(event.target.value)} placeholder="Filter logs by keyword, trace ID, exception..."/></label>
+            <label className="klog-level-filter"><span>Level</span><select value={logLevel} onChange={(event) => setLogLevel(event.target.value as LogLevelFilter)} aria-label="Log level">{LOG_LEVELS.map(level => <option key={level} value={level}>{level === "ALL" ? "All levels" : level === "UNKNOWN" ? "Other / unknown" : level}</option>)}</select></label>
+            <label><input type="checkbox" checked={logMatchCase} onChange={(event) => setLogMatchCase(event.target.checked)}/>Match case</label>
+            <button className="secondary-button" type="button" disabled={!hasLogFilter && !logMatchCase} onClick={clearLogFilters}>Clear filters</button>
+          </div>
+          <div className="klog-console-meta"><span>{filteredLogs ? `${filteredLogs.matched} / ${filteredLogs.total} ${filteredLogs.unit}` : `${logMeta.lines} lines`}</span>{logMeta.fetchedAt && <span>Updated {new Date(logMeta.fetchedAt).toLocaleTimeString()}</span>}<span>{logMeta.source || "—"}</span></div>
         </div>
 
         <div className="klog-console-shell">
           {windowValue === "live" && <div className="klog-live-strip"><span/>LIVE · refreshes every 3 seconds</div>}
           {logMeta.truncated && <div className="klog-truncated">Output exceeded the portal response limit. Showing the newest available content.</div>}
-          {!container ? <div className="klog-console-empty"><SquareTerminal size={34}/><strong>Select a pod and container</strong><span>Logs will load automatically.</span></div> : loadingLogs && !logContent ? <div className="klog-console-empty">Loading logs...</div> : <pre ref={logViewerRef}>{logContent || "No log lines were returned for this time window."}</pre>}
+          {!container ? <div className="klog-console-empty"><SquareTerminal size={34}/><strong>Select a pod and container</strong><span>Logs will load automatically.</span></div> : loadingLogs && !logContent ? <div className="klog-console-empty">Loading logs...</div> : <pre ref={logViewerRef}>{filteredLogs && filteredLogs.matched === 0 ? "No logs match the current filters. Clear filters or choose another time window." : displayedLogs || "No log lines were returned for this time window."}</pre>}
         </div>
 
         <div className="klog-history-note">
